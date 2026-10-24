@@ -92,7 +92,7 @@ export type ToChatWebview =
   | { type: "sendMode"; mode: SendMode }
   /** What became of a message sent while the agent worked: `queued` until omp takes it, `delivered` once it did, `failed` with the reason. */
   | { type: "messageStatus"; id: string; messageId: string; status: "queued" | "delivered" | "failed"; reason?: string }
-  /** The usage of the developer's subscription (`tech#omp-chat-general`): the last report omp gave (none before the first), whether a request is running, and why the last one failed. Sent at each change and when the view starts. */
+  /** The usage of the developer's subscription (`tech#omp-chat`), one per window and shared by every conversation: the last report omp gave (none before the first), whether a request is running, and why the last one failed. Sent at each change and when the view starts. */
   | { type: "usage"; report?: UsageReport; fetching: boolean; error?: string };
 
 /** Webview -> host. */

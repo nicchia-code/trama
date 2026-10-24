@@ -90,8 +90,8 @@ export function activate(context: vscode.ExtensionContext): void {
  */
 function startOmpChat(context: vscode.ExtensionContext): Promise<void> {
   const savedIds = () => readSavedConversations(context.workspaceState.get(CONVERSATIONS_KEY)).entries.map((entry) => entry.id);
-  // The usage of the subscription: `omp usage --json` in General's folder, with the program General runs as (`tech#omp-chat-general`).
-  const usage = new OmpUsage(ompUsageRunner({ ompPath: configuredOmpPath, findOmp: findConfiguredOmp, folder: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath }));
+  // The usage of the subscription: `omp usage --json` in the folder of the panel (General's, also when General is not there), with the program General runs as (`tech#omp-chat`).
+  const usage = new OmpUsage(ompUsageRunner({ ompPath: configuredOmpPath, findOmp: findConfiguredOmp, folder: () => findProject()?.root }));
   const view = new OmpChatView(context.extensionUri, () => findProject()?.root, savedIds, context.globalState, usage);
   // `trama.ompPath` is application-scoped: only the user value counts, read by `configuredOmpPath`, as for every terminal and the model list.
   // The program is the one the launches run: found as `findOmp` finds it (a conversation that resumes after a reload has had no launch before it).

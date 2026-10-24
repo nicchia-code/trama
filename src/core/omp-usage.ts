@@ -1,4 +1,4 @@
-// The usage of the developer's subscription as `omp usage --json` reports it (`rules#omp-chat-general`, `tech#omp-chat-general`). Everything here is pure: the host
+// The usage of the developer's subscription as `omp usage --json` reports it (`rules#omp-chat`, `tech#omp-chat`). Everything here is pure: the host
 // runs the command and the webview draws the bar; this module reads the report, names the windows and gives the percentages, the durations and the thresholds.
 // Emails, identities of accounts, `metadata` and `resetCredits` of the report never leave `parseUsageReport`.
 

@@ -1,10 +1,10 @@
-import { ChevronLeft, ChevronRight, ChevronUp, Play, Plus, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronUp, Clock, Play, Plus, Trash2, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { namerOf, noNumbers } from "../../../../src/core/card-names";
 import { joinReasons, RUN_IN_PROGRESS, runBlocker } from "../../../../src/core/design";
 import type { AnnouncementView, Snapshot } from "../../../../src/core/snapshot";
 import type { ModelSuggestion } from "../../host/model-lists";
-import type { RefinementView } from "../../protocol";
+import type { RefinementView, RunEstimateView } from "../../protocol";
 import type { BoardModels } from "../../host/proposal-models";
 import { cn } from "../lib/utils";
 import type { Slot, View, ViewContext } from "../types";
@@ -14,8 +14,11 @@ import { SplitButton } from "../split-button";
 import { TooltipProvider } from "../ui/tooltip";
 import { CardView, GhostCard } from "./cards";
 import { DriftDetailsDialog, type ModelList, GhostDetailsDialog, ModelDialog, ProposalBodyDialog, TaskDetailsDialog } from "./dialogs";
-import { announcedCard, announcedGhosts, type BoardColumn, type BoardResolve, buildBoard, CANCEL_REFINE_ALL_DELAY_MS, type Card, clearableTasks, COLUMN_TITLES, type ColumnId, doneGroups, EMPTY_HINTS, hideCleared, interleave, NO_MODELS, type ProposalCard, REFINEMENT_OFF, refineAllEntry, stoppedFollowingNotice, type TaskCard, withdrawnNotice } from "./logic";
+import { announcedCard, announcedGhosts, type BoardColumn, type BoardResolve, buildBoard, CANCEL_REFINE_ALL_DELAY_MS, type Card, clearableTasks, COLUMN_TITLES, type ColumnId, doneGroups, EMPTY_HINTS, hideCleared, interleave, NO_MODELS, type ProposalCard, REFINEMENT_OFF, refineAllEntry, runAllButtonText, stoppedFollowingNotice, type TaskCard, withdrawnNotice } from "./logic";
 import { BoardButton, BoardEnvContext, type BoardEnv, Tip } from "./parts";
+
+/** The `data-` attribute that finds the Run all button: its accessible name changes with the estimate, so the focus after Delete cannot look for it. */
+const RUN_ALL_ATTRIBUTE = "data-run-all";
 
 /** The state of Resolve Drifts and of the Runs the host gives with each picture. */
 export type ResolveState = NonNullable<Parameters<View["update"]>[2]>;
@@ -87,6 +90,8 @@ export interface BoardPageProps {
   ghostRequest?: { id: string; n: number };
   /** Counts the answers of the host to Clear (`clearDoneEnded`): each change ends the hiding of the cards Clear was deleting. */
   clearEnded?: number;
+  /** The time left of the Run all of this window, as the host sends it with each picture; absent: no Run all. */
+  runEstimate?: RunEstimateView;
 }
 
 const COLUMN_CLASS = "flex min-h-0 flex-col rounded-lg border bg-muted/40";
@@ -175,7 +180,7 @@ function DoneColumn({ cards, open, toggle, chevron, clear, now }: { cards: Card[
 }
 
 /** The Board: three columns of cards (Backlog, Active, Done), and the notices at its top. */
-export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, models, refinement = REFINEMENT_OFF, modelList, notices, closeNotice, context, ghostRequest, clearEnded }: BoardPageProps) {
+export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, models, refinement = REFINEMENT_OFF, runEstimate = null, modelList, notices, closeNotice, context, ghostRequest, clearEnded }: BoardPageProps) {
   const root = useRef<HTMLDivElement>(null);
   /** The card whose queued refining was cancelled: its Approve gets the focus once the picture no longer queues it. */
   const refocus = useRef<string | null>(null);
@@ -316,7 +321,7 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, m
       if (deleting.current !== task) return false;
       deleting.current = null;
       if (latest.current?.tasks.some((t) => t.id === task) !== false) return false;
-      const runAll = root.current?.querySelector<HTMLButtonElement>('button[aria-label="Run all the Tasks in To do"]');
+      const runAll = root.current?.querySelector<HTMLButtonElement>(`button[${RUN_ALL_ATTRIBUTE}]`);
       // With no Task left in To do Run all is disabled and cannot take the focus: the Active column does.
       if (runAll !== null && runAll !== undefined && !runAll.disabled) runAll.focus();
       else root.current?.querySelector<HTMLElement>('[data-column="active"]')?.focus();
@@ -368,20 +373,24 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, m
           onClick={() => context.post({ type: "writeDesignRequest" })}
         />
       );
-    if (id === "active")
+    if (id === "active") {
+      const estimate = runAllButtonText(runEstimate);
+      // Reasons first as today; during a Run all the estimate heads the tooltip, and the button stays unavailable.
       return (
         <BoardButton
-          icon={Play}
-          label="Run all"
-          aria="Run all the Tasks in To do"
+          icon={estimate === null ? Play : Clock}
+          label={estimate?.label ?? "Run all"}
+          aria={estimate?.aria ?? "Run all the Tasks in To do"}
           variant="default"
           full
-          disabled={runReason !== null}
-          tooltip={runReason ?? "Run all the Tasks in To do"}
+          disabled={estimate !== null || runReason !== null}
+          tooltip={estimate === null ? (runReason ?? "Run all the Tasks in To do") : runReason === null ? estimate.tooltipHead : `${estimate.tooltipHead}\n${runReason}`}
           description={runReason}
+          data={{ [RUN_ALL_ATTRIBUTE]: "" }}
           onClick={() => context.post({ type: "launch", action: { kind: "implement-all" } })}
         />
       );
+    }
     return null;
   };
   const clear = (
@@ -438,7 +447,7 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, m
 
 /** The Board: its view, and the model names the Board's model window offers. */
 export interface BoardView extends Omit<View, "update"> {
-  update(next: Snapshot, isAsking?: boolean, resolveState?: ResolveState, models?: BoardModels, unify?: UnifyState, refinement?: RefinementView): void;
+  update(next: Snapshot, isAsking?: boolean, resolveState?: ResolveState, models?: BoardModels, unify?: UnifyState, refinement?: RefinementView, runEstimate?: RunEstimateView): void;
   receiveModels(message: { models: ModelSuggestion[]; error?: string }): void;
   /** The host is done with the last Clear (done, refused or failed): the cards it hid at the click are shown again, the deleted ones being gone from the picture. */
   clearDoneEnded(): void;
@@ -471,8 +480,8 @@ export const mountBoard = (slot: Slot, context: ViewContext): BoardView => {
   render();
 
   return {
-    update(next, isAsking = false, resolveState = NO_RESOLVE_STATE, models = NO_MODELS, unify = NO_UNIFY_STATE, refinement = REFINEMENT_OFF) {
-      page = { ...page, snapshot: next, asking: isAsking, resolve: resolveState, unify, models, refinement };
+    update(next, isAsking = false, resolveState = NO_RESOLVE_STATE, models = NO_MODELS, unify = NO_UNIFY_STATE, refinement = REFINEMENT_OFF, runEstimate = null) {
+      page = { ...page, snapshot: next, asking: isAsking, resolve: resolveState, unify, models, refinement, runEstimate };
       render();
     },
     receiveModels(message) {

@@ -271,7 +271,7 @@ export function Conversation({ item, view, selected, actions, sendMode, usage }:
         view={view}
         actions={actions}
         sendMode={sendMode}
-        usage={item.general === true ? <UsageBar usage={usage} model={view.currentModel} active={selected} onRefresh={actions.refreshUsage} /> : null}
+        usage={<UsageBar usage={usage} model={view.currentModel ?? item.model} active={selected} onRefresh={actions.refreshUsage} />}
       />
     </div>
   );

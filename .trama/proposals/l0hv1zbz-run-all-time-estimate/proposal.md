@@ -1,5 +1,5 @@
 ---
-status: open
+status: approved
 base:
   editor-panel/panel.md: e6be713a384875439b31edac6eaafbcd598e4631d08827dda1bc0ead9c5473ca
   requirements/rules/run-paralleli.md: 602eabb4eb259534f7e5a9cb6c77405ce19d5e2ed000571462f7187ebc88d612

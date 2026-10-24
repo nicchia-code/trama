@@ -1,12 +1,23 @@
 # Requirements: Regole di business, omp Chat
 
-Usa quando implementi quando omp Chat si usa, come nascono, finiscono e riprendono le sue conversazioni e quali server MCP riceve omp.
+Usa quando implementi quando omp Chat si usa, come nascono, finiscono e riprendono le sue conversazioni, l'uso dell'abbonamento e quali server MCP riceve omp.
 
 ## omp-chat
 
 - La vista c'è (`trama.ompChatVisible`) quando omp Chat è in uso (`trama.ompChat` acceso o mai scelto nelle impostazioni utente, `tech#omp-chat`) oppure quando la finestra ha General o almeno una conversazione aperta o in attesa di ripresa. Spegnere l'impostazione non chiude nessuna conversazione di un lavoro: la vista sparisce quando l'ultima si chiude, General non c'è più e omp Chat non è in uso.
 - Ogni finestra ha le sue conversazioni e la sua General; una conversazione non passa da una finestra all'altra.
 - La scheda di General è sempre la prima. Quella in vista all'apertura della finestra è General; una conversazione di un lavoro ripresa si mostra come quando si apre e diventa quella in vista. Una conversazione nuova di un lavoro si aggiunge dopo le altre e diventa quella in vista; General che torna (omp Chat riaccesa) si mette prima delle altre senza cambiare quella in vista.
+- Uso dell'abbonamento: la fonte è il resoconto di omp sui limiti di ogni account con cui omp è autenticato (`tech#omp-chat`). Trama non calcola nessun limite da sé e non legge credenziali.
+- Ogni conversazione della vista ha la sua barra dell'uso (`ui#omp-chat`): General, ogni conversazione di un lavoro e Ask more, anche ancora vuota. Il fornitore della barra è quello del modello scelto nel selettore di quella conversazione, cioè la parte dell'identità del modello prima della prima `/`; un modello senza `/`, o nessun modello, vale come un fornitore senza dati. Cambiare modello in una conversazione cambia subito la sua barra, con l'ultimo resoconto, senza chiedere di nuovo; le barre delle altre conversazioni restano come sono.
+- Per ogni fornitore si mostra una voce per finestra di limite (finestra più eventuale livello, per esempio 7 giorni e 7 giorni Fable), con la frazione usata del totale fra gli account del fornitore come lo dà omp; con un solo account è la frazione di quell'account. Il reset di una voce è il più vicino fra quelli degli account della finestra. Nessuna email né identità di account compare.
+- Nome corto: `<N>h` per una finestra di ore e `<N>d` per una di giorni, come la finestra che omp dà (`5h`, `7d`), seguito dal livello con l'iniziale maiuscola quando c'è (`7d Fable`). Percentuale: la frazione usata per 100, arrotondata all'intero più vicino, mai sotto 0. Durata: `<g>d<h>h`, `<h>h<m>m` o `<m>m`, come la scrive omp (`2h48m`, `14h8m`, `3d2h`, `45m`), `now` quando il reset è passato.
+- Soglie, sulla percentuale mostrata: avviso da 80 % compreso, errore da 100 % compreso.
+- Un solo resoconto per finestra, condiviso da tutte le conversazioni della vista. Quando chiedere, senza nessun timer:
+  - quando una conversazione compare nella vista o è ripresa (General con `omp-chat-general.SHOWN`, le altre con `omp-chat-conversation.OPENED`), solo se la finestra non ha ancora un resoconto riuscito e nessuna richiesta è in corso;
+  - alla fine di ogni turno di un agente in qualunque conversazione della vista, General compresa, solo se nessuna richiesta è in corso e l'ultima richiesta, riuscita o fallita, è finita da più di 60 secondi (o non ce n'è ancora stata nessuna); una fine del turno che non chiede non lascia nulla in attesa;
+  - all'apertura del dialogo dell'uso, sempre: se una richiesta è in corso, ne aspetta al più una, che parte alla fine della precedente.
+- Un resoconto riuscito sostituisce il precedente, anche quando è vuoto (nessun fornitore con limiti: solo chiavi API, nessun abbonamento), e allora la barra sparisce da ogni conversazione. Uno fallito (omp mancante, che non risponde, che esce con un errore o con un JSON illeggibile) lascia l'ultimo resoconto riuscito, se c'è; senza, la barra non c'è. Nessun avviso, nessuna riga nelle conversazioni: solo il dialogo aperto dice `Could not refresh` (`ui#omp-chat`). Una richiesta fallita non ferma nessuna conversazione e non si ritenta da sé.
+- L'uso è della finestra, non della sessione né della conversazione: la pulizia di General, la chiusura di una conversazione, un omp chiuso da solo o una ripresa non lo cancellano. La finestra chiede l'uso finché la vista ha almeno una conversazione, General o di un lavoro, anche senza General (omp Chat spenta con dei lavori ancora aperti, o conversazioni riprese con omp Chat spenta); una finestra senza nessuna conversazione non lo chiede.
 
 ## omp-chat-conversation
 

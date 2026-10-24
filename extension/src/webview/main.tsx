@@ -94,7 +94,7 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
   else if (message.type === "snapshot") {
     snapshot = message.snapshot;
     diagram.update(snapshot, message.asking, message.resolve, message.scans, message.refinement);
-    board.update(snapshot, message.asking, message.resolve, message.models, message.unify, message.refinement);
+    board.update(snapshot, message.asking, message.resolve, message.models, message.unify, message.refinement, message.runEstimate);
     requirements.update(snapshot);
     specs.update(snapshot);
     history.update(snapshot);

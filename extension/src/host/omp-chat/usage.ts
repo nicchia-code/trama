@@ -9,13 +9,19 @@ export type UsageMessage = Extract<ToChatWebview, { type: "usage" }>;
 
 /** What the view of omp Chat needs of the usage: to ask for it, to read what is known and to hear of a change. */
 export interface UsageSource {
-  /** Asks omp for the usage now, or, with a request running, once more when it ends. */
+  /** Asks omp for the usage now, whatever came before (the usage dialog opened), or, with a request running, once more when it ends. */
   request(): void;
+  /** A tab appeared or was resumed: asks only when the window has no successful report and no request is running. */
+  ensure(): void;
+  /** A turn ended: asks only when no request is running and the last one ended more than `USAGE_MIN_INTERVAL_MS` ago, or none ran yet. Never leaves a request waiting. */
+  turnEnded(): void;
   /** The usage as the webview gets it. */
   message(): UsageMessage;
   onChange(listener: () => void): Disposable;
 }
 
+/** A turn that ends asks for the usage only when the last request ended more than this long ago (60 seconds). */
+export const USAGE_MIN_INTERVAL_MS = 60_000;
 const USAGE_TIMEOUT_MS = 30_000;
 const USAGE_MAX_BUFFER = 16 * 1024 * 1024;
 const UNREADABLE = "omp usage did not return a valid report";
@@ -34,14 +40,14 @@ export interface UsageRunnerDeps {
   ompPath(): string;
   /** The program omp runs as, undefined when omp is not installed (`tech#agent-launching`). */
   findOmp(ompPath: string): Promise<string | undefined>;
-  /** The folder General works in. */
+  /** The folder of the panel, the one General works in. */
   folder(): string | undefined;
 }
 
 /**
- * `omp usage --json`, run without a shell and with fixed arguments: the program `findOmp` gives, the PATH of `ompPathVariable` as for `omp models --json`, General's folder
- * as the working directory, 30 seconds and 16 MiB. Resolves with the output; rejects with the reason (`omp not found at <path>`, `omp did not answer within 30 s`,
- * `omp exited with code <N>`) when the program is missing, does not answer or fails.
+ * `omp usage --json`, run without a shell and with fixed arguments: the program `findOmp` gives, the PATH of `ompPathVariable` as for `omp models --json`, the folder of the
+ * panel (General's, also when General is not there) as the working directory, 30 seconds and 16 MiB. Resolves with the output; rejects with the reason (`omp not found at <path>`,
+ * `omp did not answer within 30 s`, `omp exited with code <N>`) when the program is missing, does not answer or fails.
  */
 export function ompUsageRunner(deps: UsageRunnerDeps, timeoutMs = USAGE_TIMEOUT_MS, env: NodeJS.ProcessEnv = process.env): () => Promise<string> {
   return async () => {
@@ -57,14 +63,16 @@ export function ompUsageRunner(deps: UsageRunnerDeps, timeoutMs = USAGE_TIMEOUT_
 }
 
 /**
- * The usage of the subscription for one window (`omp-chat-general`): the last successful report and the instant omp made it, the request running and at most one waiting.
- * Nothing is saved: a reload forgets it. A failure keeps the last report and keeps the reason until the next report succeeds.
+ * The usage of the subscription for one window (`omp-chat`): the last successful report and the instant omp made it, the instant the last request ended, the request running and
+ * at most one waiting. Nothing is saved: a reload forgets it. A failure keeps the last report and keeps the reason until the next report succeeds.
  */
 export class OmpUsage implements UsageSource {
   private report: UsageReport | undefined;
   private error: string | undefined;
   private running = false;
   private waiting = false;
+  /** The instant the last request ended, successful or not; none before the first. */
+  private endedAt: number | undefined;
   private readonly listeners = new Set<() => void>();
 
   /** `run` gives the output of `omp usage --json` or rejects with the reason it failed; `now` is the clock (tests). */
@@ -78,6 +86,17 @@ export class OmpUsage implements UsageSource {
       this.waiting = true;
       return;
     }
+    void this.fetch();
+  }
+
+  ensure(): void {
+    if (this.running || this.report !== undefined) return;
+    void this.fetch();
+  }
+
+  turnEnded(): void {
+    if (this.running) return;
+    if (this.endedAt !== undefined && this.now() - this.endedAt <= USAGE_MIN_INTERVAL_MS) return;
     void this.fetch();
   }
 
@@ -102,6 +121,7 @@ export class OmpUsage implements UsageSource {
       this.error = err instanceof Error ? err.message : String(err);
     }
     this.running = false;
+    this.endedAt = this.now();
     if (this.waiting) {
       this.waiting = false;
       void this.fetch();

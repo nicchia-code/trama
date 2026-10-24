@@ -1,5 +1,5 @@
 ---
-status: open
+status: approved
 base:
   agent-launching/omp-chat.md: 1e329924a64ecc419a4a7c44ceb41e84b25883987ffc39165ec2e14f3373679c
   agent-launching/omp-chat-general.md: c8196f557d8eb76f52187da92fa3c4d35175d94ed3a2464359788419817f8205

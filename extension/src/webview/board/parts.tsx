@@ -94,6 +94,7 @@ export function BoardButton({
   variant = "outline",
   full = false,
   className,
+  data,
   onClick,
 }: {
   icon?: LucideIcon;
@@ -105,10 +106,12 @@ export function BoardButton({
   variant?: "default" | "outline" | "secondary" | "ghost" | "link";
   full?: boolean;
   className?: string;
+  /** `data-` attributes of the button, for code that must find it (its accessible name may change). */
+  data?: Record<`data-${string}`, string>;
   onClick: () => void;
 }) {
   const button = (
-    <Button variant={variant} size="sm" disabled={disabled} aria-label={aria} aria-description={description || undefined} className={cn(full && "w-full", className)} onClick={onClick}>
+    <Button variant={variant} size="sm" disabled={disabled} aria-label={aria} aria-description={description || undefined} className={cn(full && "w-full", className)} onClick={onClick} {...data}>
       {Icon ? <Icon aria-hidden="true" focusable="false" /> : null}
       {label}
     </Button>

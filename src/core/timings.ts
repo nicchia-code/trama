@@ -267,6 +267,12 @@ function readRecords(path: string): TimingRecord[] {
   return records;
 }
 
+/** Every record of every job file, in file order (oldest job first) and line order. Reads nothing else and writes nothing. */
+export function readTimingRecords(p: Project): TimingRecord[] {
+  const dir = join(p.dir, "timings");
+  return jobFiles(dir).flatMap((file) => readRecords(join(dir, file.name)));
+}
+
 /** The newest `last` jobs, newest first, from the job files. Reads nothing else and writes nothing. */
 export function timingJobs(p: Project, last: number, now = new Date()): JobTiming[] {
   const dir = join(p.dir, "timings");

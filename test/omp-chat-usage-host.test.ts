@@ -3,7 +3,7 @@ import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseChatMessage } from "../extension/src/host/omp-chat/messages";
-import { OmpUsage, ompUsageRunner, type UsageMessage, type UsageSource } from "../extension/src/host/omp-chat/usage";
+import { OmpUsage, ompUsageRunner, USAGE_MIN_INTERVAL_MS, type UsageMessage, type UsageSource } from "../extension/src/host/omp-chat/usage";
 import { type ChatSurface, ChatViewModel } from "../extension/src/host/omp-chat/view-model";
 import type { ToChatWebview } from "../extension/src/omp-chat-protocol";
 
@@ -180,13 +180,21 @@ describe("omp usage --json", () => {
   );
 });
 
-/** A usage source that counts the requests and lets the test change it. */
+/** A usage source that counts what the view asks of it, by kind, and lets the test change it. */
 class FakeUsage implements UsageSource {
   requests = 0;
+  ensures = 0;
+  turnsEnded = 0;
   current: UsageMessage = { type: "usage", fetching: false };
   private listeners: (() => void)[] = [];
   request(): void {
     this.requests++;
+  }
+  ensure(): void {
+    this.ensures++;
+  }
+  turnEnded(): void {
+    this.turnsEnded++;
   }
   message(): UsageMessage {
     return this.current;
@@ -201,49 +209,153 @@ class FakeUsage implements UsageSource {
   }
 }
 
+function surfaceOf(posted: ToChatWebview[]): ChatSurface {
+  return { post: (message) => void posted.push(message), setVisible() {}, reveal() {}, theme: () => "auto", readText: () => undefined, openLink() {} };
+}
+
 function setupView() {
   const posted: ToChatWebview[] = [];
-  const surface: ChatSurface = { post: (message) => void posted.push(message), setVisible() {}, reveal() {}, theme: () => "auto", readText: () => undefined, openLink() {} };
   const usage = new FakeUsage();
-  const model = new ChatViewModel(surface, () => true, () => [], () => true, undefined, usage);
+  const model = new ChatViewModel(surfaceOf(posted), () => true, () => [], () => true, undefined, usage);
   return { model, usage, posted };
 }
 
+/** The view on the real usage, with the runs and the clock in the hands of the test. */
+function setupRealView() {
+  const { run, calls } = controlledRun();
+  const clock = { now: 5_000_000 };
+  const usage = new OmpUsage(run, () => clock.now);
+  const model = new ChatViewModel(surfaceOf([]), () => true, () => [], () => true, undefined, usage);
+  return { model, usage, calls, clock };
+}
+
 describe("when the view asks for the usage", () => {
-  test("General coming to the view asks once; General already there asks nothing", () => {
+  test("a tab that comes to the view, General or a conversation, asks to be sure the window has a report; General already there asks nothing more", () => {
     const { model, usage } = setupView();
     model.showGeneral();
-    expect(usage.requests).toBe(1);
+    expect(usage.ensures).toBe(1);
     model.showGeneral();
-    expect(usage.requests).toBe(1);
+    expect(usage.ensures).toBe(1);
+    model.open({ id: "job", name: "T3" }, undefined, { focus: false });
+    expect(usage.ensures).toBe(2);
+    expect(usage.requests).toBe(0);
   });
 
-  test("the end of the turn of any conversation asks, General or a job's; its start and a window with no General do not", () => {
+  test("the end of the turn of any conversation tells the usage, General or a job's; its start does not", () => {
     const { model, usage } = setupView();
     model.open({ id: "job", name: "T3" }, undefined, { focus: false });
     model.setWorking("job", true);
+    expect(usage.turnsEnded).toBe(0);
     model.setWorking("job", false);
-    expect(usage.requests).toBe(0);
+    expect(usage.turnsEnded).toBe(1);
     model.showGeneral();
-    expect(usage.requests).toBe(1);
-    model.setWorking("job", true);
-    expect(usage.requests).toBe(1);
-    model.setWorking("job", false);
-    expect(usage.requests).toBe(2);
     model.setWorking("general", true);
+    expect(usage.turnsEnded).toBe(1);
     model.setWorking("general", false);
-    expect(usage.requests).toBe(3);
+    expect(usage.turnsEnded).toBe(2);
+    model.setWorking("job", true);
+    model.setWorking("job", false);
+    expect(usage.turnsEnded).toBe(3);
   });
 
-  test("refreshUsage asks while General is there and is ignored without it; it takes no field", () => {
+  test("refreshUsage asks whenever the window has a tab, General or not, and is ignored with none; it takes no field", () => {
     const { model, usage } = setupView();
     model.receive({ type: "refreshUsage" });
     expect(usage.requests).toBe(0);
+    model.open({ id: "job", name: "T3" }, undefined, { focus: false });
+    model.receive({ type: "refreshUsage" });
+    expect(usage.requests).toBe(1);
     model.showGeneral();
+    model.receive({ type: "refreshUsage" });
+    expect(usage.requests).toBe(2);
+    model.close("job");
+    model.removeGeneral();
     model.receive({ type: "refreshUsage" });
     expect(usage.requests).toBe(2);
     expect(parseChatMessage({ type: "refreshUsage" })).toEqual({ type: "refreshUsage" });
     expect(parseChatMessage({ type: "refreshUsage", extra: 1 })).toBeUndefined();
+  });
+});
+
+describe("when omp is asked for the usage", () => {
+  test("a window with no General and one conversation of a job asks once, and a window with no conversation asks nothing", () => {
+    const { model, calls } = setupRealView();
+    expect(calls).toHaveLength(0);
+    model.open({ id: "job", name: "T3" }, undefined, { focus: false });
+    expect(calls).toHaveLength(1);
+  });
+
+  test("a conversation that opens with a report already there, or a request running, asks nothing", async () => {
+    const { model, calls } = setupRealView();
+    model.open({ id: "first", name: "T1" }, undefined, { focus: false });
+    model.open({ id: "second", name: "T2" }, undefined, { focus: false });
+    expect(calls).toHaveLength(1);
+    calls[0]?.resolve(REPORT);
+    await settle();
+    model.open({ id: "third", name: "T3" }, undefined, { focus: false });
+    model.showGeneral();
+    expect(calls).toHaveLength(1);
+  });
+
+  test("a conversation that opens while the window has no successful report asks again", async () => {
+    const { model, calls } = setupRealView();
+    model.open({ id: "first", name: "T1" }, undefined, { focus: false });
+    calls[0]?.reject("omp exited with code 3");
+    await settle();
+    model.open({ id: "second", name: "T2" }, undefined, { focus: false });
+    expect(calls).toHaveLength(2);
+  });
+
+  test("the end of a turn asks after more than 60 seconds and not before, also after a failure, and leaves nothing waiting", async () => {
+    const { model, calls, clock } = setupRealView();
+    model.open({ id: "job", name: "T3" }, undefined, { focus: false });
+    calls[0]?.reject("omp exited with code 3");
+    await settle();
+    const endTurn = () => {
+      model.setWorking("job", true);
+      model.setWorking("job", false);
+    };
+    clock.now += USAGE_MIN_INTERVAL_MS;
+    endTurn();
+    expect(calls).toHaveLength(1);
+    clock.now += 1;
+    endTurn();
+    expect(calls).toHaveLength(2);
+    // A turn that ends while that request runs asks nothing and does not queue one.
+    endTurn();
+    calls[1]?.resolve(REPORT);
+    await settle();
+    expect(calls).toHaveLength(2);
+    clock.now += USAGE_MIN_INTERVAL_MS;
+    endTurn();
+    expect(calls).toHaveLength(2);
+    clock.now += 1;
+    endTurn();
+    expect(calls).toHaveLength(3);
+  });
+
+  test("the first end of a turn asks when no request has run yet, in General too", () => {
+    const { usage, calls } = setupRealView();
+    usage.turnEnded();
+    expect(calls).toHaveLength(1);
+  });
+
+  test("the opening of the usage dialog always asks; with a request running it waits for one more, whatever the clock", async () => {
+    const { model, calls } = setupRealView();
+    model.showGeneral();
+    calls[0]?.resolve(REPORT);
+    await settle();
+    model.receive({ type: "refreshUsage" });
+    expect(calls).toHaveLength(2);
+    model.receive({ type: "refreshUsage" });
+    model.receive({ type: "refreshUsage" });
+    expect(calls).toHaveLength(2);
+    calls[1]?.resolve(REPORT);
+    await settle();
+    expect(calls).toHaveLength(3);
+    calls[2]?.resolve(REPORT);
+    await settle();
+    expect(calls).toHaveLength(3);
   });
 
   test("the webview gets the usage when it starts and at each change, and none while it is not there", () => {

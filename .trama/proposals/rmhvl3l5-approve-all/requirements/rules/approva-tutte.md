@@ -1,0 +1,23 @@
+---
+description: "Usa quando implementi Approve All e Cancel Approve All del menu di + Add Work Item, o Cancel sulla scheda di una Proposal in coda."
+---
+# Approve All
+
+## developer.ANNULLA_RAFFINAMENTO
+- È disponibile solo sulla scheda di una Proposal in coda di questa finestra. L'host ricontrolla che sia ancora in coda; altrimenti non fa nulla.
+
+## developer.APPROVA_TUTTE
+- Approvabile: una Proposal `open` in Backlog, di qualunque `kind` (`change`, `import`, `setup`, `resolution`), non allegata a un Drift aperto, che non è da raffinare, il cui `approvalBlock` è nullo e il cui agente ha finito il turno: le stesse condizioni di `Approve` sulla sua scheda, senza contare il motivo `A run is in progress`.
+- Prende, nell'ordine del Backlog, ogni Proposal che non è già in coda, in raffinamento o in attesa della fine di un Run e che è approvabile oppure, con la funzione attiva, da raffinare con `Approve` disponibile (`rules#raffinamento`). Prende anche una Proposal, approvabile o da raffinare a parte le Proposal che richiede, bloccata solo da Proposal che richiede e che non sono approvate, quando ognuna di quelle è presa a sua volta, è già in coda, è in raffinamento o è in attesa della fine di un Run; la relazione è transitiva. Il numero `n` dell'etichetta conta, in un solo totale, le Proposal che il clic prenderebbe in quel momento. Con la funzione spenta prende solo le approvabili e quelle che aspettano soltanto approvabili prese o Proposal in attesa della fine di un Run.
+- Indisponibile solo con `n` a 0, con il motivo `No Proposal to approve`. La funzione spenta, un Run in corso, un raffinamento al lavoro, una risoluzione o un'unificazione non la rendono indisponibile.
+- Il clic non chiede conferme. L'host ricontrolla le condizioni al clic e prende le Proposal in quel momento; con `n` a 0 non fa nulla. Poi, in una volta sola:
+  1. Senza un Run lanciato da questa finestra in corso, approva le Proposal prese che non sono da raffinare e non aspettano Proposal in coda, in raffinamento o in attesa del Run, nell'ordine delle dipendenze (prima le richieste, come `requiredProposals`) e poi del Backlog, ciascuna con la stessa operazione dell'approvazione dal pannello, Task compresi. Subito prima di ognuna ricalcola `approvalBlock`: una Proposal diventata obsoleta per un'approvazione dello stesso clic, con la funzione attiva e se è da raffinare, va in coda come le altre da raffinare; ogni altra Proposal che non si può approvare, o la cui approvazione è rifiutata, resta Open con l'avviso `Trama: <numero breve> was not approved: <motivo>.`, uno per Proposal, e il clic continua con le altre.
+  2. Con un Run lanciato da questa finestra in corso, non approva nulla: le stesse Proposal vanno in attesa della fine del Run, come le raffinate (`rules#raffinamento`), con il badge `waiting for the run`; alla fine del Run Trama le guarda nell'ordine delle dipendenze e del Backlog con la regola del punto 1.
+  3. Mette in coda, come altrettanti `Approve`, le Proposal da raffinare prese, quelle diventate da raffinare nel punto 1 e quelle che aspettano una Proposal in coda o in raffinamento (in attesa di approvazione, `rules#raffinamento`), e fa partire le Proposal pronte.
+- Dal clic, se qualcosa è entrato in coda, la finestra ricorda che `Approve All` è in corso, finché nella coda resta almeno una Proposal che aspetta. Intanto la voce è `Cancel Approve All`; quando la coda si svuota, per partenze, approvazioni, uscite, `Cancel` sulle schede, `Cancel Approve All` o la funzione spenta, la voce torna `Approve All (<n>)`, anche mentre dei raffinamenti lavorano ancora. Un clic che approva soltanto, o mette soltanto in attesa del Run, non cambia la voce. Approve su una scheda, senza `Approve All` in corso, non cambia la voce.
+- Le Proposal raffinate dopo `Approve All` si approvano alla fine del loro raffinamento come con Approve; mentre un Run lanciato da questa finestra non è finito, aspettano la sua fine con il badge `waiting for the run` (`rules#raffinamento`).
+
+## developer.ANNULLA_APPROVA_TUTTE
+- Disponibile solo mentre `Approve All` è in corso e almeno 2 secondi dopo il clic su `Approve All`: prima la voce `Cancel Approve All` c'è ma non si può scegliere.
+- Svuota tutta la coda della finestra, anche le Proposal messe in coda con Approve e quelle in attesa di approvazione: ognuna torna com'era, da raffinare o Open, senza cambiare file. Le approvazioni già fatte restano. I raffinamenti al lavoro continuano e alla fine sono guardati come sempre, approvazione compresa; le Proposal in attesa della fine di un Run restano in attesa. La voce torna `Approve All (<n>)`.
+- L'host ricontrolla al clic che `Approve All` sia in corso; altrimenti non fa nulla.

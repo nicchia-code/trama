@@ -5,7 +5,7 @@ import { REFINEMENT_OFF, REFINING_REASON, RESUME_REASON, QUEUED_REASON, TO_REFIN
 import type { RefinementView } from "../extension/src/protocol";
 import type { AnnouncementView, DriftView, HistoryView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
 import { boardDecisionCount } from "../src/core/board-decisions";
-import { announcedCard, announcedGhosts, approveBlocker, blockedReason, buildBoard, clearableTasks, createsText, doneGroups, driftReworkBlocker, ghostExplanation, hideCleared, NO_MODELS, finishingBlocker, noteTime, runningFor, stoppedFollowingNotice, formatCounts, historyGroups, historyWhen, type HistoryPeriod, interleave, proposalBadges, proposalCard, resolveBlocker, summarizeChanges, summarizeFile, tagColour, taskCard, withdrawnNotice } from "../extension/src/webview/board/logic";
+import { announcedCard, announcedGhosts, runAllButtonText, approveBlocker, blockedReason, buildBoard, clearableTasks, createsText, doneGroups, driftReworkBlocker, ghostExplanation, hideCleared, NO_MODELS, finishingBlocker, noteTime, runningFor, stoppedFollowingNotice, formatCounts, historyGroups, historyWhen, type HistoryPeriod, interleave, proposalBadges, proposalCard, resolveBlocker, summarizeChanges, summarizeFile, tagColour, taskCard, withdrawnNotice } from "../extension/src/webview/board/logic";
 import { shopSnapshot, shopWithProposals } from "./diagram-fixture";
 import { RUN_IN_PROGRESS, runBlocker } from "../src/core/design";
 import { dismissBlocker } from "../extension/src/webview/dismiss";
@@ -759,5 +759,35 @@ describe("the Done column", () => {
       expect(ids).toEqual(["0010", "0012"]);
       expect(hideCleared(after, []).map((c) => c.cards.map((card) => card.id))).toEqual([["0003"], [], ["0011", "0012"]]);
     });
+  });
+});
+
+describe("the Run all button text while a Run all goes on", () => {
+  test("is the usual button without a Run all", () => {
+    expect(runAllButtonText(null)).toBeNull();
+  });
+
+  test("says it is working the time out", () => {
+    expect(runAllButtonText({ estimating: true })).toEqual({ label: "Estimating time left…", tooltipHead: "Estimating time left…", aria: "Run all, estimating time left" });
+  });
+
+  test("rounds a high limit under 60 minutes to the minute, at least 1", () => {
+    expect(runAllButtonText({ low: 14.6, high: 35.2, over: false })).toEqual({ label: "~15–35 min left", tooltipHead: "~15–35 min left", aria: "Run all, about 15 to 35 minutes left" });
+    expect(runAllButtonText({ low: 0.2, high: 0.4, over: false })?.label).toBe("~1 min left");
+    expect(runAllButtonText({ low: 3.4, high: 59.4, over: false })?.label).toBe("~3–59 min left");
+  });
+
+  test("writes equal limits once", () => {
+    expect(runAllButtonText({ low: 20, high: 20.4, over: false })).toEqual({ label: "~20 min left", tooltipHead: "~20 min left", aria: "Run all, about 20 minutes left" });
+    expect(runAllButtonText({ low: 118, high: 121, over: false })).toEqual({ label: "~2 h left", tooltipHead: "~2 h left", aria: "Run all, about 2 hours left" });
+  });
+
+  test("goes to hours rounded to the half hour with a dot from 60 minutes of the high limit, at least half an hour", () => {
+    expect(runAllButtonText({ low: 70, high: 150, over: false })).toEqual({ label: "~1–2.5 h left", tooltipHead: "~1–2.5 h left", aria: "Run all, about 1 to 2.5 hours left" });
+    expect(runAllButtonText({ low: 5, high: 60, over: false })?.label).toBe("~0.5–1 h left");
+  });
+
+  test("says it takes longer than expected, with the estimate as now in the first tooltip line", () => {
+    expect(runAllButtonText({ low: 15, high: 35, over: true })).toEqual({ label: "Taking longer than expected", tooltipHead: "~15–35 min left", aria: "Run all, taking longer than expected" });
   });
 });

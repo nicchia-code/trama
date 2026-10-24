@@ -51,8 +51,8 @@ function useTick(active: boolean): void {
 }
 
 /**
- * The usage of the subscription in General (`ui#omp-chat-general`): a small bar in the row under the message field, right of the model selector, with an entry for each
- * window of the provider of General's model, and the dialog with every provider. The bar is one button that opens the dialog; its entries wrap onto more lines in the space
+ * The usage of the subscription in every conversation of the view (`ui#omp-chat`): a small bar in the row under the message field, right of the model selector, with an entry for each
+ * window of the provider of the model chosen in that conversation, and the dialog with every provider. The bar is one button that opens the dialog; its entries wrap onto more lines in the space
  * right of the selector. With no data for that provider it is a compact `Usage` button; with no report at all it is nothing. Opening the dialog asks the host for the usage
  * again.
  */

@@ -10,7 +10,7 @@ La scheda di General è sempre la prima della vista e non si sposta. Al posto de
 
 Un problema di omp non lascia mai General senza scheda e non apre mai un terminale né un avviso dell'editor: il motivo compare dentro la conversazione, con le ultime righe che omp ha scritto sul suo output di errore, e Trama riprova solo quando il developer manda il messaggio seguente. Come per le altre conversazioni, l'avvio ha un solo limite di tempo per tutta l'apertura, la ripresa compresa, una connessione chiusa vale come un omp uscito da solo, e quando Trama ferma il processo di General (pulizia, spegnimento, chiusura) ferma prima il turno e chiude la sessione, poi termina omp con ogni comando che omp ha avviato.
 
-Sotto il campo del messaggio, accanto al selettore del modello, General mostra quanto il developer ha consumato dei limiti del suo abbonamento presso il fornitore del modello scelto in General, finestra per finestra (per esempio le 5 ore e i 7 giorni), come omp li riporta. Trama chiede l'uso a omp quando General compare e dopo ogni turno di un agente in qualunque conversazione di omp Chat della finestra; prima del primo dato, o quando omp non ne dà nessuno, non mostra nulla e non avvisa. Quando il fornitore del modello scelto non ha dati ma altri sì, resta solo un accesso all'uso, nello stesso posto. Il developer può aprire da lì l'uso di ogni fornitore, che Trama chiede di nuovo a omp a ogni apertura. L'uso riguarda l'account del developer, non la conversazione: pulire General o cambiare modello non lo azzera.
+Come ogni conversazione della vista, General mostra sotto il campo del messaggio, accanto al selettore del modello, l'uso dell'abbonamento del developer presso il fornitore del suo modello (vedi omp Chat).
 
 ## States
 

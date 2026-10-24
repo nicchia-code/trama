@@ -17,7 +17,7 @@ import { terminalVerdict } from "../../../src/core/terminal-check";
 import { startFailureNotice, type SavedJob, useOmpChat } from "../../../src/core/omp-chat-conversation";
 import { bundledAskMoreInstructions, bundledGeneralInstructions, bundledOmpHook } from "./bundled";
 import { withdrawWaiting } from "./announcements";
-import { addJobFollower, endHeldJob as endHeldJobs, endTerminalJobs, hasJobs, jobAbnormalEnd, type Job, type JobKind, onAgentIdle, onAgentStarted, releaseFiledWork, reportAgentStopped, reportStoppedFollowing, setHooked, startJob } from "./drift-resolution";
+import { addJobFollower, endHeldJob as endHeldJobs, endTerminalJobs, hasJobs, jobAbnormalEnd, type Job, type JobKind, onAgentIdle, onAgentStarted, releaseFiledWork, reportAgentStopped, reportStoppedFollowing, type RunAll, setHooked, startJob } from "./drift-resolution";
 import { addHolderFollower } from "./followed-holders";
 import { agentCommandLine, isSupportedShell, programName, quote, type ShellFamily, shellFamily } from "./quote";
 import { interruptTerminalRounds, ownWindowId, questionEndpoint } from "./questions";
@@ -590,8 +590,8 @@ function finishJob(root: string, job: Job): void {
  * Holds the project from now until `endHeldJob` with a job of `kind` that has no terminal or chat: `run` between the Runs
  * of a sequence cut by model.
  */
-export function startHeldJob(root: string, kind: JobKind, id: string): void {
-  startJob(kind, root, { held: true }, id);
+export function startHeldJob(root: string, kind: JobKind, id: string, runAll?: RunAll): void {
+  startJob(kind, root, { held: true }, id, [], runAll);
 }
 
 /** Ends the held job `id`: its steps are over, or it was released with `abnormal`. */
@@ -619,6 +619,8 @@ export interface LaunchJobOptions {
   attachment?: { file: string; text: string };
   /** Unify Drifts: the Drifts the job gathered, read when the job starts. */
   drifts?: () => readonly string[];
+  /** Set on the Run of a `Run all` that stands alone (not cut by model): its job keeps what the time-left estimate needs. */
+  runAll?: RunAll;
 }
 
 export async function launchAgent(
@@ -664,7 +666,7 @@ export async function launchAgent(
       let savedJob: SavedJob | undefined;
       if (job !== undefined && jobId !== undefined) {
         const drifts = jobOptions.drifts?.() ?? [];
-        const started = startJob(job, root, { terminal: terminalId }, jobId, drifts);
+        const started = startJob(job, root, { terminal: terminalId }, jobId, drifts, jobOptions.runAll);
         if (started !== undefined && jobOptions.onEnd !== undefined) runEnds.set(started, jobOptions.onEnd);
         savedJob = { id: jobId, kind: job, name, ...(cardId === undefined ? {} : { announcement: cardId }), ...(drifts.length === 0 ? {} : { drifts: [...drifts] }) };
       }
@@ -697,7 +699,7 @@ export async function launchAgent(
       if (announceProposal !== undefined) announceLaunch(root, announceProposal, { terminal: terminalId });
       onSent?.(startedAt);
       if (job !== undefined && jobId !== undefined) {
-        const started = startJob(job, root, { terminal: terminalId }, jobId, jobOptions.drifts?.() ?? []);
+        const started = startJob(job, root, { terminal: terminalId }, jobId, jobOptions.drifts?.() ?? [], jobOptions.runAll);
         if (started !== undefined && jobOptions.onEnd !== undefined) runEnds.set(started, jobOptions.onEnd);
       }
     }

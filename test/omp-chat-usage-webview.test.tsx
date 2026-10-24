@@ -5,6 +5,7 @@ import type { UsageReport } from "../src/core/omp-usage";
 import type { ToChatHost, ToChatWebview } from "../extension/src/omp-chat-protocol";
 import { ChatApp, createChatController } from "../extension/src/webview/omp-chat/app";
 import { createChatStore } from "../extension/src/webview/omp-chat/state";
+import { panelId } from "../extension/src/webview/omp-chat/tabs";
 
 afterEach(cleanup);
 
@@ -75,26 +76,57 @@ test("the bar has an entry for each window of the provider of the model: ring, s
   expect(screen.queryByRole("button", { name: "Usage" })).toBeNull();
 });
 
-test("the bar sits in the row of the model selector of General, right of it and under the message field, with no border, and the conversations of jobs have none", () => {
+test("the bar sits in the row of the model selector of every conversation, right of it and under the message field, with no border, each with the provider of its own model", () => {
+  const { host } = setup();
+  const job = { id: "job", name: "T3", state: "idle" as const };
+  const ask = { id: "ask", name: "Ask more", state: "idle" as const, placeholder: "Ask omp more" };
+  host({ type: "conversations", items: [general, job, ask], selected: GENERAL_ID });
+  host(models("anthropic/claude-opus-5-5"));
+  host({ type: "models", id: "job", available: [{ id: "openai/gpt-5", name: "x" }], current: "openai/gpt-5" });
+  host({ type: "models", id: "ask", available: [{ id: "google/gemini-3", name: "y" }], current: "google/gemini-3" });
+  const base = report();
+  host({ type: "usage", fetching: false, report: { ...base, providers: [...base.providers, { id: "google", name: "google", windows: [{ short: "1d", label: "Gemini 1 Day", usedFraction: 0.3 }] }] } });
+  expect(document.querySelectorAll("[data-usage-bar]")).toHaveLength(3);
+  const expected: [string, string][] = [
+    [GENERAL_ID, "anthropic usage: 5h 9%, 7d 50%, 7d Fable 2%"],
+    ["job", "openai usage: 5h 40%"],
+    ["ask", "google usage: 1d 30%"],
+  ];
+  for (const [id, name] of expected) {
+    const panel = document.getElementById(panelId(id)) as HTMLElement;
+    const own = panel.querySelector("[data-usage-bar]");
+    expect(own).not.toBeNull();
+    expect(panel.querySelectorAll("[data-usage-bar]")).toHaveLength(1);
+    expect(within(panel).getByRole("button", { name, hidden: true })).not.toBeNull();
+    expect(panel.firstElementChild?.hasAttribute("data-usage-bar")).toBe(false);
+    const selector = within(panel).getByRole("combobox", { name: "Model", hidden: true });
+    const field = within(panel).getByRole("textbox", { name: "Message omp", hidden: true });
+    expect(selector.parentElement?.contains(own)).toBe(true);
+    expect(own?.previousElementSibling).toBe(selector);
+    expect(selector.className).toContain("shrink-0");
+    expect(field.compareDocumentPosition(selector) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(own?.className).not.toMatch(/\bborder|\bp[xy]?-\d/);
+  }
+});
+
+test("a conversation whose model has not been reported yet shows the bar of the model it started with", () => {
+  const { host } = setup();
+  host({ type: "conversations", items: [{ id: "job", name: "T3", state: "idle", model: "openai/gpt-5" }], selected: "job" });
+  host({ type: "usage", fetching: false, report: report() });
+  expect(screen.getByRole("button", { name: "openai usage: 5h 40%" })).not.toBeNull();
+});
+
+test("changing the model of one conversation changes only its bar", () => {
   const { host } = setup();
   host({ type: "conversations", items: [general, { id: "job", name: "T3", state: "idle" }], selected: GENERAL_ID });
   host(models("anthropic/claude-opus-5-5"));
   host({ type: "models", id: "job", available: [{ id: "anthropic/claude-opus-5-5", name: "x" }], current: "anthropic/claude-opus-5-5" });
   host({ type: "usage", fetching: false, report: report() });
-  expect(document.querySelectorAll("[data-usage-bar]")).toHaveLength(1);
-  const panel = document.getElementById("omp-chat-panel-general") ?? document.querySelector('[role="tabpanel"]');
-  expect(panel?.contains(bar())).toBe(true);
-  expect(panel?.firstElementChild?.hasAttribute("data-usage-bar")).toBe(false);
-  const selector = within(panel as HTMLElement).getByRole("combobox", { name: "Model" });
-  const field = within(panel as HTMLElement).getByRole("textbox", { name: "Message omp" });
-  const row = selector.parentElement;
-  expect(row?.contains(bar())).toBe(true);
-  expect(bar()?.previousElementSibling).toBe(selector);
-  expect(selector.className).toContain("shrink-0");
-  expect(field.compareDocumentPosition(selector) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(bar()?.className).not.toMatch(/\bborder|\bp[xy]?-\d/);
-  host({ type: "conversations", items: [general, { id: "job", name: "T3", state: "idle" }], selected: "job" });
-  expect(screen.getAllByRole("tabpanel", { hidden: true }).find((each) => !each.hidden)?.querySelector("[data-usage-bar]")).toBeNull();
+  const barOf = (id: string) => document.getElementById(panelId(id))?.querySelector("[data-usage-bar]")?.textContent;
+  expect(barOf("job")).toBe("5h9%7d50%7d Fable2%");
+  host({ type: "models", id: "job", available: [{ id: "openai/gpt-5", name: "x" }], current: "openai/gpt-5" });
+  expect(barOf("job")).toBe("5h40%");
+  expect(barOf(GENERAL_ID)).toBe("5h9%7d50%7d Fable2%");
 });
 
 test("ring and percentage are secondary below 80 %, warning from 80 % and error at 100 %, on the shown percentage", () => {

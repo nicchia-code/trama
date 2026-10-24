@@ -11,6 +11,31 @@ export type JobKind = "run" | "resolve" | "scan" | "prepared" | "unify" | "refin
  */
 export type JobPlace = { terminal: string } | { held: true };
 
+/** A Run of a `Run all` as the host remembers it, in memory only. */
+export interface RunAllGroup {
+  /** The identity of the job the Run works as: the one its terminal or conversation starts. */
+  jobId: string;
+  /** The Tasks `planRuns` gave the Run at the launch. */
+  tasks: readonly string[];
+  /** The sub-agent places of the Run: `trama.maxParallelAgents` or its part. */
+  seats: number;
+  /** The terminal or conversation of the Run once it started; null until then. */
+  terminal: string | null;
+  /** Whether the Run's job ended. */
+  ended: boolean;
+}
+
+/** What a job of a `Run all` launched from this window keeps for the time-left estimate, forgotten with the job. */
+export interface RunAll {
+  /** The instant of the launch, in milliseconds. */
+  launchedAt: number;
+  /** `trama.parallelExecution` as read at the launch. */
+  parallel: boolean;
+  groups: RunAllGroup[];
+  /** The high limit, in minutes, of the first estimate; null until the estimate first exists. */
+  high: number | null;
+}
+
 export interface Job {
   id: string;
   kind: JobKind;
@@ -18,8 +43,9 @@ export interface Job {
   place: JobPlace;
   /** The Drifts a `unify` job gathered when its instruction was sent, in creation order: the Board marks their cards as being unified. */
   drifts?: readonly string[];
+  /** Set only on the job that stands for a `Run all`: the held job of a sequence cut by model, or the job of the only Run. */
+  runAll?: RunAll;
 }
-
 
 
 const jobs = new Set<Job>();
@@ -179,11 +205,23 @@ export function onAgentStarted(listener: (terminal: string, pid: number, root: s
  * A job begins when its instruction is really written in the terminal or sent to the omp Chat conversation by itself; never for one left
  * copied to the clipboard.
  */
-export function startJob(kind: JobKind, root: string, place: JobPlace, id: string = randomUUID(), drifts: readonly string[] = []): string | undefined {
-  const job: Job = { id, kind, root, place, ...(drifts.length > 0 ? { drifts } : {}) };
+export function startJob(kind: JobKind, root: string, place: JobPlace, id: string = randomUUID(), drifts: readonly string[] = [], runAll?: RunAll): string | undefined {
+  const job: Job = { id, kind, root, place, ...(drifts.length > 0 ? { drifts } : {}), ...(runAll === undefined ? {} : { runAll }) };
   jobs.add(job);
+  // The Run of a `Run all` that starts now: its group learns the terminal or conversation it works in.
+  if ("terminal" in place) {
+    for (const other of localProjectJobs(root)) {
+      const group = other.runAll?.groups.find((g) => g.jobId === id);
+      if (group !== undefined) group.terminal = place.terminal;
+    }
+  }
   changed();
   return id;
+}
+
+/** The job of the `Run all` this window launched in the project at `root`, if one is going. */
+export function runAllJob(root: string): (Job & { runAll: RunAll }) | undefined {
+  return localProjectJobs(root).find((job): job is Job & { runAll: RunAll } => job.runAll !== undefined);
 }
 
 function endWhere(matches: (job: Job) => boolean, abnormal?: string): Job[] {
@@ -191,6 +229,10 @@ function endWhere(matches: (job: Job) => boolean, abnormal?: string): Job[] {
   for (const job of [...jobs]) {
     if (!matches(job) || !jobs.delete(job)) continue;
     if (abnormal !== undefined) abnormalEnds.set(`${projectRootKey(job.root)}\n${job.id}`, abnormal);
+    for (const other of localProjectJobs(job.root)) {
+      const group = other.runAll?.groups.find((g) => g.jobId === job.id);
+      if (group !== undefined) group.ended = true;
+    }
     ended.push(job);
   }
   if (ended.length > 0) changed();

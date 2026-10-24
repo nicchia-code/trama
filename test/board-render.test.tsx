@@ -614,6 +614,47 @@ describe("The Board page", () => {
     expect(posted).toEqual([{ type: "writeDesignRequest" }, { type: "launch", action: { kind: "implement-all" } }]);
   });
 
+  describe("Run all with the time left", () => {
+    const inRun = { blocker: null, runReason: "A run is in progress", drifts: {}, resolving: [] };
+    const runAll = (name: RegExp | string) => screen.getByRole("button", { name }) as HTMLButtonElement;
+
+    test("shows the range in minutes, with the Clock icon, disabled, with the reasons as description", () => {
+      page(snapshot({ tasks: [taskView()] }), { resolve: inRun, runEstimate: { low: 14.6, high: 35.2, over: false } });
+      const run = runAll("Run all, about 15 to 35 minutes left");
+      expect(run.textContent).toBe("~15–35 min left");
+      expect([run.disabled, run.getAttribute("aria-description"), run.hasAttribute("data-run-all")]).toEqual([true, "A run is in progress", true]);
+      expect(run.querySelector("svg.lucide-clock")).not.toBeNull();
+      expect(run.querySelector("svg.lucide-play")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Run all the Tasks in To do" })).toBeNull();
+    });
+
+    test("shows hours from 60 minutes of the high limit, equal limits once, and says it is working it out", () => {
+      page(snapshot({ tasks: [taskView()] }), { resolve: inRun, runEstimate: { low: 70, high: 150, over: false } });
+      expect(runAll("Run all, about 1 to 2.5 hours left").textContent).toBe("~1–2.5 h left");
+      cleanup();
+      page(snapshot({ tasks: [taskView()] }), { resolve: inRun, runEstimate: { low: 20, high: 20.4, over: false } });
+      expect(runAll("Run all, about 20 minutes left").textContent).toBe("~20 min left");
+      cleanup();
+      page(snapshot({ tasks: [taskView()] }), { resolve: inRun, runEstimate: { estimating: true } });
+      const run = runAll("Run all, estimating time left");
+      expect([run.textContent, run.disabled]).toEqual(["Estimating time left…", true]);
+    });
+
+    test("says it takes longer than expected once the Run all is over its first estimate", () => {
+      page(snapshot({ tasks: [taskView()] }), { resolve: inRun, runEstimate: { low: 5, high: 9, over: true } });
+      const run = runAll("Run all, taking longer than expected");
+      expect([run.textContent, run.disabled, run.querySelector("svg.lucide-clock") !== null]).toEqual(["Taking longer than expected", true, true]);
+    });
+
+    test("without a Run all of this window the button is the usual one, a single Run included", () => {
+      page(snapshot({ tasks: [taskView()] }), { resolve: inRun, runEstimate: null });
+      const run = runAll("Run all the Tasks in To do");
+      expect([run.textContent, run.disabled, run.getAttribute("aria-description")]).toEqual(["Run all", true, "A run is in progress"]);
+      expect(run.querySelector("svg.lucide-play")).not.toBeNull();
+      expect(run.querySelector("svg.lucide-clock")).toBeNull();
+    });
+  });
+
   describe("ghost details", () => {
     const ghostView = (over: Partial<AnnouncementView> = {}): AnnouncementView => ({ id: "g00001", kind: "proposal", title: "Returns", phase: "preparing", notes: [], announced: new Date().toISOString(), ...over });
     const ghostButton = () => screen.getByRole("button", { name: /Show details$/ });
@@ -1540,6 +1581,15 @@ describe("Delete in the Task details", () => {
     const { rerender, props } = page(snapshot({ tasks: [taskView()] }));
     fireEvent.click(deleteIn(openTask()));
     rerender(<BoardPage {...props} snapshot={snapshot()} />);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(document.querySelector('[data-column="active"]')));
+  });
+
+  test("the focus finds Run all by its data attribute, not its name: with the time left shown it is disabled, so the focus goes to Active", async () => {
+    const other = taskView({ id: "other", title: "Another" });
+    const { rerender, props } = page(snapshot({ tasks: [taskView(), other] }));
+    fireEvent.click(deleteIn(openTask()));
+    rerender(<BoardPage {...props} snapshot={snapshot({ tasks: [other] })} runEstimate={{ estimating: true }} resolve={running} />);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(document.querySelector('[data-column="active"]')));
   });

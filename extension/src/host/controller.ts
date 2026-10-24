@@ -17,13 +17,13 @@ import { namerOf } from "../../../src/core/card-names";
 import { runBlocker } from "../../../src/core/design";
 import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
 import { attachedDrift, blockedTasks, dismissDrift, getDrift, getTask, getTaskOrNull, listDrifts, listTasks, originDesign, requireNotAttached } from "../../../src/core/work";
-import type { AgentAction, NavigateOptions, RefinementView, SetupChoice, ToHost, ToWebview, ViewName, WorkspaceFolderView } from "../protocol";
+import type { AgentAction, NavigateOptions, RefinementView, RunEstimateView, SetupChoice, ToHost, ToWebview, ViewName, WorkspaceFolderView } from "../protocol";
 import type { MenuViewName } from "../menu-protocol";
 import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
 import { configuredAdvisorScanner, configuredAsyncDriftResolver, configuredAutoUpdateStaleProposals, configuredMaxParallelAgents, configuredModels, configuredOmpPath, configuredParallelExecution, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, installOmp, launchAgent, launched, openAskMore, settings, startHeldJob } from "./agent";
 import { bundledUnifyInstructions } from "./bundled";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
-import { driftWork, driftsFinishing, localProjectJobs, onAgentStopped, onDriftResolutionChange, onProposalDelivered, onStoppedFollowing, proposalsFinishing, receiveNotice, releaseFiledWork, tasksFinishing, unifyingDrifts } from "./drift-resolution";
+import { driftWork, driftsFinishing, localProjectJobs, onAgentStopped, onDriftResolutionChange, onProposalDelivered, onStoppedFollowing, proposalsFinishing, receiveNotice, releaseFiledWork, type RunAll, tasksFinishing, unifyingDrifts } from "./drift-resolution";
 import { agentStoppedNotice } from "../../../src/core/omp-chat-conversation";
 import { askPreparedRound } from "./questions";
 import { askMorePlaceholder, askMoreSubject, askMoreTerminalName } from "./ask-more";
@@ -58,7 +58,8 @@ import {
   switchedOff,
   withdraw,
 } from "./refinement";
-import { planRuns, runSequence, runSequenceTogether, type AppliedModel, type PlannedRun } from "./run-groups";
+import { planRuns, runSequence, runSequenceTogether, startRuns, type AppliedModel, type PlannedRun } from "./run-groups";
+import { runAllEstimate } from "./run-all-estimate";
 import { ompModels } from "./model-lists";
 import { ensureOmpUpdated, findOmp, forgetUpdateCheck } from "./omp-update";
 import { ompStatus } from "./omp-status";
@@ -75,6 +76,8 @@ import { writeLastScan } from "../../../src/core/last-scan";
 import { askMorePart, buildPrompt, mayFileDrifts, PREPARED_ANSWER_SENTENCE, reworkPrompt, terminalName, type ResolvedAction } from "./prompts";
 
 const DEBOUNCE_MS = 150;
+/** How often the time left of a Run all is worked out again while it goes on. */
+const RUN_ESTIMATE_INTERVAL_MS = 60_000;
 
 /** The key under the `trama` section for a manifest key: `trama.maxParallelAgents` is read and written as `maxParallelAgents`. */
 const sectionKey = (key: string): string => key.slice("trama.".length);
@@ -123,6 +126,10 @@ export class Controller implements vscode.Disposable {
   private refinement: RefinementState = NO_REFINEMENT;
   private panel: vscode.WebviewPanel | undefined;
   private timer: NodeJS.Timeout | undefined;
+  /** Worked out again every `RUN_ESTIMATE_INTERVAL_MS`, only while a Run all of this window goes on. */
+  private estimateTimer: NodeJS.Timeout | undefined;
+  /** The estimate the Board was last sent, as text, so the timer sends only a change. */
+  private lastRunEstimate = "null";
   private disposed = false;
   /** The open Drifts the resolution launched from this window was asked to resolve; cleared once no resolution runs. */
   private readonly namedByResolution = new Set<string>();
@@ -584,6 +591,7 @@ export class Controller implements vscode.Disposable {
     this.panel?.dispose();
     this.shownViewListeners.clear();
     clearTimeout(this.timer);
+    this.stopEstimateTimer();
   }
 
   private create(): void {
@@ -619,6 +627,7 @@ export class Controller implements vscode.Disposable {
     panel.onDidDispose(() => {
       for (const subscription of subscriptions) subscription.dispose();
       clearTimeout(this.timer);
+      this.stopEstimateTimer();
       this.panel = undefined;
       this.setPanelView(undefined);
       this.pendingView = undefined;
@@ -713,7 +722,11 @@ export class Controller implements vscode.Disposable {
       const drifts = Object.fromEntries(listDrifts(project).filter((d) => d.data.status === "open").map((d) => [d.id, resolveDriftBlocker(project, work, this.namedByResolution.has(d.id), asyncResolver && snapshot.drifts.find((x) => x.id === d.id)?.prepared?.valid === true)]));
       // The open Drifts the running resolution is working on: those this window asked an agent to resolve.
       const resolving = work.resolving ? Object.keys(drifts).filter((id) => this.namedByResolution.has(id)) : [];
-      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker({ resolving: work.resolving, running: ownWindowRuns(project.root) }), running: ownWindowRuns(project.root), drifts, resolving }, unify: { blockers: unifyDriftsBlockers(project, work, driftsFinishing(project.root)), unifying: unifyingDrifts(project.root) }, models, scans: { advisorScanner: configuredAdvisorScanner() }, refinement: this.refinementPicture(project) });
+      const runEstimate = runAllEstimate(project);
+      this.lastRunEstimate = JSON.stringify(runEstimate);
+      if (runEstimate === null) this.stopEstimateTimer();
+      else this.startEstimateTimer(project);
+      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker({ resolving: work.resolving, running: ownWindowRuns(project.root) }), running: ownWindowRuns(project.root), drifts, resolving }, unify: { blockers: unifyDriftsBlockers(project, work, driftsFinishing(project.root)), unifying: unifyingDrifts(project.root) }, models, scans: { advisorScanner: configuredAdvisorScanner() }, refinement: this.refinementPicture(project), runEstimate });
     } catch (err) {
       this.post({ type: "error", message: describeError(err) });
     }
@@ -730,12 +743,32 @@ export class Controller implements vscode.Disposable {
     return this.modelMemory ? appliedProposalModels(this.modelMemory, project) : [];
   }
 
+  /** Starts the timer that works the time left of the Run all out again every minute and sends the Board only a change; it runs only while a Run all of this window goes on. */
+  private startEstimateTimer(project: Project): void {
+    if (this.estimateTimer !== undefined) return;
+    this.estimateTimer = setInterval(() => {
+      let estimate: RunEstimateView;
+      try {
+        estimate = runAllEstimate(project);
+      } catch {
+        return; // The files cannot be read now: the next change or tick tries again.
+      }
+      if (estimate === null) this.stopEstimateTimer();
+      if (JSON.stringify(estimate) !== this.lastRunEstimate) this.refresh();
+    }, RUN_ESTIMATE_INTERVAL_MS);
+  }
+
+  private stopEstimateTimer(): void {
+    clearInterval(this.estimateTimer);
+    this.estimateTimer = undefined;
+  }
+
   /**
    * Starts one Run of a sequence, `Run all` cut by model. Its `onEnd` hears how the Run ends. The Run is not refused here
    * for the held sequence it belongs to, so the window and the Run-all checks are not applied to it again. `seats` is the
    * sub-agent places its instruction gives; absent, the whole `trama.maxParallelAgents`.
    */
-  private async launchSequenceRun(project: Project, planned: PlannedRun & { seats?: number }, onEnd: (abnormal?: string) => void): Promise<boolean> {
+  private async launchSequenceRun(project: Project, planned: PlannedRun & { seats?: number }, jobId: string | undefined, onEnd: (abnormal?: string) => void): Promise<boolean> {
     const action: Extract<AgentAction, { kind: "implement-all" }> = { kind: "implement-all", group: planned.group };
     try {
       const result = await launchAgent(
@@ -746,7 +779,7 @@ export class Controller implements vscode.Disposable {
         () => true,
         "run",
         undefined,
-        { filesDrifts: true, severalTasks: true, model: planned.run, limit: planned.seats, onEnd },
+        { filesDrifts: true, severalTasks: true, model: planned.run, limit: planned.seats, onEnd, ...(jobId === undefined ? {} : { id: jobId }) },
       );
       return launched(result);
     } catch (error) {
@@ -1539,15 +1572,25 @@ export class Controller implements vscode.Disposable {
         const only = runs[0];
         // One group is one Run. Several groups are a sequence of Runs, one per model: it holds the project from its first Run to its last.
         // With parallel execution the Runs start together, sharing the sub-agent places; otherwise they start one after the other.
+        const parallel = configuredParallelExecution();
+        const limit = configuredMaxParallelAgents();
+        const launchedAt = Date.now();
         if (runs.length <= 1) {
-          await send({ kind: "implement-all", group: only?.group }, undefined, undefined, undefined, only?.run);
+          // The only Run's job is the Run all: it keeps what the time-left estimate needs, under the identity its job will have.
+          const id = randomUUID();
+          const runAll: RunAll = { launchedAt, parallel, groups: [{ jobId: id, tasks: only?.tasks ?? [], seats: limit, terminal: null, ended: false }], high: null };
+          await send({ kind: "implement-all", group: only?.group }, undefined, undefined, undefined, only?.run, { id, runAll });
           return;
         }
         const held = randomUUID();
-        startHeldJob(project.root, "run", held);
-        const launch = (planned: PlannedRun & { seats?: number }, onEnd: (abnormal?: string) => void) => this.launchSequenceRun(project, planned, onEnd);
+        // The places each Run gets are decided at the launch, as the sequence decides them; the Runs are told apart by their Task lists.
+        const seated = parallel ? (({ now, waiting }) => [...now, ...waiting])(startRuns(runs, limit)) : runs.map((run) => ({ ...run, seats: limit }));
+        const jobIds = new Map<readonly string[], string>(runs.map((run) => [run.tasks, randomUUID()]));
+        const runAll: RunAll = { launchedAt, parallel, groups: seated.map((run) => ({ jobId: jobIds.get(run.tasks) as string, tasks: run.tasks, seats: run.seats, terminal: null, ended: false })), high: null };
+        startHeldJob(project.root, "run", held, runAll);
+        const launch = (planned: PlannedRun & { seats?: number }, onEnd: (abnormal?: string) => void) => this.launchSequenceRun(project, planned, jobIds.get(planned.tasks), onEnd);
         const finish = (abnormal?: string) => endHeldJob(project.root, held, abnormal);
-        if (configuredParallelExecution()) runSequenceTogether(runs, configuredMaxParallelAgents(), launch, finish);
+        if (parallel) runSequenceTogether(runs, limit, launch, finish);
         else runSequence(runs, launch, finish);
         return;
       }

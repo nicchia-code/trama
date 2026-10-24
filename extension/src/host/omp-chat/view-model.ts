@@ -144,6 +144,8 @@ export class ChatViewModel implements ChatViewPort {
       ...(options.instruction === undefined ? {} : { instruction: options.instruction }),
     };
     this.tabs.push(created);
+    // `omp-chat-conversation.OPENED`: the tab is in the view, and the usage is asked for when the window has none.
+    this.usage?.ensure();
     this.selected = tab.id;
     this.refresh();
     this.surface.reveal(!options.focus);
@@ -166,10 +168,10 @@ export class ChatViewModel implements ChatViewPort {
   /** General comes to the view as its first tab; it takes the view only when none is in view. */
   showGeneral(): void {
     if (this.find(GENERAL_ID) !== undefined) return;
-    // `omp-chat-general.SHOWN`: General is in the view, and the usage is asked for.
-    this.usage?.request();
     const general: Tab = { id: GENERAL_ID, name: "General", session: undefined, inTurn: false, working: false, forms: new Set(), permissions: new Map(), start: {}, subscriptions: [] };
     this.tabs.unshift(general);
+    // `omp-chat-general.SHOWN`: General is in the view, and the usage is asked for when the window has none.
+    this.usage?.ensure();
     if (this.selected === undefined) this.selected = GENERAL_ID;
     this.refresh();
     this.postConversations();
@@ -309,8 +311,8 @@ export class ChatViewModel implements ChatViewPort {
         if (this.find(GENERAL_ID) !== undefined) for (const listener of [...this.installListeners]) listener();
         return;
       case "refreshUsage":
-        // Only General shows the usage; a window without General asks for none.
-        if (this.find(GENERAL_ID) !== undefined) this.usage?.request();
+        // The usage dialog was opened: always asked, by a window that has at least one tab.
+        if (this.tabs.length > 0) this.usage?.request();
         return;
       case "setModel": {
         const tab = this.find(message.id);
@@ -386,8 +388,8 @@ export class ChatViewModel implements ChatViewPort {
     const endedTurn = states.some(([id, state]) => state !== "running" && this.lastStates.get(id) === "running");
     this.lastStates.clear();
     for (const [id, state] of states) this.lastStates.set(id, state);
-    // A turn of any conversation of the window ended: General, when it is there, asks for the usage.
-    if (endedTurn && this.find(GENERAL_ID) !== undefined) this.usage?.request();
+    // A turn of any conversation of the window ended: the usage is asked for when the last request is old enough (`usage.ts`).
+    if (endedTurn) this.usage?.turnEnded();
     if (!this.ready) return;
     const items: ConversationItem[] = this.tabs.map((tab) => ({
       id: tab.id,

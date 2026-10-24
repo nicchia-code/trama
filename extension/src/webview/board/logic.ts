@@ -7,7 +7,7 @@ import { driftsWithCard } from "../../../../src/core/board-decisions";
 import { joinReasons, RUN_IN_PROGRESS } from "../../../../src/core/design";
 import type { Blocker } from "../../../../src/core/blocking";
 import type { AnnouncementView, DriftView, HistoryView, ProposalTag, ProposalView, Snapshot, TaskImageView, TaskView } from "../../../../src/core/snapshot";
-import type { Column, FocusRequest, RefinementView } from "../../protocol";
+import type { Column, FocusRequest, RefinementView, RunEstimateView } from "../../protocol";
 import { appliesUnder, requiredReasons } from "../../../../src/core/required";
 import { focusStepCount } from "../focus/steps";
 import { dismissBlocker } from "../dismiss";
@@ -324,6 +324,50 @@ export const REFINEMENT_OFF: RefinementView = { enabled: false, running: [], que
 
 /** The wait after the click on Refine All before Cancel Refine All can be chosen. */
 export const CANCEL_REFINE_ALL_DELAY_MS = 2000;
+
+/** The text of the button while the Run all estimate is being worked out. */
+export const ESTIMATING_TEXT = "Estimating time left…";
+
+/** The text of the button when the Run all lasts longer than the high limit of its first estimate. */
+export const OVER_TEXT = "Taking longer than expected";
+
+/** An hour count rounded to the half hour, at least half an hour, written with a dot: `1`, `2.5`. */
+const hoursText = (minutes: number): string => String(Math.max(0.5, Math.round((minutes / 60) * 2) / 2));
+
+/**
+ * The range of a Run all estimate as words, rounded as the host's Requirements say: with a high limit under 60 minutes both
+ * limits go to the minute, at least 1; from 60 minutes up both go to the half hour, at least half an hour. Equal limits are written once.
+ */
+function estimateRange(low: number, high: number): { text: string; spoken: string } {
+  const hours = high >= 60;
+  const [from, to] = hours ? [hoursText(low), hoursText(high)] : [String(Math.max(1, Math.round(low))), String(Math.max(1, Math.round(high)))];
+  const unit = hours ? "h" : "min";
+  const spokenUnit = hours ? "hours" : "minutes";
+  if (from === to) return { text: `~${from} ${unit} left`, spoken: `about ${from} ${spokenUnit} left` };
+  return { text: `~${from}–${to} ${unit} left`, spoken: `about ${from} to ${to} ${spokenUnit} left` };
+}
+
+/** What the `Run all` button shows while a Run all launched from this window goes on. */
+export interface RunAllButtonText {
+  /** The visible text of the button. */
+  label: string;
+  /** The first line of the tooltip: the estimate as it is now, even when the button says it takes longer than expected. */
+  tooltipHead: string;
+  /** The accessible name of the button. */
+  aria: string;
+}
+
+/**
+ * The text, the first tooltip line and the accessible name of `Run all` for the estimate the host sends; null without a Run all
+ * (the button is then the usual one). The texts are English and do not follow `trama.language`.
+ */
+export function runAllButtonText(estimate: RunEstimateView): RunAllButtonText | null {
+  if (estimate === null) return null;
+  if ("estimating" in estimate) return { label: ESTIMATING_TEXT, tooltipHead: ESTIMATING_TEXT, aria: "Run all, estimating time left" };
+  const range = estimateRange(estimate.low, estimate.high);
+  if (estimate.over) return { label: OVER_TEXT, tooltipHead: range.text, aria: "Run all, taking longer than expected" };
+  return { label: range.text, tooltipHead: range.text, aria: `Run all, ${range.spoken}` };
+}
 
 /**
  * The second entry of the menu of `+ Add Work Item`, as the host's `refineAll` says: `Refine All (<count>)` (`Refine All` with none), disabled with the host's reasons;
