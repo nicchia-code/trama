@@ -114,6 +114,8 @@ beforeAll(async () => {
     answerForm() {},
     onPermissionRequest: none,
     onPermissionCancelled: none,
+    onPermissionAnswered: none,
+    onSend: none,
     answerPermission() {},
     models: async () => ({ available: [] }),
     setModel: async () => undefined,

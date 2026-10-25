@@ -31,6 +31,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Regole degli annunci** (`announcements.md`): Usa per annunci, ghost, controlli e confronti. Sections: `announcement`.
 - **Regole dell'approvazione** (`approvals.md`): Usa quando implementi ciò che succede all'approvazione di una Proposal. Sections: `proposal/Approved`.
 - **Regole di Ask more** (`ask-more.md`): Usa quando implementi l'istruzione di Ask more, ciò che riceve l'agente e cosa può fare la sua chat. Sections: `developer.ASK_MORE`.
+- **Away notification rules** (`away-notifications.md`): Use when implementing when Trama's ntfy notifications are born, wait, are cancelled and are sent, the test notification and the ntfy access token. Sections: `notice`, `developer.SET_NTFY_TOKEN`, `developer.SEND_TEST_NOTIFICATION`.
 - **Regole delle Proposal** (`decisions.md`): Usa quando implementi le regole delle Proposal, dalla scrittura all'approvazione. Sections: `proposal`.
 - **Regole della risoluzione dei Drift** (`drift-resolution.md`): Usa quando lanci Resolve Drifts, decidi quando una risoluzione o un Run sono in corso o prepari e usi le domande pronte dell'Async Drift Resolver. Sections: `drift-resolution`.
 - **Regole dei Drift** (`drifts.md`): Usa quando implementi le regole dei Drift, della loro risoluzione e del pulsante Resolve Drifts. Sections: `drift`.
@@ -48,12 +49,15 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Regole delle prenotazioni dei file** (`prenotazioni.md`): Usa quando lavori sulle prenotazioni dei file dei sotto-agenti durante un Run: chi prenota, chi è fermato, quando una prenotazione finisce. Sections: `prenotazione-file`.
 - **Regole del progetto** (`project.md`): Usa quando implementi init, aggiornamento delle skill e skill dei Requisiti. Sections: `project`.
 - **Regole dei round di domande** (`questions-notices.md`): Usa quando implementi i round di domande. Sections: `question-round`.
-- **Raffinamento delle Proposal obsolete** (`raffinamento.md`): Usa quando implementi Auto-update Stale Proposals: quando una Proposal è da raffinare, coda e catene in parallelo, Refine All, istruzione, fine del raffinamento e approvazione. Sections: `raffinamento`, `developer.ANNULLA_RAFFINAMENTO`, `developer.RAFFINA_TUTTE`, `developer.ANNULLA_RAFFINA_TUTTE`.
+- **Raffinamento delle Proposal obsolete** (`raffinamento.md`): Use when implementing Auto-update Stale Proposals: when a Proposal is to refine or being written, queue and parallel chains, instruction, end of the refinement and approval. Sections: `raffinamento`.
+- **Refine All and refining queue cancellation** (`refine-all.md`): Use when implementing Cancel on a queued Proposal, Refine All and Cancel Refine All. Sections: `developer.ANNULLA_RAFFINAMENTO`, `developer.RAFFINA_TUTTE`, `developer.ANNULLA_RAFFINA_TUTTE`.
 - **Regole delle richieste di design** (`requests.md`): Usa per invio, contenuto e consumo delle richieste di design scritte. Sections: `design-request`.
 - **Rework with feedback** (`rework.md`): Usa quando implementi Rework with feedback su una Proposal o su un Drift: condizioni, rifiuto con feedback, istruzioni all'agente, legame `reworks` e comportamento delle skill che rifanno. Sections: `developer.REWORK_PROPOSAL`, `developer.REWORK_DRIFT`.
 - **Regole dei Run per modello in parallelo e della stima di Run all** (`run-paralleli.md`): Usa quando lavori sulla sequenza per modello di Run all lanciata in parallelo, sulla divisione del limite dei sotto-agenti fra i suoi Run e sulla stima del tempo che manca a un Run all. Sections: `drift-resolution/Running tasks`.
 - **Regole di scan, confronti e Advisor Scanner** (`scans.md`): Usa per scan, confronto delle Machine e Advisor Scanner. Sections: `work`.
 - **Regole del wizard di setup** (`setup-wizard.md`): Usa quando implementi i passi, i salvataggi, le cartelle escluse e la conferma del wizard di setup. Sections: `setup-wizard`.
+- **Solo merge** (`solo-merge.md`): Use when computing when Merge is available, what it merges, when the merge is over and what the scan after a merge receives. Sections: `solo-merge`.
+- **Solo mode** (`solo-mode.md`): Use when computing what Solo mode keeps out of git, its exclusion block and when Trama rewrites it. Sections: `solo-switch`.
 - **System certificates** (`system-certificates.md`): Use when implementing the System Certificates mode (export of the system's certificate authorities, the bundle, its refresh and the variables given to omp) or the message of a certificate error. Sections: `developer.REFRESH_SYSTEM_CERTIFICATES`.
 - **Task progress rules** (`task-progress.md`): Use when implementing the percentage the agent declares on a Task it has taken. Sections: `task/Taken by the agent`.
 - **Regole dei Task** (`tasks.md`): Usa quando implementi le regole dei Task. Sections: `task`.

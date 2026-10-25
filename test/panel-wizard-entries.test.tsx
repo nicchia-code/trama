@@ -15,7 +15,7 @@ import type { ViewContext } from "../extension/src/webview/types";
 
 const manifest: ManifestPackage = JSON.parse(readFileSync(join(import.meta.dir, "../extension/package.json"), "utf8"));
 const schema = settingsSchema(manifest);
-const FOLDER = { name: "app", root: "/work/app", hasFiles: true };
+const FOLDER = { name: "app", root: "/work/app", hasFiles: true, inGit: false };
 
 // Radix and cmdk use browser APIs that happy-dom does not have.
 beforeAll(() => {

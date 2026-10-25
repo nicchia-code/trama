@@ -62,6 +62,12 @@ class FakeSession implements OmpSessionPort {
     this.cancelledListeners.push(listener);
     return { dispose: () => void (this.cancelledListeners = this.cancelledListeners.filter((each) => each !== listener)) };
   }
+  onSend(): Disposable {
+    return { dispose: () => undefined };
+  }
+  onPermissionAnswered(): Disposable {
+    return { dispose: () => undefined };
+  }
   answerPermission(requestId: string, optionId: string): void {
     this.permissionAnswers.push({ requestId, optionId });
   }

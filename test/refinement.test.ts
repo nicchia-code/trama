@@ -27,6 +27,7 @@ import {
   refinementView,
   switchedOff,
   withdraw,
+  writtenNow,
 } from "../extension/src/host/refinement";
 import { shareSeats } from "../extension/src/host/run-groups";
 
@@ -391,6 +392,19 @@ describe("refinable and view", () => {
     expect(refinable(draft)).toBe(true);
     expect(refinable({ ...draft, writing: true })).toBe(false);
     expect(refinable({ ...draft, draftRefining: false })).toBe(false);
+  });
+
+  test("a Draft is written when a refinement of this window runs it or any live announcement is bound to it", () => {
+    const running = new Map([["a", { seats: 1 }]]);
+    expect(writtenNow("a", running, [])).toBe(true);
+    // Another window, an agent started before the editor was reopened, a refinement launched by hand: only the bound announcement is seen.
+    expect(writtenNow("b", running, [{ proposal: "b" }])).toBe(true);
+    expect(writtenNow("b", running, [{ proposal: null }, { proposal: "c" }])).toBe(false);
+    expect(writtenNow("b", new Map(), [])).toBe(false);
+    // A Draft being written is never refinable, whoever writes it.
+    const draft = { kind: "change", attached: false, open: false, stale: false, draftRefining: true };
+    expect(refinable({ ...draft, writing: writtenNow("b", running, [{ proposal: "b" }]) })).toBe(false);
+    expect(refinable({ ...draft, writing: writtenNow("b", running, []) })).toBe(true);
   });
 
   test("the view lists the refinements at work in the order they started, the queue with its reasons and the Refine All entry", () => {

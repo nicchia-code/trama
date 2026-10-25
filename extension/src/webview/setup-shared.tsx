@@ -47,14 +47,18 @@ export const GROUP_SENTENCES: Readonly<Record<string, string>> = {
   Advanced: ADVANCED_GROUP_SENTENCE,
 };
 
-/** The subgroups of Advanced, in order: each with its subtitle (a heading a level below the group's) and its settings one under the other. */
-export function Subgroups<T>({ groups, render }: { groups: readonly { title: string; items: readonly T[] }[]; render: (item: T) => ReactNode }) {
+/**
+ * The subgroups of Advanced, in order: each with its subtitle (a heading a level below the group's) and its settings one under the other. `after` gives what a subgroup shows
+ * under its settings, when it has more than settings (the Notifications subgroup of the Settings tab).
+ */
+export function Subgroups<T>({ groups, render, after }: { groups: readonly { title: string; items: readonly T[] }[]; render: (item: T) => ReactNode; after?: (title: string) => ReactNode }) {
   return (
     <div className="grid gap-8">
       {groups.map((group) => (
         <section key={group.title} aria-label={group.title} className="grid gap-5">
           <h3 className="m-0 border-b pb-1 text-base font-semibold">{group.title}</h3>
           {group.items.map(render)}
+          {after?.(group.title)}
         </section>
       ))}
     </div>
@@ -276,12 +280,24 @@ function ProviderRow({ provider, descriptionId, connected, busy, onLogin, onLogo
   );
 }
 
+/** The words of a pair of secret buttons: the labels, the accessible names and the tooltips of Set (Change with a secret saved) and Remove. */
+export interface SecretButtonWords {
+  set: string;
+  change: string;
+  remove: string;
+  setName: string;
+  changeName: string;
+  removeName: string;
+  setTip: string;
+  removeTip: string;
+}
+
 /**
- * The key buttons of a provider that takes an API key: Set API key (Change API key with a key saved) and, only with one saved, Remove API key; both are unavailable (`unavailable`)
- * while the row's logout runs. After a save or a removal the host answers with `cursorApiKey`, and the focus goes back to the first button, which stays when Remove goes away; the
+ * The buttons of a secret that the editor's keychain keeps (an API key, an access token): Set (Change with one saved) and, only with one saved, Remove; both are unavailable (`unavailable`)
+ * while something of the row is busy. After a save or a removal the host answers with the saved state, and the focus goes back to the first button, which stays when Remove goes away; the
  * tooltip does not open by that focus, only by the pointer or the keyboard.
  */
-function ApiKeyButtons({ name, controls, unavailable }: { name: string; controls: ApiKeyControls; unavailable: boolean }) {
+export function SecretButtons({ controls, unavailable, words }: { controls: ApiKeyControls; unavailable: boolean; words: SecretButtonWords }) {
   const button = useRef<HTMLButtonElement>(null);
   const returning = useRef(false);
   const quiet = useRef(false);
@@ -313,7 +329,7 @@ function ApiKeyButtons({ name, controls, unavailable }: { name: string; controls
             type="button"
             variant="outline"
             size="sm"
-            aria-label={`${saved ? "Change" : "Set"} ${name} API key`}
+            aria-label={saved ? words.changeName : words.setName}
             {...(unavailable ? { disabled: true, "aria-disabled": true } : {})}
             onClick={press(onSet)}
             onPointerMove={() => void (quiet.current = false)}
@@ -321,24 +337,42 @@ function ApiKeyButtons({ name, controls, unavailable }: { name: string; controls
             onBlur={() => void (quiet.current = false)}
           >
             <KeyRound aria-hidden="true" />
-            {saved ? "Change API key" : "Set API key"}
+            {saved ? words.change : words.set}
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Save a {name} API key that Trama passes to omp</TooltipContent>
+        <TooltipContent>{words.setTip}</TooltipContent>
       </Tooltip>
       {saved ? (
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button type="button" variant="ghost" size="sm" aria-label={`Remove ${name} API key`} {...(unavailable ? { disabled: true, "aria-disabled": true } : {})} onClick={press(onRemove)}>
+            <Button type="button" variant="ghost" size="sm" aria-label={words.removeName} {...(unavailable ? { disabled: true, "aria-disabled": true } : {})} onClick={press(onRemove)}>
               <Trash2 aria-hidden="true" />
-              Remove API key
+              {words.remove}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Remove the {name} API key saved in Trama</TooltipContent>
+          <TooltipContent>{words.removeTip}</TooltipContent>
         </Tooltip>
       ) : null}
     </>
   );
+}
+
+/**
+ * The key buttons of a provider that takes an API key: Set API key (Change API key with a key saved) and, only with one saved, Remove API key; both are unavailable (`unavailable`)
+ * while the row's logout runs. After a save or a removal the host answers with `cursorApiKey`.
+ */
+function ApiKeyButtons({ name, controls, unavailable }: { name: string; controls: ApiKeyControls; unavailable: boolean }) {
+  const words: SecretButtonWords = {
+    set: "Set API key",
+    change: "Change API key",
+    remove: "Remove API key",
+    setName: `Set ${name} API key`,
+    changeName: `Change ${name} API key`,
+    removeName: `Remove ${name} API key`,
+    setTip: `Save a ${name} API key that Trama passes to omp`,
+    removeTip: `Remove the ${name} API key saved in Trama`,
+  };
+  return <SecretButtons controls={controls} unavailable={unavailable} words={words} />;
 }
 
 /**

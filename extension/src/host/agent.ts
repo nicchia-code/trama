@@ -11,6 +11,7 @@ import { releaseTerminalClaims } from "../../../src/core/claims";
 import { developerExclusions, findInstructionFiles, instructionExclusions, mergeExclusions } from "../../../src/core/instruction-files";
 import { TramaError } from "../../../src/core/errors";
 import { projectAt } from "../../../src/core/store";
+import { type NtfyTarget, ntfyTarget } from "../../../src/core/ntfy";
 import { releaseTasks } from "../../../src/core/work";
 import { QUESTION_ENDPOINT_ENV, questionProjectId, sendCoordinatorMessage } from "../../../src/core/question-channel";
 import { processAlive, readAgentProcess, removeAgentProcess, writeAgentProcess } from "../../../src/core/agent-processes";
@@ -18,7 +19,7 @@ import { terminalVerdict } from "../../../src/core/terminal-check";
 import { startFailureNotice, type SavedJob, useOmpChat } from "../../../src/core/omp-chat-conversation";
 import { bundledAskMoreInstructions, bundledGeneralInstructions, bundledOmpHook } from "./bundled";
 import { withdrawWaiting } from "./announcements";
-import { addJobFollower, endHeldJob as endHeldJobs, endTerminalJobs, hasJobs, jobAbnormalEnd, type Job, type JobKind, onAgentIdle, onAgentStarted, releaseFiledWork, reportAgentStopped, reportStoppedFollowing, type RunAll, setHooked, startJob } from "./drift-resolution";
+import { addJobFollower, endHeldJob as endHeldJobs, endTerminalJobs, hasJobs, jobAbnormalEnd, type Job, type JobKind, onAgentIdle, onAgentStarted, onDriftResolutionChange, releaseFiledWork, reportAgentStopped, reportStoppedFollowing, type RunAll, setHooked, startJob } from "./drift-resolution";
 import { addHolderFollower } from "./followed-holders";
 import { agentCommandLine, isSupportedShell, programName, quote, quoteProgram, type ShellFamily, shellFamily } from "./quote";
 import type { OmpLoginProvider } from "../omp-login";
@@ -33,6 +34,8 @@ import { showYoloNoticeOnce } from "./yolo-notice";
 import { ompPathVariable } from "./model-lists";
 import { ompBeforeLaunch } from "./omp-launch";
 import { type ConversationInfo, type ConversationStore, type OpenConversation, OmpConversations } from "./omp-chat/conversations";
+import { AwayNotifier } from "./away-notices";
+import { ntfyToken } from "./ntfy-token";
 import type { ChatViewPort, OmpClientPort, OmpLaunch } from "./omp-chat/ports";
 import { GeneralConversation, type GeneralDeps } from "./omp-chat/general";
 import { findConfiguredOmp, ompVersionOnly } from "./omp-update";
@@ -95,14 +98,38 @@ function warnShellReplaced(shell: string): void {
   void vscode.window.showInformationMessage(`Trama: the default terminal shell (${programName(shell)}) is not supported for agents on Windows; the agent runs in Windows PowerShell.`);
 }
 
+/** An agent terminal Trama opened: its identity, its job and its command. `askMore` marks an Ask more, which never counts as the window's work (`notice` Machine). */
+interface AgentTerminal {
+  id: string;
+  jobId?: string;
+  root: string;
+  line: string;
+  since: number;
+  askMore?: true;
+}
+
 /** Every active agent terminal and the command Trama typed into it. */
-const agentTerminals = new Map<vscode.Terminal, { id: string; jobId?: string; root: string; line: string; since: number }>();
+const agentTerminals = new Map<vscode.Terminal, AgentTerminal>();
 
 /** Agent terminals left open at rest with `trama.autoExit` off: no longer followed, remembered until they close. */
-const idleTerminals = new Map<vscode.Terminal, { id: string; jobId?: string; root: string; line: string; since: number }>();
+const idleTerminals = new Map<vscode.Terminal, AgentTerminal>();
 
 /** The conversations of omp Chat of this window; absent until the ACP client and the view are registered (`setOmpChat`), so nothing opens before they can. */
 let chatConversations: OmpConversations | undefined;
+
+/** The away notices of this window (`notice` Machine); absent until omp Chat is registered, and after the window closes. */
+let awayNotices: AwayNotifier | undefined;
+let awayJobs: { dispose(): void } | undefined;
+
+/** Where notifications go now, from the user settings only: a workspace value never counts, so a cloned repository can neither turn them on nor send them to its own server. */
+export const configuredNtfyTarget = (): NtfyTarget => ntfyTarget(settings().inspect<unknown>("ntfyServer")?.globalValue, settings().inspect<unknown>("ntfyTopic")?.globalValue);
+
+/**
+ * Whether the window works, for its away notices: a job in progress in a conversation of omp Chat (Agent running, with Trama's hook), in a terminal in Agent running, or the held
+ * job of a Run of a sequence still to start. Ask more, General and the prepared question of the Async Drift Resolver never count.
+ */
+const windowWorking = (): boolean =>
+  chatConversations?.workingJobs() === true || [...agentTerminals.values()].some((info) => info.askMore !== true) || hasJobs((job) => job.kind !== "prepared");
 
 /** The conversation General of omp Chat of this window, set with `chatConversations`. */
 let general: GeneralConversation | undefined;
@@ -155,6 +182,12 @@ const endInfo = (conversation: ConversationInfo) => ({ id: conversation.id, ...(
  * the project the window has open). Called once when the extension activates, by the code that creates the two.
  */
 export function setOmpChat(ports: { client: OmpClientPort; view: ChatViewPort }, store: ConversationStore, projectRoot: () => string | undefined): Promise<void> {
+  awayNotices?.dispose();
+  awayJobs?.dispose();
+  const notices = new AwayNotifier({ topicSet: () => configuredNtfyTarget().state !== "off", working: windowWorking, target: configuredNtfyTarget, token: ntfyToken });
+  awayNotices = notices;
+  // A job that starts or ends in the registry may change whether the window works.
+  awayJobs = onDriftResolutionChange(() => notices.refresh());
   chatConversations = new OmpConversations(ports.client, ports.view, store, {
     autoExit: configuredAutoExit,
     endWork: (conversation, abnormal) => endAgentWork(endInfo(conversation), abnormal),
@@ -175,6 +208,7 @@ export function setOmpChat(ports: { client: OmpClientPort; view: ChatViewPort },
       return { args, env: { ...env, [QUESTION_ENDPOINT_ENV]: endpoint, ...conversationPath() }, cwd: root };
     },
     confirm: async (message, detail, button) => (await vscode.window.showWarningMessage(message, { modal: true, detail }, button)) === button,
+    notices,
   });
   general = new GeneralConversation(generalDeps(ports, store));
   general.start();
@@ -183,7 +217,22 @@ export function setOmpChat(ports: { client: OmpClientPort; view: ChatViewPort },
 
 /** `editor.WINDOW_CLOSED`: the extension stops, and every conversation's process with it; their jobs and saved entries wait for the resume. Resolves when the processes are gone. */
 export async function windowClosed(): Promise<void> {
+  // Nothing is sent when the window closes or reloads: every notice that waits is cancelled before the processes stop.
+  awayNotices?.dispose();
+  awayNotices = undefined;
+  awayJobs?.dispose();
+  awayJobs = undefined;
   await Promise.all([chatConversations?.windowClosed(), general?.windowClosed()]);
+}
+
+/** `question-round.ROUND_OPENED`: the window presents the round `round`, asked by the terminal or conversation `terminal`. */
+export function roundOpened(round: number, terminal: string | undefined): void {
+  awayNotices?.roundOpened(round, terminal);
+}
+
+/** `question-round.ROUND_CLOSED`: the round `round` ended, answered or not. */
+export function roundClosed(round: number): void {
+  awayNotices?.roundClosed(round);
 }
 
 /** `trama.ompChat` changed in this window: General starts, or leaves as it is switched off. */
@@ -322,6 +371,7 @@ function endAgentWork(info: { id: string; jobId?: string; root: string; line: st
   endFiledWork(info.root, info.id);
   for (const job of endTerminalJobs(info.id, abnormal)) finishJob(info.root, job);
   withdrawWaiting(info.root, (announcement) => announcement.terminal === info.id);
+  awayNotices?.refresh();
 }
 
 /** Why a command's end is not a normal end: undefined for exit code 0; an unreported status counts as abnormal. */
@@ -421,6 +471,7 @@ export function agentTabName(terminal: string): string | undefined {
 /** This window stops following `terminal`. */
 function unfollowTerminal(terminal: vscode.Terminal): void {
   agentTerminals.delete(terminal);
+  awayNotices?.refresh();
 }
 
 /**
@@ -550,13 +601,14 @@ function inSendTurn<T>(step: () => Promise<T>): Promise<T> {
 
 /**
  * The instruction with its limit, sub-agent, parallel execution, advisor, Async Drift Resolver, context sharing, ask, auto-exit and language sentences.
+ * With `subAgents` false (the reconciliation of a merge) neither the limit sentence nor the sub-agent one goes to it.
  * The parallel execution sentence goes right after the sub-agent sentence (or the limit one, when there is none), only to a run over several Tasks and only when
  * `trama.parallelExecution` is on, read now. The ask sentence always stays on the instruction's line, after the limit, sub-agent and optional-feature sentences and before the language one;
  * the auto-exit sentence, when `trama.autoExit` is on, sits between the ask sentence and the language one.
  */
-function agentPrompt(instruction: string, role: Role, filesDrifts: boolean, severalTasks: boolean, advisor?: string, limit?: number): string {
-  const withLimit = withAgentLimit(instruction, limit);
-  const withSubAgent = canScan(role) && advisor === undefined ? `${withLimit} Compare each Machine with the trama-analysis sub-agent.` : withLimit;
+function agentPrompt(instruction: string, role: Role, filesDrifts: boolean, severalTasks: boolean, advisor?: string, limit?: number, subAgents = true): string {
+  const withLimit = subAgents ? withAgentLimit(instruction, limit) : instruction;
+  const withSubAgent = subAgents && canScan(role) && advisor === undefined ? `${withLimit} Compare each Machine with the trama-analysis sub-agent.` : withLimit;
   const withParallel = severalTasks && configuredParallelExecution() ? `${withSubAgent} ${PARALLEL_EXECUTION_SENTENCE}` : withSubAgent;
   const withAdvisor = advisor !== undefined ? `${withParallel} ${advisor}` : withParallel;
   const withResolver = withAsyncDriftResolver(withAdvisor, filesDrifts && configuredAsyncDriftResolver());
@@ -573,13 +625,14 @@ export const configuredModels = (): Models => ({
   execution: settings().get<string>("execution", "").trim(),
 });
 
-function terminalRun(omp: string, instruction: Instruction, role: Role, filesDrifts: boolean, severalTasks: boolean, model: string, overlay: string | undefined, advisor: boolean, attachment: string | undefined, limit: number | undefined): TerminalRun {
+function terminalRun(omp: string, instruction: Instruction, role: Role, filesDrifts: boolean, severalTasks: boolean, model: string, overlay: string | undefined, advisor: boolean, attachment: string | undefined, limit: number | undefined, subAgents: boolean): TerminalRun {
   const hook = bundledOmpHook();
   const models = { model, scan: configuredModels().scan };
+  const scanning = subAgents && canScan(role) && !advisor;
   return {
-    options: ompOptions(canScan(role) && !advisor, models, hook, overlay, advisor),
-    template: (family) => agentTemplate(omp, canScan(role) && !advisor, models, family, hook, overlay, advisor, attachment),
-    prompt: () => agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, advisor ? ADVISOR_SENTENCE : undefined, limit),
+    options: ompOptions(scanning, models, hook, overlay, advisor),
+    template: (family) => agentTemplate(omp, scanning, models, family, hook, overlay, advisor, attachment),
+    prompt: () => agentPrompt(textOf(instruction), role, filesDrifts, severalTasks, advisor ? ADVISOR_SENTENCE : undefined, limit, subAgents),
     hooked: hook !== undefined,
   };
 }
@@ -667,6 +720,8 @@ export interface LaunchJobOptions {
   drifts?: () => readonly string[];
   /** Set on the Run of a `Run all` that stands alone (not cut by model): its job keeps what the time-left estimate needs. */
   runAll?: RunAll;
+  /** False for the reconciliation of a merge: the instruction has no sub-agent limit and no sub-agent sentence, and the command has no `--slow`. Absent, true. */
+  subAgents?: boolean;
 }
 
 export async function launchAgent(
@@ -696,7 +751,7 @@ export async function launchAgent(
     const runTask = isRun ? jobOptions.task : undefined;
     const parallel = isRun && configuredParallelExecution();
     const overlay = await writeLaunchOverlay(root, advisor);
-    const run = terminalRun(omp, instruction, role, filesDrifts, severalTasks, runModel, overlay, advisor, jobOptions.attachment?.file, jobOptions.limit);
+    const run = terminalRun(omp, instruction, role, filesDrifts, severalTasks, runModel, overlay, advisor, jobOptions.attachment?.file, jobOptions.limit, jobOptions.subAgents !== false);
     const endpoint = await questionEndpoint(root);
     if (!canSend()) return undefined;
     if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
@@ -736,6 +791,7 @@ export async function launchAgent(
     const family = shellFamily(shellPath ?? defaultShell);
     const line = agentCommandLine(run.template(family), run.prompt(), family);
     agentTerminals.set(terminal, { id: terminalId, ...(jobId === undefined ? {} : { jobId }), root, line, since: Date.now() });
+    awayNotices?.refresh();
     launchedRoots.add(root);
     setHooked(terminalId, run.hooked);
     if (asTab) terminal.show(true);
@@ -801,7 +857,7 @@ async function openFocusedTerminal(root: string, name: string, omp: string, line
   announceLaunch(root, { kind: "work", title: name }, { terminal: terminalId });
   if (replaced) warnShellReplaced(defaultShell);
   const line = lineOf(shellFamily(shellPath ?? defaultShell));
-  agentTerminals.set(terminal, { id: terminalId, root, line, since: Date.now() });
+  agentTerminals.set(terminal, { id: terminalId, root, line, since: Date.now(), askMore: true });
   launchedRoots.add(root);
   setHooked(terminalId, false);
   terminal.show(false);

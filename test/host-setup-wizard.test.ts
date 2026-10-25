@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, mock, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -524,17 +525,17 @@ test("a folder outside the workspace is refused, and the workspace folders are s
   expect(messages.some((m) => m["type"] === "error")).toBe(true);
   messages.length = 0;
   await send({ type: "ready" });
-  expect(messages).toContainEqual({ type: "workspaceFolders", folders: [{ name: "app", root, hasFiles: false }] });
+  expect(messages).toContainEqual({ type: "workspaceFolders", folders: [{ name: "app", root, hasFiles: false, inGit: false }] });
 });
 
 test("the folders of the first setup say whether a folder has files: a name without a dot counts, a dot name does not", async () => {
   mkdirSync(join(root, ".git"));
   await send({ type: "ready" });
-  expect(messages).toContainEqual({ type: "workspaceFolders", folders: [{ name: "app", root, hasFiles: false }] });
+  expect(messages).toContainEqual({ type: "workspaceFolders", folders: [{ name: "app", root, hasFiles: false, inGit: false }] });
   writeFileSync(join(root, "main.ts"), "");
   messages.length = 0;
   await send({ type: "ready" });
-  expect(messages).toContainEqual({ type: "workspaceFolders", folders: [{ name: "app", root, hasFiles: true }] });
+  expect(messages).toContainEqual({ type: "workspaceFolders", folders: [{ name: "app", root, hasFiles: true, inGit: false }] });
 });
 
 test("Import from Code or Start from Scratch on the Diagram with the empty Model opens the wizard in the Settings tab with that path", async () => {
@@ -635,4 +636,128 @@ test("a search for a folder outside the workspace is refused, and without a fold
   const answer = messages.find((m) => m["type"] === "instructionFiles") as { root: string; files: { label: string }[] };
   expect(answer.root).toBe(root);
   expect(answer.files.map((f) => f.label)).toContain("CLAUDE.md");
+});
+
+// ---- Solo mode ----
+
+/** Makes the workspace folder a git repository and, when asked, a Trama project with an empty Model. */
+function gitRepo(project = false): void {
+  spawnSync("git", ["init", "-q"], { cwd: root });
+  if (!project) return;
+  mkdirSync(join(root, ".trama", "model"), { recursive: true });
+  writeFileSync(join(root, ".trama", "model", "system.md"), "# App\n\nx\n");
+}
+
+const excludeFile = () => join(root, ".git", "info", "exclude");
+const soloMessages = () => messages.filter((m) => m["type"] === "soloMode");
+
+test("the folders of the first setup say whether a folder is in a git repository", async () => {
+  gitRepo();
+  await send({ type: "ready" });
+  expect(messages).toContainEqual({ type: "workspaceFolders", folders: [{ name: "app", root, hasFiles: false, inGit: true }] });
+});
+
+test("without a project no soloMode is sent; in a project it is sent at ready and each time the Settings view asks for the omp status", async () => {
+  gitRepo();
+  await send({ type: "ready" });
+  expect(soloMessages()).toEqual([]);
+  mkdirSync(join(root, ".trama", "model"), { recursive: true });
+  writeFileSync(join(root, ".trama", "model", "system.md"), "# App\n\nx\n");
+  messages.length = 0;
+  await send({ type: "ready" });
+  expect(soloMessages()).toEqual([{ type: "soloMode", available: true, solo: "off", tracked: [] }]);
+  messages.length = 0;
+  await send({ type: "ompStatusWanted" });
+  expect(soloMessages()).toEqual([{ type: "soloMode", available: true, solo: "off", tracked: [] }]);
+});
+
+test("setSoloMode writes the project's Solo mode and answers with it, with the tracked files of Trama; off removes it again", async () => {
+  gitRepo(true);
+  spawnSync("git", ["add", "-f", ".trama/model/system.md"], { cwd: root });
+  await send({ type: "setSoloMode", solo: "folders" });
+  expect(soloMessages()).toEqual([{ type: "soloMode", available: true, solo: "folders", tracked: [".trama/model/system.md"] }]);
+  expect(readFileSync(excludeFile(), "utf8")).toContain("# trama solo mode");
+  expect(JSON.parse(readFileSync(join(root, ".trama", "solo", "mode.json"), "utf8"))).toEqual({ exclusions: "folders" });
+  messages.length = 0;
+  await send({ type: "setSoloMode", solo: "files" });
+  expect(soloMessages()).toEqual([{ type: "soloMode", available: true, solo: "files", tracked: [".trama/model/system.md"] }]);
+  messages.length = 0;
+  await send({ type: "setSoloMode", solo: "off" });
+  expect(soloMessages()).toEqual([{ type: "soloMode", available: true, solo: "off", tracked: [] }]);
+  expect(readFileSync(excludeFile(), "utf8")).not.toContain("trama solo mode");
+  expect(errors).toEqual([]);
+});
+
+test("a failed write of Solo mode is an editor error with the reason, and the row is told the project's real value", async () => {
+  // Outside a git repository Solo mode cannot be turned on.
+  mkdirSync(join(root, ".trama", "model"), { recursive: true });
+  writeFileSync(join(root, ".trama", "model", "system.md"), "# App\n\nx\n");
+  await send({ type: "setSoloMode", solo: "folders" });
+  expect(errors).toEqual(["Trama: could not save Solo Mode: Solo mode needs a git repository."]);
+  expect(soloMessages()).toEqual([{ type: "soloMode", available: false, solo: "off", tracked: [] }]);
+  expect(existsSync(join(root, ".trama", "solo"))).toBe(false);
+});
+
+test("Solo mode is not a setting: setSetting refuses it, and a value that is not a kind is refused", async () => {
+  gitRepo(true);
+  await send({ type: "setSetting", key: "trama.soloMode", value: true });
+  await send({ type: "setSoloMode", solo: "everything" });
+  expect(messages.filter((m) => m["type"] === "error")).toHaveLength(2);
+  expect(existsSync(join(root, ".trama", "solo"))).toBe(false);
+});
+
+test("the first setup with Solo mode initializes through project new with it: the block and the file are written, and the project is told", async () => {
+  gitRepo();
+  await send(confirm({ choice: "scratch", solo: "folders" }));
+  expect(readFileSync(excludeFile(), "utf8")).toContain("/.trama/");
+  expect(JSON.parse(readFileSync(join(root, ".trama", "solo", "mode.json"), "utf8"))).toEqual({ exclusions: "folders" });
+  expect(results().at(-1)).toEqual({ type: "setup", busy: false, error: null });
+  expect(soloMessages().at(-1)).toEqual({ type: "soloMode", available: true, solo: "folders", tracked: [] });
+});
+
+test("the first setup with Solo mode outside a git repository fails and creates nothing, with the reason in the summary", async () => {
+  await send(confirm({ choice: "scratch", solo: "files" }));
+  expect(existsSync(join(root, ".trama"))).toBe(false);
+  expect(launched).toEqual([]);
+  expect(setups).toBe(0);
+  // The reason shows as the failures of the initialization show today.
+  expect(results().at(-1)).toEqual({ type: "setup", busy: false, error: "Unexpected error: Solo mode needs a git repository." });
+});
+
+test("the first setup with Solo mode off writes nothing of Solo mode", async () => {
+  gitRepo();
+  await send(confirm({ choice: "scratch", solo: "off" }));
+  expect(existsSync(join(root, ".trama", "model", "system.md"))).toBe(true);
+  expect(existsSync(join(root, ".trama", "solo"))).toBe(false);
+});
+
+test("the Empty Model mode writes Solo mode after the settings and before the path, only when it differs from the project's value", async () => {
+  gitRepo(true);
+  await send(confirm({ mode: "empty-model", root: undefined, solo: "files", values: [{ key: "trama.scan", value: "m" }] }));
+  expect(JSON.parse(readFileSync(join(root, ".trama", "solo", "mode.json"), "utf8"))).toEqual({ exclusions: "files" });
+  expect(results()).toEqual([{ type: "guidedSetupResult", ok: true, error: null }]);
+  expect(launched).toHaveLength(1);
+  // The same value again writes nothing: the exclusion file is left as the developer made it.
+  writeFileSync(excludeFile(), `${readFileSync(excludeFile(), "utf8")}# mine\n`);
+  const before = readFileSync(excludeFile(), "utf8");
+  const mode = readFileSync(join(root, ".trama", "solo", "mode.json"), "utf8");
+  messages.length = 0;
+  await send(confirm({ mode: "empty-model", root: undefined, solo: "files" }));
+  expect(readFileSync(excludeFile(), "utf8")).toBe(before);
+  expect(readFileSync(join(root, ".trama", "solo", "mode.json"), "utf8")).toBe(mode);
+  // Off writes again.
+  await send(confirm({ mode: "empty-model", root: undefined, solo: "off" }));
+  expect(existsSync(join(root, ".trama", "solo", "mode.json"))).toBe(false);
+  expect(readFileSync(excludeFile(), "utf8")).toContain("# mine");
+  expect(readFileSync(excludeFile(), "utf8")).not.toContain("trama solo mode");
+});
+
+test("a failed write of Solo mode in the Empty Model mode counts as a failed save: the wizard stays on the summary and nothing starts", async () => {
+  mkdirSync(join(root, ".trama", "model"), { recursive: true });
+  writeFileSync(join(root, ".trama", "model", "system.md"), "# App\n\nx\n");
+  await send(confirm({ mode: "empty-model", root: undefined, solo: "folders", values: [{ key: "trama.scan", value: "m" }] }));
+  expect(results()).toEqual([{ type: "guidedSetupResult", ok: false, error: "Could not save Solo Mode: Solo mode needs a git repository." }]);
+  expect(userSettings.get("scan")).toBe("m");
+  expect(launched).toEqual([]);
+  expect(setups).toBe(0);
 });

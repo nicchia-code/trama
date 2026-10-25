@@ -6,6 +6,7 @@ import { safeLink } from "../../../src/core/links";
 import { isSafeRelativePath } from "./folder-tree";
 import { STEP_KEYS } from "../webview/wizard/logic";
 import { ompLoginProvider } from "../omp-login";
+import { SOLO_KINDS, type SoloKind } from "../../../src/core/solo-mode";
 import { PANEL_VIEWS } from "../menu-protocol";
 
 /** The settings the wizard may write: the keys of its steps. */
@@ -20,7 +21,7 @@ const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
 
 const bad = (reason: string): Parsed => ({ ok: false, reason });
 
-function parseAction(value: unknown): Exclude<AgentAction, { kind: "scan" }> | string {
+function parseAction(value: unknown): Exclude<AgentAction, { kind: "scan" | "mergeScan" | "reconcileMerge" }> | string {
   if (typeof value !== "object" || value === null) return "launch needs an action";
   const raw = value as Raw;
   switch (raw["kind"]) {
@@ -82,6 +83,11 @@ function parseConfirmSetup(raw: Raw, settings: readonly SettingSchema[]): Parsed
     if (reason !== null) return bad(`${setting.key}: ${reason}`);
     values.push({ key: setting.key, value: item["value"] as SettingValue });
   }
+  let solo: SoloKind | undefined;
+  if (raw["solo"] !== undefined) {
+    solo = SOLO_KINDS.find((kind) => kind === raw["solo"]);
+    if (solo === undefined || mode === "settings") return bad("confirmSetup has a Solo mode that is not off, folders or files, or the mode has none");
+  }
   const excluded = raw["excluded"];
   if (!Array.isArray(excluded) || excluded.length > MAX_EXCLUDED || !excluded.every((path) => typeof path === "string" && isSafeRelativePath(path))) return bad("confirmSetup needs the excluded paths, each inside the folder");
   return {
@@ -92,6 +98,7 @@ function parseConfirmSetup(raw: Raw, settings: readonly SettingSchema[]): Parsed
       ...(mode === "settings" ? {} : { choice: choice as "import" | "scratch" }),
       ...(mode === "first" ? { root: raw["root"] as string } : {}),
       values,
+      ...(solo === undefined ? {} : { solo }),
       excluded: excluded as string[],
     },
   };
@@ -158,6 +165,9 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
     case "ompStatusWanted":
     case "refreshSystemCertificates":
     case "systemCertificatesExport":
+    case "setNtfyToken":
+    case "removeNtfyToken":
+    case "sendTestNotification":
       return { ok: true, message: { type } };
     case "viewChanged": {
       const view = PANEL_VIEWS.find((name) => name === raw["view"]);
@@ -247,6 +257,10 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
       if (setting === undefined) return bad("setSetting needs a key of the Trama settings");
       const reason = settingValueError(setting, raw["value"]);
       return reason === null ? { ok: true, message: { type, key: setting.key, value: raw["value"] as SettingValue } } : bad(`${setting.key}: ${reason}`);
+    }
+    case "setSoloMode": {
+      const solo = SOLO_KINDS.find((kind) => kind === raw["solo"]);
+      return solo === undefined ? bad("setSoloMode needs a Solo mode: off, folders or files") : { ok: true, message: { type, solo } };
     }
     default:
       return bad(`unknown message type "${type}"`);

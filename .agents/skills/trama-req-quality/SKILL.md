@@ -13,6 +13,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 ## Fragments
 
 - **Quality of agent launching** (`agents.md`): Use for the security, privacy and reliability of launching omp, the agent terminal and the installation and update of omp. Sections: `agent-launching`, `agent-terminal`.
+- **Away notifications quality** (`away-notifications.md`): Use for the privacy, security, reliability and acceptance of Trama's ntfy notifications. Sections: `notice`.
 - **Quality of agent instruction files** (`instruction-files.md`): Use for the security, privacy and reliability of finding agent instruction files in the setup wizard and of leaving them out of omp launches. Sections: `setup-wizard/omp`, `agent-terminal/Agent running`.
 - **Quality** (`main.md`): Use for performance, security, privacy, accessibility, offline, localisation or reliability. Sections: `task`, `drift-resolution`, `panel/Settings`, `developer.CLEAR_DONE`.
 - **omp Chat** (`omp-chat.md`): Usa quando lavori alla sicurezza, all'affidabilità, alla compatibilità o all'accettazione di omp Chat. Sections: `omp-chat-conversation`, `omp-chat`.

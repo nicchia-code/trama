@@ -478,13 +478,15 @@ function normalizeModelPath(path: string, areaFolders = true): string {
   return clean;
 }
 
+/** The refusal for a Draft that `action` needs handed over: the developer meets it as «not ready yet». */
+export const stillBeingWritten = (p: Project, proposal: Proposal, action: string) =>
+  `Proposal ${cardName(p, "proposal", proposal.id)} is still being written: the agent has not handed it over, so it cannot be ${action} yet`;
+
 /** Refuses unless the Proposal is in `status`; a Draft gets its own message, because the developer meets it as "not ready yet". */
 function requireStatus(p: Project, proposal: Proposal, status: "draft" | "open", action: string) {
   if (proposal.data.status === status) return;
-  const name = cardName(p, "proposal", proposal.id);
-  if (proposal.data.status === "draft")
-    throw new TramaError(`Proposal ${name} is still being written: the agent has not handed it over, so it cannot be ${action} yet`);
-  throw new TramaError(`Proposal ${name} is ${proposal.data.status}; only ${status === "draft" ? "a Draft" : "open Proposals"} can be ${action}`);
+  if (proposal.data.status === "draft") throw new TramaError(stillBeingWritten(p, proposal, action));
+  throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} is ${proposal.data.status}; only ${status === "draft" ? "a Draft" : "open Proposals"} can be ${action}`);
 }
 
 export function requireEditable(p: Project, proposal: Proposal) {

@@ -344,20 +344,33 @@ test("the six skills that create cards give them a short title, and no command c
 test("the skills give the writing rules: no first person in Trama's texts, and self-contained Tasks", () => {
   const firstPerson = "- **No first person in Trama's texts.**";
   const selfContained = "The body of a Task is understood without the conversation that produced it";
-  for (const name of ["trama-design", "trama-setup", "trama-scan", "trama-compare", "trama-implement", "trama-import", "trama-resolve-drifts"]) {
+  for (const name of ["trama-design", "trama-setup", "trama-scan", "trama-compare", "trama-implement", "trama-import", "trama-resolve-drifts", "trama-merge"]) {
     const skill = SKILLS[`${name}/SKILL.md`] as string;
     expect(skill).toContain("## Language");
     expect(skill).toContain(firstPerson);
     expect(skill).toContain('Trama is always "Trama" and you are "the agent"');
     expect(skill).toContain("Your replies in the conversation are not Trama's texts and do not change");
-    if (name !== "trama-import" && name !== "trama-resolve-drifts") expect(skill).toContain(selfContained);
+    if (name !== "trama-import" && name !== "trama-resolve-drifts" && name !== "trama-merge") expect(skill).toContain(selfContained);
   }
+});
+
+test("trama-merge resolves the conflicts of the merge in progress and never commits, aborts, resets or touches .trama/", () => {
+  const skill = SKILLS["trama-merge/SKILL.md"] as string;
+  expect(skill).toContain("name: trama-merge");
+  expect(skill).toContain("keeping the intent of **both sides**");
+  expect(skill).toContain("ask the developer with `trama question new`");
+  expect(skill).toContain("**Never commit.**");
+  expect(skill).toContain("Never run `git merge --abort`, `git reset`");
+  expect(skill).toContain("**Never touch `.trama/`.**");
+  expect(skill).toContain("Run `git add <file>` for each file whose conflicts you resolved completely, and for no other file.");
+  expect(skill).toContain("end with **one line** that tells the developer to review the files in the index and commit the merge");
+  expect(skill).toContain("## Language");
 });
 
 test("every Language section carries the same list of what goes in the language and what stays English, with no transliteration of Model names", () => {
   const root = join(import.meta.dir, "..");
   const texts: Record<string, string> = {};
-  for (const name of ["trama-design", "trama-setup", "trama-scan", "trama-compare", "trama-implement", "trama-import", "trama-resolve-drifts"]) texts[name] = SKILLS[`${name}/SKILL.md`] as string;
+  for (const name of ["trama-design", "trama-setup", "trama-scan", "trama-compare", "trama-implement", "trama-import", "trama-resolve-drifts", "trama-merge"]) texts[name] = SKILLS[`${name}/SKILL.md`] as string;
   for (const name of ["ask-more", "general", "unify-drifts"]) texts[name] = readFileSync(join(root, "extension", "media", `${name}.md`), "utf8");
   const bullet = (text: string, start: string): string => {
     const line = text.split("\n").find((l) => l.startsWith(start));

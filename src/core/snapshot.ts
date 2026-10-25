@@ -87,6 +87,13 @@ export interface ProposalTaskView {
   images: TaskImageView[];
 }
 
+/** The agent writing a Draft: the phase and the latest note its live announcement would show as a ghost. */
+export interface ProposalWriter {
+  phase: AnnouncementView["phase"];
+  /** What the agent last declared it is doing; null when it declared nothing. */
+  note: string | null;
+}
+
 /** A Proposal with everything the Diagram needs to draw it as a ghost over the current Model: an open one, or a Draft being refined. */
 export interface ProposalView {
   id: string;
@@ -97,8 +104,10 @@ export interface ProposalView {
   kind: ProposalKind;
   /** A resolution born from the answer to a Drift's prepared question: it does not stop Resolve while it awaits a decision. */
   prepared: boolean;
-  /** Set while a Draft is being refined by a rebase: it is drawn as a ghost until handed over again. */
+  /** Set while a Draft is being refined by a rebase: its card stands in Backlog until it is handed over again. */
   refining: boolean;
+  /** The live announcement bound to this Draft (whatever terminal, window or launch made it), as phase and latest note: an agent is writing it. Null when none is bound, and always for an Open Proposal. */
+  writer: ProposalWriter | null;
   /** The Drifts a resolution resolves, in creation order, each with what approving does to it; empty for any other Proposal. */
   resolves: ResolvedDrift[];
   /** Required Proposals not approved yet; Approve stays disabled while any is listed. */
@@ -151,6 +160,8 @@ export interface DriftView {
   unifies: { id: string; title: string }[];
   /** The unified Drift this one was merged into, as identity and title; null unless its resolution is unified. */
   unifiedInto: { id: string; title: string } | null;
+  /** True for a Drift from a merge: the scan after a Merge in Solo mode found it in code the merge brought, so the code may be right. */
+  merge: boolean;
   /** The fix Task that dismissed this Drift by closing without changes, with its note while Done; null otherwise. */
   closedUnchanged: { task: string; note: string | null } | null;
   body: string;
@@ -351,7 +362,7 @@ const modelView = (project: ProjectModel): ModelView => ({
 });
 
 /** A Proposal as the Diagram and the Requirements tab draw it, read in `p` whose Model is `project`. */
-function proposalView(p: Project, project: ProjectModel, proposal: Proposal): ProposalView {
+function proposalView(p: Project, project: ProjectModel, proposal: Proposal, writer: ProposalWriter | null): ProposalView {
   const afterProject = buildProject(applied(p, proposal));
   const after = afterProject.model;
   const h = health(p, proposal);
@@ -383,6 +394,7 @@ function proposalView(p: Project, project: ProjectModel, proposal: Proposal): Pr
     kind: proposal.data.kind,
     prepared: proposal.data.prepared,
     refining: proposal.data.refining,
+    writer,
     tasks: coverage === null ? [] : proposal.tasks.map((t) => ({ id: t.id, title: t.title, body: stripTitle(t.body), technical: t.technical, refs: t.refs, images: readTaskImages(p, t.id) })),
     removals: coverage?.removals ?? [],
     creates: coverage === null ? 0 : proposal.tasks.length + coverage.removals.length,
@@ -428,12 +440,19 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
   const held = tasksHeldByDrifts(drifts);
 
   const allProposals = listProposals(p);
-  const shownProposals = allProposals.filter((x) => x.data.status === "open" || (x.data.status === "draft" && x.data.refining)).map((proposal) => proposalView(p, project, proposal));
+  const live = listAnnouncements(p);
+  // Any live announcement bound to a Draft means an agent is writing it, whoever launched that agent.
+  const writerOf = (proposal: Proposal): ProposalWriter | null => {
+    if (proposal.data.status !== "draft") return null;
+    const bound = live.find((a) => a.proposal === proposal.id);
+    return bound === undefined ? null : { phase: announcementView(p, bound, undefined).phase, note: bound.notes.at(-1)?.text ?? null };
+  };
+  const shownProposals = allProposals.filter((x) => x.data.status === "open" || (x.data.status === "draft" && x.data.refining)).map((proposal) => proposalView(p, project, proposal, writerOf(proposal)));
   const proposalById = new Map(allProposals.map((x) => [x.id, x]));
   // The developer does not see attached Proposals, so the ghost of a Proposal whose Draft is attached to an open Drift is drawn nowhere.
   // The announcement of a refinement is bound to a Proposal that already has its card (Open, or a Draft left refining): its phase and notes show on that card, never as a ghost of its own.
   const carded = new Set(shownProposals.map((x) => x.id));
-  const announcements = listAnnouncements(p).filter((a) => !(a.kind === "proposal" && a.proposal !== null && (attachedDrift(p, a.proposal) || carded.has(a.proposal))));
+  const announcements = live.filter((a) => !(a.kind === "proposal" && a.proposal !== null && (attachedDrift(p, a.proposal) || carded.has(a.proposal))));
   const driftView = (d: Drift): DriftView => ({
     id: d.id,
     created: d.data.created,
@@ -443,6 +462,7 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
     task: d.data.task,
     unifies: unifiedDrifts(p, d),
     unifiedInto: unifiedInto(p, d),
+    merge: d.data.merge,
     closedUnchanged: closedUnchanged(p, d),
     body: driftBody(d),
     job: d.data.job,

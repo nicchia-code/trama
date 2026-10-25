@@ -13,8 +13,10 @@ export function driftsWithCard(snapshot: Pick<Snapshot, "proposals" | "drifts">)
 
 /**
  * How many cards wait for a decision of the developer: the cards of the Board's Backlog, the open Proposals and the open Drifts with a card of their own.
- * Ghosts do not count. The panel's Board and the side menu (its Board entry and the badge of the icon) use this number.
+ * Ghosts do not count. With Auto-update Stale Proposals off (`refiningOn` false), a Draft left half-way that no agent writes does not count either: the
+ * developer cannot decide it. The panel's Board and the side menu (its Board entry and the badge of the icon) use this number.
  */
-export function boardDecisionCount(snapshot: Pick<Snapshot, "proposals" | "drifts">): number {
-  return snapshot.proposals.length + driftsWithCard(snapshot).length;
+export function boardDecisionCount(snapshot: Pick<Snapshot, "proposals" | "drifts">, refiningOn = true): number {
+  const decidable = snapshot.proposals.filter((p) => refiningOn || !p.refining || p.writer !== null);
+  return decidable.length + driftsWithCard(snapshot).length;
 }

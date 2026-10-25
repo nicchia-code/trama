@@ -281,7 +281,7 @@ test("the page is one centred column of at most 720 px, with no grid of columns 
   expect(screen.queryByRole("navigation")).toBeNull();
 });
 
-test("the groups are the wizard's, each with its title and its sentence under it, and Advanced has its four subgroups a level below", () => {
+test("the groups are the wizard's, each with its title and its sentence under it, and Advanced has its five subgroups a level below, Notifications last", () => {
   setup();
   const sections = Array.from(document.querySelectorAll("main section, section")).filter((s) => s.querySelector(":scope > h2")) as HTMLElement[];
   expect(sections.map((s) => [s.querySelector(":scope > h2")?.textContent, s.querySelector(":scope > p")?.textContent])).toEqual([
@@ -291,8 +291,8 @@ test("the groups are the wizard's, each with its title and its sentence under it
     ["Advanced", "Theme and optional features."],
   ]);
   const advanced = sections[3] as HTMLElement;
-  expect(Array.from(advanced.querySelectorAll("h3")).map((h) => h.textContent)).toEqual(["Appearance", "Drifts", "Agents", "omp Chat"]);
-  expect(Array.from(advanced.querySelectorAll("section")).map((s) => s.querySelectorAll("label").length)).toEqual([1, 2, 3, 3]);
+  expect(Array.from(advanced.querySelectorAll("h3")).map((h) => h.textContent)).toEqual(["Appearance", "Drifts", "Agents", "omp Chat", "Notifications"]);
+  expect(Array.from(advanced.querySelectorAll("section")).map((s) => s.querySelectorAll("label").length)).toEqual([1, 2, 3, 3, 2]);
   // Auto Exit and the language stay in omp, with the language enabled and no note; the group Features does not exist.
   const omp = sections[0] as HTMLElement;
   expect(within(omp).getByRole("checkbox", { name: "Auto Exit" })).not.toBeNull();

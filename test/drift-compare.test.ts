@@ -23,6 +23,7 @@ const drift = (over: Partial<DriftView> = {}): DriftView => ({
   proposalBlock: null,
   proposalTitle: null,
   proposalChanges: null,
+  merge: false,
   ...over,
 });
 

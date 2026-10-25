@@ -79,15 +79,15 @@ const holderOf = (record: TimingRecord): string => record.terminal ?? record.cha
 
 /**
  * The average minutes of the Tasks finished `done` in the records, pairing `task-start` and `task-end` of the same holder
- * and Task as `timingJobs` does; only durations above `HISTORY_MIN_SECONDS` and only the holders that are not in
- * `excluded` (the Run all in progress) count. `DEFAULT_TASK_MINUTES` with fewer than `HISTORY_MIN_DURATIONS` of them.
+ * and Task as `timingJobs` does; only durations above `HISTORY_MIN_SECONDS` and only the records that are not `excluded` (the
+ * ones of the Run all in progress) count. `DEFAULT_TASK_MINUTES` with fewer than `HISTORY_MIN_DURATIONS` of them.
  */
-function averageTaskMinutes(records: readonly TimingRecord[], excluded: ReadonlySet<string>): number {
+function averageTaskMinutes(records: readonly TimingRecord[], excluded: (record: TimingRecord) => boolean): number {
   const started = new Map<string, number>();
   const durations: number[] = [];
   for (const record of records) {
+    if (excluded(record)) continue;
     const holder = holderOf(record);
-    if (excluded.has(holder)) continue;
     if (record.event === "task-start") {
       started.set(`${holder}\n${record.task}`, Date.parse(record.at));
     } else if (record.event === "task-end") {
@@ -101,6 +101,64 @@ function averageTaskMinutes(records: readonly TimingRecord[], excluded: Readonly
   }
   if (durations.length < HISTORY_MIN_DURATIONS) return DEFAULT_TASK_MINUTES;
   return durations.reduce((sum, minutes) => sum + minutes, 0) / durations.length;
+}
+
+/** The records of a Run: those of its terminal or conversation made at or after the launch. Earlier ones of a reused terminal are another job's. */
+function runRecords(records: readonly TimingRecord[], terminal: string | null, launchedAt: number): TimingRecord[] {
+  if (terminal === null) return [];
+  return records.filter((record) => holderOf(record) === terminal && Date.parse(record.at) >= launchedAt);
+}
+
+/** The Tasks of a Run that still count: its executable To do Tasks and, once started, the In progress ones its terminal took; none that `finished` recorded. */
+function tasksOfRun(run: EstimateRun, tasks: readonly EstimateTask[], byId: ReadonlyMap<string, EstimateTask>, finished: ReadonlySet<string>): EstimateTask[] {
+  if (run.terminal === null) {
+    return run.tasks.flatMap((id) => {
+      const task = byId.get(id);
+      return task !== undefined && task.column === "todo" && !task.blocked ? [task] : [];
+    });
+  }
+  const ids = new Set([...run.tasks, ...tasks.filter((task) => task.holder === run.terminal).map((task) => task.id)]);
+  const found: EstimateTask[] = [];
+  for (const id of ids) {
+    const task = byId.get(id);
+    if (task === undefined || finished.has(id)) continue;
+    if ((task.column === "todo" && !task.blocked) || (task.column === "doing" && task.holder === run.terminal)) found.push(task);
+  }
+  return found;
+}
+
+/** The Tasks a Run's own records say it finished. */
+const finishedBy = (own: readonly TimingRecord[]): Set<string> => new Set(own.flatMap((record) => (record.event === "task-end" ? [record.task] : [])));
+
+/** What changes the plan of a Run all: a Run taking a Task, the `order` and `conflict` choices of its Runs, the Tasks that have been Tasks of its Runs. */
+export interface RunAllPlan {
+  /** Whether one of the Runs has taken a Task. */
+  taken: boolean;
+  /** The identity of each `order` or `conflict` choice a Run of the Run all recorded. */
+  choices: string[];
+  /** The Tasks that are Tasks of a Run that has not ended. */
+  tasks: string[];
+}
+
+/** The plan of a Run all now, from the same inputs as the estimate. Pure: the host keeps the union of the plans it has seen. */
+export function runAllPlan(input: RunEstimateInput): RunAllPlan {
+  const launch = input.launchedAt.getTime();
+  const byId = new Map(input.tasks.map((task) => [task.id, task]));
+  const plan: RunAllPlan = { taken: false, choices: [], tasks: [] };
+  const tasks = new Set<string>();
+  for (const run of input.runs) {
+    const own = runRecords(input.records, run.terminal, launch);
+    for (const record of own) {
+      if (record.event === "task-start") plan.taken = true;
+      else if (record.event === "choice" && record.kind !== "release") plan.choices.push(`${run.terminal}|${record.at}|${record.kind}|${record.tasks.map((t) => t.id).join(",")}`);
+    }
+    if (!run.ended) {
+      const finished = new Set(own.flatMap((record) => (record.event === "task-end" ? [record.task] : [])));
+      for (const task of tasksOfRun(run, input.tasks, byId, finished)) tasks.add(task.id);
+    }
+  }
+  plan.tasks = [...tasks];
+  return plan;
 }
 
 /** The longest sum of weights along the waits, ignoring a wait that would close a cycle (depth-first visit). */
@@ -140,27 +198,24 @@ function longestChain(weights: ReadonlyMap<string, number>, choices: readonly (r
 
 /**
  * The time left of a Run all, or null while it is being worked out: with Parallel Execution, until a Run of the sequence has
- * recorded the first piece of its plan (a choice, a Task taken or a `queue`); without it, from the launch.
+ * recorded the first piece of its plan (a choice, a Task taken or a `queue`) since the launch; without it, from the launch.
+ * Only the records of a Run's terminal or conversation made at or after the launch belong to the Run; for the weights, only those
+ * are left out as the Run all in progress, and older records of a reused terminal count as another job's.
  */
 export function estimateRunAll(input: RunEstimateInput): RunEstimate | null {
   const { records, runs, parallel, now } = input;
+  const launch = input.launchedAt.getTime();
   const runTerminals = new Set(runs.flatMap((run) => (run.terminal === null ? [] : [run.terminal])));
-  if (parallel && !records.some((record) => runTerminals.has(holderOf(record)) && (record.event === "choice" || record.event === "task-start" || record.event === "queue"))) return null;
+  const ofRunAll = (record: TimingRecord): boolean => runTerminals.has(holderOf(record)) && Date.parse(record.at) >= launch;
+  if (parallel && !records.some((record) => ofRunAll(record) && (record.event === "choice" || record.event === "task-start" || record.event === "queue"))) return null;
 
-  const average = averageTaskMinutes(records, runTerminals);
+  const average = averageTaskMinutes(records, ofRunAll);
   const byId = new Map(input.tasks.map((task) => [task.id, task]));
   const weightOf = (task: EstimateTask): number => (task.fix ? FIX_TASK_MINUTES : average);
 
   /** The estimate of a Run in minutes: its Tasks plus start and tail. */
   const ofRun = (run: EstimateRun): number => {
-    if (run.terminal === null) {
-      const todo = run.tasks.flatMap((id) => {
-        const task = byId.get(id);
-        return task !== undefined && task.column === "todo" && !task.blocked ? [task] : [];
-      });
-      return START_MINUTES + todo.reduce((sum, task) => sum + weightOf(task), 0) + TAIL_MINUTES;
-    }
-    const own = records.filter((record) => record.terminal === run.terminal);
+    const own = runRecords(records, run.terminal, launch);
     const finished = new Set<string>();
     const startedAt = new Map<string, number>();
     let lastEnd: number | null = null;
@@ -171,20 +226,19 @@ export function estimateRunAll(input: RunEstimateInput): RunEstimate | null {
         lastEnd = Math.max(lastEnd ?? 0, Date.parse(record.at));
       }
     }
+    const mine = tasksOfRun(run, input.tasks, byId, finished);
+    if (run.terminal === null) return START_MINUTES + mine.reduce((sum, task) => sum + weightOf(task), 0) + TAIL_MINUTES;
     const weights = new Map<string, number>();
-    const ids = new Set([...run.tasks, ...input.tasks.filter((task) => task.holder === run.terminal).map((task) => task.id)]);
-    for (const id of ids) {
-      const task = byId.get(id);
-      if (task === undefined || finished.has(id)) continue;
-      if (task.column === "todo" && !task.blocked) weights.set(id, weightOf(task));
-      else if (task.column === "doing" && task.holder === run.terminal) {
-        const since = startedAt.get(id);
+    for (const task of mine) {
+      if (task.column === "todo") weights.set(task.id, weightOf(task));
+      else {
+        const since = startedAt.get(task.id);
         const elapsed = since === undefined ? 0 : (now.getTime() - since) / MS_PER_MINUTE;
-        weights.set(id, Math.max(MIN_IN_PROGRESS_MINUTES, weightOf(task) - elapsed));
+        weights.set(task.id, Math.max(MIN_IN_PROGRESS_MINUTES, weightOf(task) - elapsed));
       }
     }
     if (weights.size === 0) {
-      const since = lastEnd ?? input.launchedAt.getTime();
+      const since = lastEnd ?? launch;
       return Math.max(MIN_TAIL_MINUTES, TAIL_MINUTES - (now.getTime() - since) / MS_PER_MINUTE);
     }
     const sum = [...weights.values()].reduce((total, weight) => total + weight, 0);
@@ -211,8 +265,9 @@ export function estimateRunAll(input: RunEstimateInput): RunEstimate | null {
 
 /**
  * The progress of a Run all, between 0 and `MAX_PROGRESS`: the time elapsed since the launch over the elapsed time plus the central
- * estimate, never below `reached` (the highest progress already shown: it does not go back when the estimate grows) and never above
- * `MAX_PROGRESS`; exactly `MAX_PROGRESS` when the Run all is `over` its first estimate. Pure: the host keeps `reached`, nothing is written.
+ * estimate, never below `reached` (the highest progress already reached outside the state longer than expected: it does not go back
+ * when the estimate grows) and never above `MAX_PROGRESS`; exactly `MAX_PROGRESS` when the Run all is `over` (longer than expected),
+ * a value that does not count as reached. Pure: the host keeps `reached`, nothing is written.
  */
 export function runAllProgress(input: { elapsedMinutes: number; estimate: number; reached: number; over: boolean }): number {
   if (input.over) return MAX_PROGRESS;

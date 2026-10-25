@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { announce, listAnnouncements } from "../src/core/announcements";
 import { archiveComparison } from "../src/core/compare";
-import { codeFingerprint, comparedRefs, git, recordComparison, splitCompared, textFingerprint } from "../src/core/compared";
+import { codeFingerprint, comparedRefs, recordComparison, splitCompared, textFingerprint } from "../src/core/compared";
+import { git } from "../src/core/git";
 import { loadProject } from "../src/core/requirements";
 import { type Project, projectAt } from "../src/core/store";
 import { newTask } from "../src/core/work";
@@ -86,6 +87,29 @@ describe("code fingerprint", () => {
       mkdirSync(join(dir, old), { recursive: true });
       writeFileSync(join(dir, old, "note.md"), old);
       expect(codeFingerprint(dir)).not.toBe(base);
+    }
+  }, GIT_TEST_MS);
+
+  test("in a project inside a subfolder of the repository, leaves out Trama's folder and counts the code", () => {
+    const repo = mkdtempSync(join(tmpdir(), "trama-sub-"));
+    try {
+      const inner = join(repo, "packages", "shop");
+      mkdirSync(inner, { recursive: true });
+      cpSync(join(import.meta.dir, "../examples/shop"), inner, { recursive: true });
+      const g = (...args: string[]) => {
+        const r = spawnSync("git", args, { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30_000, killSignal: "SIGKILL", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+        if (r.error !== undefined || r.status !== 0) throw new Error(r.error?.message ?? r.stderr);
+      };
+      g("init", "-q");
+      g("add", "-A");
+      g("-c", "user.name=Trama", "-c", "user.email=trama@example.com", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init");
+      const before = codeFingerprint(inner);
+      writeFileSync(join(inner, ".trama", "note.txt"), "not code");
+      expect(codeFingerprint(inner)).toBe(before);
+      writeFileSync(join(inner, "app.ts"), "export const x = 1;\n");
+      expect(codeFingerprint(inner)).not.toBe(before);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
     }
   }, GIT_TEST_MS);
 });

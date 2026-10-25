@@ -3,16 +3,19 @@ import type { SettingSchema, SettingsValues, SettingValue } from "../../host/set
 import { storedValue } from "../../host/settings-schema";
 import type { FolderEntry, InstructionFileView, ToHost, ToWebview, WorkspaceFolderView } from "../../protocol";
 import { type ProvidersView, providersView } from "../../omp-login";
-import { type CertificatesState, SYSTEM_CERTIFICATES_KEY } from "../settings/logic";
+import { type CertificatesState, SYSTEM_CERTIFICATES_KEY, type SoloState } from "../settings/logic";
+import type { SoloKind } from "../../../../src/core/solo-mode";
 import {
   type AgentCheckResult,
   bundleNeedsExport,
   changedWrites,
   chosenOmpPath,
+  chosenSolo,
   chosenSystemCertificates,
   exclusions,
   nextBlock,
   nextStep,
+  offersSolo,
   ompAnswers,
   openStep,
   openWizard,
@@ -42,6 +45,8 @@ export interface WizardSnapshot {
   instructionFiles: readonly InstructionFileView[] | null;
   /** The check of the omp chosen now; null while it is being checked. */
   check: AgentCheckResult | null;
+  /** The project's Solo mode, from the host's last `soloMode`; null until it arrives and without a project. The empty-Model wizard starts from it and compares with it. */
+  projectSolo: SoloState | null;
   /** The Providers section of the omp step: null while it is not shown (no outcome yet, or omp does not answer), else the providers omp lists models of (absent: unknown); it keeps its rows while omp is checked again. */
   providers: ProvidersView;
   /** Whether a Cursor API key is saved and how many times the host has told so, for the Cursor row of the Providers section; the key itself never reaches the panel and is no choice of the wizard. */
@@ -85,6 +90,7 @@ export class WizardController {
   private keyAsked = false;
   private loggingOut: readonly string[] = [];
   private certificates: CertificatesState | null = null;
+  private projectSolo: SoloState | null = null;
   private instructionFiles: readonly InstructionFileView[] | null = null;
   /** The folder the last instruction-files search was asked for (null: the project's folder), while the omp step is on view. */
   private instructionRoot: string | null | undefined = undefined;
@@ -122,7 +128,7 @@ export class WizardController {
   }
 
   private build(): WizardSnapshot {
-    return { state: this.state, schema: this.schema, current: this.current, folders: this.folders, models: this.models, check: this.check, providers: this.providers, cursorKey: this.cursorKey, loggingOut: this.loggingOut, certificates: this.certificates, instructionFiles: this.instructionFiles, busy: this.busy, error: this.error, generation: this.generation };
+    return { state: this.state, schema: this.schema, current: this.current, folders: this.folders, models: this.models, check: this.check, providers: this.providers, cursorKey: this.cursorKey, loggingOut: this.loggingOut, certificates: this.certificates, instructionFiles: this.instructionFiles, projectSolo: this.projectSolo, busy: this.busy, error: this.error, generation: this.generation };
   }
 
   private emit(): void {
@@ -269,6 +275,13 @@ export class WizardController {
     else this.emit();
   }
 
+  /** The host tells Solo mode of the project (empty-Model mode): the wizard shows what it was asked for, and keeps the developer's choice if there is one. */
+  receiveSoloMode(message: Extract<ToWebview, { type: "soloMode" }>): void {
+    const { type: _type, ...state } = message;
+    this.projectSolo = state;
+    this.emit();
+  }
+
   /** The omp step checks omp again at once, for its path and its value of System Certificates. */
   private recheckOmp(): void {
     const state = this.state;
@@ -406,6 +419,11 @@ export class WizardController {
     if (setting.key === SYSTEM_CERTIFICATES_KEY) this.certificatesToggled(before);
   }
 
+  /** The `Solo Mode` row of the Project step changed: the choice lives in the wizard's state until the confirmation; nothing is written before. */
+  setSolo(solo: SoloKind): void {
+    this.act((state) => ({ ...state, solo }));
+  }
+
   /**
    * The box of System Certificates changed in the omp step. Checked with the bundle missing or older than 24 hours: the host exports it (nothing is asked while an export runs) and
    * the step checks omp again when the export ends; checked with a recent bundle, or unchecked: omp is checked again at once, with the step's value.
@@ -460,6 +478,7 @@ export class WizardController {
       ...(state.mode === "first" && state.root !== null ? { root: state.root } : {}),
       values: changedWrites(this.schema, state, this.current),
       excluded: state.choice === "import" && state.mode !== "settings" ? exclusions(state.excluded) : [],
+      ...(offersSolo(state.mode) ? { solo: chosenSolo(state, this.folders, this.projectSolo) } : {}),
     });
   }
 

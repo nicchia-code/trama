@@ -4,12 +4,13 @@ import * as vscode from "vscode";
 import { syncRequirementSkills } from "../../../src/core/requirement-skills";
 import { ActivitiesItem, SHOW_ACTIVITIES_COMMAND } from "./activities-item";
 import { watchAnnouncements } from "./announcements";
-import { agentTabName, watchAgentTerminal, configuredOmpPath, configuredSkillsDir, configuredSystemCertificates, ompChatGeneralSettingsChanged, ownsAgentTerminal, setBundledCliDir, setOmpChat, setOverlayStorage, settings, windowClosed } from "./agent";
+import { agentTabName, watchAgentTerminal, configuredOmpPath, configuredSkillsDir, configuredSystemCertificates, ompChatGeneralSettingsChanged, ownsAgentTerminal, roundClosed, roundOpened, setBundledCliDir, setOmpChat, setOverlayStorage, settings, windowClosed } from "./agent";
 import { Controller, describeError } from "./controller";
 import { startExecutionCheck } from "./execution-check";
 import { DesignRequests } from "./design-requests";
 import { bundledTrama } from "./bundled";
 import { startCursorApiKey } from "./cursor-api-key";
+import { startNtfyToken } from "./ntfy-token";
 import { findProject } from "./project";
 import { QuestionSession } from "./question-session";
 import { EditorQuestions } from "./questions";
@@ -18,6 +19,7 @@ import { OmpClient } from "./omp-chat/client";
 import { OmpChatView } from "./omp-chat/view";
 import { OmpUsage, ompUsageRunner } from "./omp-chat/usage";
 import { MenuView } from "./menu/view";
+import { SoloMerge } from "./solo-merge";
 import { SHOW_COMMANDS } from "../menu-protocol";
 import { findConfiguredOmp, findOmp, forgetUpdateCheck, setUpdateStore } from "./omp-update";
 import { bundleStale, loadBundleState, setSystemCertificatesSetting } from "./system-certificates";
@@ -39,7 +41,7 @@ function guarded<A extends unknown[]>(action: (...args: A) => Promise<void>): (.
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-  const session = new QuestionSession(() => trama.revealForQuestions(), agentTabName);
+  const session = new QuestionSession(() => trama.revealForQuestions(), agentTabName, { opened: roundOpened, closed: roundClosed });
   const questions = new EditorQuestions(() => findProject(), session, ownsAgentTerminal);
   // One watcher of `.trama/` for the extension's whole life: the panel follows it while open, the design requests always.
   setOverlayStorage(context.globalStorageUri);
@@ -51,10 +53,14 @@ export function activate(context: vscode.ExtensionContext): void {
   controller = trama;
   // The item of the ghosts with no Board column lives with the extension, so it shows with the panel closed too.
   const activities = new ActivitiesItem(() => findProject()?.root, tramaFiles, (announcement) => trama.openGhostDetails(announcement));
+  // Merge of Solo mode: its flow and the follow-up of the merge Trama started, for the whole life of the window.
+  const soloMerge = new SoloMerge((action) => trama.launch(action));
   // The side menu of the Activity Bar icon: it follows the same watcher, so it stays up to date with the panel closed.
-  const menu = new MenuView(context.extensionUri, trama, tramaFiles);
+  const menu = new MenuView(context.extensionUri, trama, tramaFiles, soloMerge);
   context.subscriptions.push(
     tramaFiles,
+    soloMerge,
+    soloMerge.start(),
     menu,
     menu.register(),
     vscode.commands.registerCommand("trama.open", guarded(() => trama.open())),
@@ -90,10 +96,13 @@ export function activate(context: vscode.ExtensionContext): void {
   // The Cursor API key is read now and kept in memory; a conversation that starts or resumes waits for that first read, so it gets the key too.
   const cursorKey = startCursorApiKey(context.secrets, (message) => void vscode.window.showErrorMessage(message));
   context.subscriptions.push({ dispose: () => void cursorKey.then((subscription) => subscription.dispose()) });
+  // The access token of the ntfy server is read the same way; the notifier reads it when it makes a request.
+  const ntfyTokenRead = startNtfyToken(context.secrets, (message) => void vscode.window.showErrorMessage(message));
+  context.subscriptions.push({ dispose: () => void ntfyTokenRead.then((subscription) => subscription.dispose()) });
   // The window follows its conversations and General from here on: only now can the announcements of agents nobody follows be told from those it resumes.
   const orphans = watchAnnouncements(() => findProject()?.root, startOmpChat(context, cursorKey));
   // The first execution check follows the withdrawal of the orphan ghosts.
-  context.subscriptions.push(orphans, startExecutionCheck(() => findProject()?.root, tramaFiles, orphans.done));
+  context.subscriptions.push(orphans, startExecutionCheck(() => findProject()?.root, tramaFiles, orphans.done, () => soloMerge.check()));
 }
 
 /**

@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import type { MenuSituation, ToMenuWebview } from "../extension/src/menu-protocol";
+import type { MenuSituation, MergeMenuState, ToMenuWebview } from "../extension/src/menu-protocol";
 import type { ViewName } from "../extension/src/protocol";
 import { badgeTooltip, MenuModel, type MenuSurface, menuBadge, parseMenuMessage } from "../extension/src/host/menu/model";
 
-function setup(init: { situation?: MenuSituation; facts?: { decisions: number; tasksSinceScan: number } | undefined; panel?: ViewName } = {}) {
+function setup(init: { situation?: MenuSituation; facts?: { decisions: number; tasksSinceScan: number } | undefined; panel?: ViewName; merge?: MergeMenuState } = {}) {
   const posted: ToMenuWebview[] = [];
   const badges: ({ value: number; tooltip: string } | undefined)[] = [];
   const calls: string[] = [];
-  const env = { situation: init.situation ?? "project", facts: "facts" in init ? init.facts : { decisions: 2, tasksSinceScan: 3 }, panel: init.panel };
+  const env = { situation: init.situation ?? "project", facts: "facts" in init ? init.facts : { decisions: 2, tasksSinceScan: 3 }, panel: init.panel, merge: init.merge };
   const surface: MenuSurface = {
     post: (message) => void posted.push(message),
     setBadge: (badge) => void badges.push(badge),
@@ -18,6 +18,11 @@ function setup(init: { situation?: MenuSituation; facts?: { decisions: number; t
     show: (view) => void calls.push(`show ${view}`),
     scan: () => void calls.push("scan"),
     openFolder: () => void calls.push("openFolder"),
+    mergeState: () => env.merge,
+    startMerge: () => void calls.push("merge"),
+    openMergeEditor: () => void calls.push("openMergeEditor"),
+    reconcileMerge: () => void calls.push("reconcileMerge"),
+    abortMerge: () => void calls.push("abortMerge"),
   };
   return { model: new MenuModel(surface), posted, badges, calls, env };
 }
@@ -72,6 +77,27 @@ describe("the state the menu is sent", () => {
   });
 });
 
+describe("Merge of Solo mode in the state", () => {
+  const merge: MergeMenuState = { available: false, reason: "changes", trackedTrama: true };
+
+  test("a project with Solo mode on carries merge, and one with it off carries none", () => {
+    expect(setup({ merge }).model.state().merge).toEqual(merge);
+    expect("merge" in setup().model.state()).toBe(false);
+  });
+
+  test("an open merge is carried with its branch and whether it still has conflicts", () => {
+    const open: MergeMenuState = { available: false, reason: "inProgress", trackedTrama: false, open: { branch: "origin/main", conflict: true } };
+    const { model, posted } = setup({ merge: open });
+    model.refresh();
+    expect(posted).toEqual([{ type: "menuState", situation: "project", decisions: 2, tasksSinceScan: 3, panelView: null, merge: open }]);
+  });
+
+  test("outside a project there is no merge, whatever Solo mode says", () => {
+    expect("merge" in setup({ situation: "notProject", merge }).model.state()).toBe(false);
+    expect("merge" in setup({ situation: "noFolder", merge }).model.state()).toBe(false);
+  });
+});
+
 describe("the badge of the icon", () => {
   test("shows the number with N cards awaiting a decision in a project, and a singular for one", () => {
     expect(menuBadge({ situation: "project", decisions: 3 })).toEqual({ value: 3, tooltip: "3 cards await a decision" });
@@ -109,6 +135,13 @@ describe("the messages of the menu", () => {
     model.receive({ type: "scan" });
     model.receive({ type: "openFolder" });
     expect(calls).toEqual(["show history", "show getstarted", "scan", "openFolder"]);
+  });
+
+  test("merge, openMergeEditor, reconcileMerge and abortMerge are carried out", () => {
+    const { model, calls } = setup({ merge: { available: true, trackedTrama: false } });
+    for (const type of ["merge", "openMergeEditor", "reconcileMerge", "abortMerge"]) model.receive({ type });
+    expect(calls).toEqual(["merge", "openMergeEditor", "reconcileMerge", "abortMerge"]);
+    expect(parseMenuMessage({ type: "merge", branch: "main" })).toBeUndefined();
   });
 
   test("anything else is ignored", () => {

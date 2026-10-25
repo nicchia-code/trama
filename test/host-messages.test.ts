@@ -17,6 +17,9 @@ test("accepts every well-formed message of the contract", () => {
   expect(parseToHost({ type: "openQuickTask" })).toEqual({ ok: false, reason: 'unknown message type "openQuickTask"' });
   expect(parseToHost({ type: "launch", action: { kind: "scan" } })).toEqual({ ok: false, reason: 'unknown action "scan"' });
   expect(parseToHost({ type: "launch", action: { kind: "scan", feature: "checkout" } })).toEqual({ ok: false, reason: 'unknown action "scan"' });
+  // The scan after a merge and the reconciling of a merge start only from the host.
+  expect(parseToHost({ type: "launch", action: { kind: "mergeScan", base: "aaaa1111", incoming: "bbbb2222" } })).toEqual({ ok: false, reason: 'unknown action "mergeScan"' });
+  expect(parseToHost({ type: "launch", action: { kind: "reconcileMerge", branch: "main" } })).toEqual({ ok: false, reason: 'unknown action "reconcileMerge"' });
   expect(ok({ type: "launch", action: { kind: "implement", task: "0003" } })).toEqual({ type: "launch", action: { kind: "implement", task: "0003" } });
   expect(ok({ type: "launch", action: { kind: "implement-all" } })).toEqual({ type: "launch", action: { kind: "implement-all" } });
   expect(parseToHost({ type: "launch", action: { kind: "resolve-drifts" } })).toEqual({ ok: false, reason: "resolve-drifts needs a valid Drift ID" });
@@ -169,6 +172,25 @@ test("trama.systemCertificates is a boolean setting of the manifest: setSetting 
   for (const value of ["true", 1, null]) expect(parseToHost({ type: "setSetting", key: "trama.systemCertificates", value }, schema).ok).toBe(false);
 });
 
+test("setNtfyToken, removeNtfyToken and sendTestNotification carry no field at all: a token or a server sent along is dropped", () => {
+  for (const type of ["setNtfyToken", "removeNtfyToken", "sendTestNotification"] as const) {
+    expect(ok({ type })).toEqual({ type });
+    expect(ok({ type, token: "tk_secret", value: "tk_secret", topic: "mytopic", url: "https://evil.example" })).toEqual({ type });
+  }
+});
+
+test("trama.ntfyServer and trama.ntfyTopic are text settings with a validity: setSetting refuses a value that is not valid, and an empty one is accepted", () => {
+  const manifest = JSON.parse(readFileSync(join(import.meta.dir, "../extension/package.json"), "utf8"));
+  const schema = settingsSchema(manifest);
+  const setting = (key: string, value: unknown) => parseToHost({ type: "setSetting", key, value }, schema);
+  for (const value of ["", "https://ntfy.example.org", "http://localhost:8080"]) expect(setting("trama.ntfyServer", value).ok, String(value)).toBe(true);
+  for (const value of ["ntfy.sh", "ftp://ntfy.sh", "https://user:pass@ntfy.sh", "https://ntfy.sh?x=1", "https://ntfy.sh#a", 5, null]) expect(setting("trama.ntfyServer", value).ok, String(value)).toBe(false);
+  expect(setting("trama.ntfyServer", "ntfy.sh")).toEqual({ ok: false, reason: "trama.ntfyServer: Enter an http or https address without user name or password." });
+  for (const value of ["", "my-topic_01", "a".repeat(64)]) expect(setting("trama.ntfyTopic", value).ok, String(value)).toBe(true);
+  for (const value of ["with space", "a".repeat(65), "a/b", "é", 5, null]) expect(setting("trama.ntfyTopic", value).ok, String(value)).toBe(false);
+  expect(setting("trama.ntfyTopic", "bad topic")).toEqual({ ok: false, reason: "trama.ntfyTopic: Use 1 to 64 letters, digits, - or _." });
+});
+
 test("the messages of the setup wizard are checked: the choice, the agent, the folder and the paths", () => {
   expect(ok({ type: "openGuidedSetup", choice: "import" })).toEqual({ type: "openGuidedSetup", choice: "import" });
   expect(ok({ type: "openGuidedSetup", choice: "scratch" })).toEqual({ type: "openGuidedSetup", choice: "scratch" });
@@ -268,4 +290,15 @@ test("viewChanged needs the name of a view of the panel", () => {
   expect(ok({ type: "viewChanged", view: "getstarted" })).toEqual({ type: "viewChanged", view: "getstarted" });
   expect(ok({ type: "viewChanged", view: "history" })).toEqual({ type: "viewChanged", view: "history" });
   for (const view of ["nowhere", "", 3, undefined, null]) expect(parseToHost({ type: "viewChanged", view }).ok).toBe(false);
+});
+
+test("setSoloMode carries one of the three kinds and nothing else; confirmSetup carries solo only in the modes that have it", () => {
+  for (const solo of ["off", "folders", "files"] as const) expect(ok({ type: "setSoloMode", solo })).toEqual({ type: "setSoloMode", solo });
+  for (const solo of ["on", "", undefined, true, null, "Folders"]) expect(parseToHost({ type: "setSoloMode", solo }).ok).toBe(false);
+  const parse = (message: Record<string, unknown>) => parseToHost({ type: "confirmSetup", values: [], excluded: [], ...message });
+  expect(parse({ mode: "first", choice: "scratch", root: "/work/app", solo: "files" })).toEqual({ ok: true, message: { type: "confirmSetup", mode: "first", choice: "scratch", root: "/work/app", values: [], solo: "files", excluded: [] } });
+  expect(parse({ mode: "empty-model", choice: "import", solo: "off" })).toEqual({ ok: true, message: { type: "confirmSetup", mode: "empty-model", choice: "import", values: [], solo: "off", excluded: [] } });
+  expect(parse({ mode: "first", choice: "scratch", root: "/work/app" })).toEqual({ ok: true, message: { type: "confirmSetup", mode: "first", choice: "scratch", root: "/work/app", values: [], excluded: [] } });
+  expect(parse({ mode: "first", choice: "scratch", root: "/work/app", solo: "everything" }).ok).toBe(false);
+  expect(parse({ mode: "settings", solo: "folders" }).ok).toBe(false);
 });

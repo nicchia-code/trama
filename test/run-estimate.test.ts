@@ -3,6 +3,7 @@ import {
   DEFAULT_TASK_MINUTES,
   estimateRunAll,
   MAX_PROGRESS,
+  runAllPlan,
   runAllProgress,
   FIX_TASK_MINUTES,
   HIGH_FACTOR,
@@ -218,5 +219,59 @@ describe("progress of a Run all", () => {
   test("is 0.95 beyond the estimate, whatever the recomputed estimate says", () => {
     expect(runAllProgress({ elapsedMinutes: 5, estimate: 500, reached: 0.1, over: true })).toBe(MAX_PROGRESS);
     expect(runAllProgress({ elapsedMinutes: 5, estimate: 0, reached: 0, over: true })).toBe(MAX_PROGRESS);
+  });
+});
+
+describe("records of a Run", () => {
+  /** Ten durations of 2 minutes of the terminal `run1` made well before the launch at minute 0: a reused terminal. */
+  const earlier = Array.from({ length: 10 }, (_, i) => [start("run1", `e${i}`, -1000 + i * 100), end("run1", `e${i}`, -1000 + i * 100 + 2)]).flat();
+
+  test("records before the launch of a reused terminal do not make the Run started, nor the plan", () => {
+    const tasks = [task("a")];
+    const old = [queue("run1", -50), choice("run1", "order", ["a"], -40), start("run1", "z", -30)];
+    expect(estimateRunAll({ records: old, tasks, runs: [run(["a"])], parallel: true, launchedAt: at(0), now: at(1) })).toBeNull();
+    expect(runAllPlan({ records: old, tasks, runs: [run(["a"])], parallel: true, launchedAt: at(0), now: at(1) })).toEqual({ taken: false, choices: [], tasks: ["a"] });
+  });
+
+  test("a Task started or ended before the launch is neither the Run's own nor finished by it", () => {
+    const tasks = [task("a", { column: "doing", holder: "run1" }), task("b")];
+    const records = [start("run1", "a", -10), end("run1", "b", -5)];
+    // `a` is held by the terminal: its weight is not cut by the old start; `b` counts although an old end names it.
+    expect(minutes({ runs: [run(["b"])], tasks, records, now: at(30) })).toBeCloseTo(START_MINUTES + DEFAULT_TASK_MINUTES + DEFAULT_TASK_MINUTES + TAIL_MINUTES, 9);
+  });
+
+  test("earlier records of a reused terminal count for the weights as another job's", () => {
+    const result = minutes({ runs: [run(["a"])], tasks: [task("a")], records: earlier, now: at(1) });
+    expect(result).toBeCloseTo(START_MINUTES + 2 + TAIL_MINUTES, 9);
+    // The records of the same terminal from the launch on are the Run all's and do not weigh.
+    const own = Array.from({ length: 10 }, (_, i) => [start("run1", `o${i}`, i * 10), end("run1", `o${i}`, i * 10 + 5)]).flat();
+    expect(minutes({ runs: [run(["a"])], tasks: [task("a")], records: [...earlier, ...own], now: at(100) })).toBeCloseTo(2 + TAIL_MINUTES, 9);
+  });
+});
+
+describe("the plan of a Run all", () => {
+  const tasks = [task("a"), task("b"), task("c", { blocked: true })];
+  const plan = (records: TimingRecord[], over: Partial<RunEstimateInput> = {}) =>
+    runAllPlan({ records, tasks, runs: [run(["a", "b", "c"])], parallel: true, launchedAt: at(0), now: at(1), ...over });
+
+  test("tells whether a Run took a Task, the order and conflict choices and the Tasks of the Runs", () => {
+    expect(plan([queue("run1", 0)])).toEqual({ taken: false, choices: [], tasks: ["a", "b"] });
+    const result = plan([queue("run1", 0), choice("run1", "order", ["a", "b"], 1), choice("run1", "conflict", ["b", "a"], 2), choice("run1", "release", ["a"], 3), start("run1", "a", 4)]);
+    expect(result.taken).toBe(true);
+    expect(result.choices).toHaveLength(2);
+    expect(new Set(result.choices).size).toBe(2);
+    expect(result.tasks).toEqual(["a", "b"]);
+  });
+
+  test("a Task the Run finished, a Run that ended and a choice of another terminal are not in it", () => {
+    const result = plan([start("run1", "a", 0), end("run1", "a", 1), choice("other", "order", ["a", "b"], 1)]);
+    expect(result.tasks).toEqual(["b"]);
+    expect(result.choices).toEqual([]);
+    expect(plan([], { runs: [run(["a", "b"], { ended: true })] }).tasks).toEqual([]);
+  });
+
+  test("a Task held in progress by the Run's terminal is a Task of the Run", () => {
+    const result = plan([start("run1", "d", 0)], { tasks: [...tasks, task("d", { column: "doing", holder: "run1" })] });
+    expect(result.tasks).toContain("d");
   });
 });

@@ -73,6 +73,12 @@ class FakeSession implements OmpSessionPort {
   onPermissionCancelled(): Disposable {
     return { dispose: () => undefined };
   }
+  onSend(): Disposable {
+    return { dispose: () => undefined };
+  }
+  onPermissionAnswered(): Disposable {
+    return { dispose: () => undefined };
+  }
   async models() {
     return { available: [] };
   }

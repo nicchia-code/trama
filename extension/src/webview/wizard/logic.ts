@@ -1,8 +1,9 @@
 import type { SetupChoice, SetupMode, ToWebview } from "../../protocol";
 import { ompTooOldText } from "../../../../src/core/omp-version";
-import { groupKeys, MODEL_ROLE_KEYS, SETTING_GROUPS, type SettingSchema, type SettingsValues, type SettingValue, settingValueError, storedValue } from "../../host/settings-schema";
+import { groupKeys, MODEL_ROLE_KEYS, NTFY_SERVER_KEY, NTFY_TOPIC_KEY, SETTING_GROUPS, type SettingSchema, type SettingsValues, type SettingValue, settingValueError, storedValue } from "../../host/settings-schema";
 import type { ModelSuggestion } from "../../host/model-lists";
-import { type CertificatesState, ompAnsweredText, ompFailureText, roleLabel, SYSTEM_CERTIFICATES_KEY } from "../settings/logic";
+import { type CertificatesState, ompAnsweredText, ompFailureText, roleLabel, SOLO_EXCLUDE_OPTIONS, type SoloState, SYSTEM_CERTIFICATES_KEY } from "../settings/logic";
+import type { SoloKind } from "../../../../src/core/solo-mode";
 
 /** Which wizard is open: the first setup of a folder without a project (Get Started), the settings of a project, or a project with an empty Model that carries on with a path. */
 export type WizardMode = SetupMode;
@@ -19,8 +20,8 @@ export function stepsFor(mode: WizardMode, choice: WizardChoice | null): WizardS
   return steps;
 }
 
-/** The settings of the Settings tab that the wizard does not ask for: Auto Exit stays in the group `omp` of the tab. */
-const NOT_IN_WIZARD: readonly string[] = ["trama.autoExit"];
+/** The settings of the Settings tab that the wizard does not ask for: Auto Exit stays in the group `omp` of the tab, and the Notifications subgroup (ntfy server and topic) is set only in the Settings tab. */
+const NOT_IN_WIZARD: readonly string[] = ["trama.autoExit", NTFY_SERVER_KEY, NTFY_TOPIC_KEY];
 
 /** The keys of a group of the shared list `SETTING_GROUPS`, in order, without the ones the wizard leaves out. */
 const wizardKeysOf = (title: string): string[] => {
@@ -81,6 +82,8 @@ export interface WizardState {
   /** Paths excluded from the import, relative to `root`, with `/`; none contains another. */
   excluded: readonly string[];
   tree: Tree;
+  /** The Solo mode the developer chose in the Project step (first setup and empty-Model modes only): `null` follows the project's current value, which is how an empty-Model wizard opens; the first setup opens with `off`. */
+  solo: SoloKind | null;
 }
 
 /** The wizard as it opens: on its first step, with the user values of the settings and, for the first setup, no path. */
@@ -89,7 +92,7 @@ export function openWizard(mode: WizardMode, choice: WizardChoice | null, values
   for (const step of ["omp", "Models", "Project", "Advanced"] as const) {
     for (const key of STEP_KEYS[step] ?? []) initial[key] = values[key]?.user as SettingValue | undefined;
   }
-  const state: WizardState = { mode, choice, root, step: "omp", initial, values: initial, invalid: [], excluded: [], tree: {} };
+  const state: WizardState = { mode, choice, root, step: "omp", initial, values: initial, invalid: [], excluded: [], tree: {}, solo: mode === "first" ? "off" : null };
   return { ...state, step: stepsFor(mode, choice)[0] as WizardStep };
 }
 
@@ -97,6 +100,25 @@ export const stepsOf = (state: WizardState): WizardStep[] => stepsFor(state.mode
 
 /** The wizard value of `key` as the field shows it: the default when there is no value. */
 export const wizardValue = (setting: SettingSchema, state: WizardState): unknown => state.values[setting.key] ?? setting.default;
+
+/** Whether the Project step offers Solo mode: in the first setup and in the empty-Model mode, never in the Guided setup of the Settings tab. */
+export const offersSolo = (mode: WizardMode): boolean => mode !== "settings";
+
+/**
+ * Whether Solo mode can be turned on where the wizard writes: the folder to initialize is inside a git repository (first setup), or the project's folder is (`project`, the host's last `soloMode`;
+ * available until the host says otherwise). The Guided setup has no Solo mode.
+ */
+export function soloAvailable(state: WizardState, folders: readonly { root: string; inGit?: boolean }[], project: SoloState | null): boolean {
+  if (!offersSolo(state.mode)) return false;
+  if (state.mode === "first") return folders.find((folder) => folder.root === state.root)?.inGit === true;
+  return project?.available ?? true;
+}
+
+/** The Solo mode the wizard would write: the developer's choice, the project's current value when there is none, and `off` where git is missing. */
+export function chosenSolo(state: WizardState, folders: readonly { root: string; inGit?: boolean }[], project: SoloState | null): SoloKind {
+  if (!soloAvailable(state, folders, project)) return "off";
+  return state.solo ?? project?.solo ?? "off";
+}
 
 
 /** How old the bundle may be before checking the box in the step exports it again: 24 hours. */
@@ -339,8 +361,25 @@ function summaryText(setting: SettingSchema, value: unknown, models: readonly Mo
   return roleLabel(value.trim(), models);
 }
 
+const soloLabel = (kind: Exclude<SoloKind, "off">): string => SOLO_EXCLUDE_OPTIONS.find((option) => option.value === kind)?.label ?? kind;
+
+/**
+ * The Solo mode rows of the Project step: `Solo Mode` with On or Off and, when on, `Exclude` with the chosen value. `current` is the project's value (empty-Model mode; null in the first setup, which has no
+ * project): a row that changes it is marked changed and shows the value it replaces; `Exclude` turned on from off has no value to replace.
+ */
+export function soloRows(chosen: SoloKind, current: SoloKind | null): SummaryRow[] {
+  const base = { step: "Project", group: null, empty: false, mono: false, isDefault: false } as const;
+  const switched = current !== null && (chosen === "off") !== (current === "off");
+  const rows: SummaryRow[] = [{ ...base, title: "Solo Mode", value: chosen === "off" ? "Off" : "On", changed: switched, was: switched ? (current === "off" ? "Off" : "On") : null }];
+  if (chosen !== "off") {
+    const changed = current !== null && chosen !== current;
+    rows.push({ ...base, title: "Exclude", value: soloLabel(chosen), isDefault: chosen === "folders", changed, was: changed && current !== "off" && current !== null ? soloLabel(current) : null });
+  }
+  return rows;
+}
+
 /** The rows of the summary, grouped by step in order, from the values and the current user values. */
-export function summaryRows(schema: readonly SettingSchema[], state: WizardState, current: Readonly<Record<string, SettingsValues>>, folders: readonly { name: string; root: string }[], models: readonly ModelSuggestion[] = []): SummaryRow[] {
+export function summaryRows(schema: readonly SettingSchema[], state: WizardState, current: Readonly<Record<string, SettingsValues>>, folders: readonly { name: string; root: string; inGit?: boolean }[], models: readonly ModelSuggestion[] = [], project: SoloState | null = null): SummaryRow[] {
   const rows: SummaryRow[] = [];
   for (const step of stepsOf(state)) {
     if (step === "Path") {
@@ -370,6 +409,7 @@ export function summaryRows(schema: readonly SettingSchema[], state: WizardState
           was: changed ? summaryText(setting, currentUser ?? setting.default, models) : null,
         });
       }
+      if (step === "Project" && offersSolo(state.mode)) rows.push(...soloRows(chosenSolo(state, folders, project), state.mode === "empty-model" ? (project?.solo ?? "off") : null));
     }
   }
   return rows;

@@ -21,5 +21,8 @@ Trama ha riaperto in un processo nuovo, con le stesse opzioni, la sessione di om
 ### SESSION_NOT_RESUMED
 La sessione di omp di una conversazione non si è riaperta dove SESSION_RESUMED l'avrebbe riaperta: il processo nuovo non parte, la sessione non esiste più, omp rifiuta di riaprirla o non risponde entro lo stesso limite di tempo dell'apertura.
 
+### PERMISSION_REQUESTED
+omp asks the developer's permission, in a conversation of omp Chat, before running a command or making a change for which it would ask in the terminal. It happens only with the permissive approval of omp Chat; with yolo omp never asks. The agent waits until the developer chooses, or until the request is cancelled by Stop, by the closing of the conversation, by the end of the process or by the end of the turn.
+
 ### TURN_ENDED
 omp has answered a prompt Trama sent to the conversation of a job, that is every conversation that loads Trama's hook (design, scan, Run, Resolve Drifts, Unify Drifts, import, refinement), with the reason the turn stopped: the agent ended its turn, the developer stopped it with Stop, the model refused, or the model reached its token limit. It counts only when no message of the developer is waiting to be delivered to the agent: a queued message starts a new turn and its answer will be the one that counts. When omp refuses the prompt itself (for example for authentication or for the model), the answer is an error and counts as a turn ended for that reason. It replaces, for job conversations, the idle signal the hook gives in a terminal. Ask more and General, which have no hook, do not produce it.

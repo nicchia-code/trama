@@ -111,7 +111,10 @@ export function SettingField({ setting, values, generation, models, listError, s
     if (!editable.dirty.current) return;
     editable.dirty.current = false;
     const text = editable.text.trim();
-    if (text !== savedText) send(key, text);
+    // The ntfy server and topic are checked before they are saved: an invalid value is not sent and the field says why.
+    const reason = settingValueError(setting, text);
+    editable.setError(reason);
+    if (reason === null && text !== savedText) send(key, text);
   }
 
   let control: ReactNode;
@@ -217,7 +220,11 @@ export function SettingField({ setting, values, generation, models, listError, s
         aria-describedby={describedBy}
         placeholder={placeholder}
         value={editable.text}
-        onChange={(event) => editable.edit(event.target.value)}
+        onChange={(event) => {
+          editable.edit(event.target.value);
+          // A value that is valid again drops its message at once; an invalid one waits for Enter or the end of editing.
+          if (settingValueError(setting, event.target.value.trim()) === null) editable.setError(null);
+        }}
         onKeyDown={(event) => {
           if (event.key === "Enter") commitText();
         }}

@@ -10,11 +10,13 @@ import {
   ompMissing,
   changedWrites,
   checkState,
+  chosenSolo,
   confirmLabel,
   exclusions,
   hasPrevious,
   nextBlock,
   nextStep,
+  offersSolo,
   openStep,
   openWizard,
   previousStep,
@@ -25,6 +27,8 @@ import {
   setValue,
   showsFolderNotice,
   skipAdvanced,
+  soloAvailable,
+  soloRows,
   stepPosition,
   stepsFor,
   summaryRows,
@@ -135,7 +139,11 @@ test("the keys of each step are always shown: the omp step asks the language, ne
 
 test("Advanced has four subgroups with their subtitles, in order, from the schema of the shared groups, and they are its keys in order", () => {
   const advanced = SETTING_GROUPS.find((group) => group.title === "Advanced");
-  expect(advancedSubgroups(schema)).toEqual((advanced?.subgroups ?? []).map((sub) => ({ title: sub.title, keys: [...sub.keys] })));
+  // The wizard skips the Notifications subgroup: its two keys are set only in the Settings tab, and no step or summary row has them.
+  expect(advanced?.subgroups?.at(-1)).toEqual({ title: "Notifications", keys: ["trama.ntfyServer", "trama.ntfyTopic"] });
+  expect(advancedSubgroups(schema)).toEqual((advanced?.subgroups ?? []).filter((sub) => sub.title !== "Notifications").map((sub) => ({ title: sub.title, keys: [...sub.keys] })));
+  expect(Object.values(STEP_KEYS).flat()).not.toContain("trama.ntfyServer");
+  expect(Object.values(STEP_KEYS).flat()).not.toContain("trama.ntfyTopic");
   expect(advancedSubgroups(schema).map((group) => [group.title, group.keys])).toEqual([
     ["Appearance", ["trama.theme"]],
     ["Drifts", ["trama.advisorScanner", "trama.asyncDriftResolver"]],
@@ -415,4 +423,45 @@ test("the check says omp responds when it ended with an answer from an omp that 
   expect(ompAnswers({ ompPath: "", state: "done", ok: true, missing: false, version: "18.12.5", models: 2, tooOld: true })).toBe(false);
   expect(ompAnswers({ ompPath: "", state: "done", ok: true, missing: false, version: "18.12.6", models: 0 })).toBe(true);
   expect(ompAnswers({ ompPath: "", state: "done", ok: true, missing: false, version: "18.12.6", models: 2, updateError: "x" })).toBe(true);
+});
+
+test("Solo mode is offered in the first setup and the Empty Model mode only; the first setup opens off, the Empty Model wizard follows the project", () => {
+  expect(offersSolo("first")).toBe(true);
+  expect(offersSolo("empty-model")).toBe(true);
+  expect(offersSolo("settings")).toBe(false);
+  expect(open("first").solo).toBe("off");
+  expect(open("empty-model").solo).toBeNull();
+  const project = { available: true, solo: "files" as const, tracked: [] };
+  expect(chosenSolo(open("empty-model"), [], project)).toBe("files");
+  expect(chosenSolo({ ...open("empty-model"), solo: "off" }, [], project)).toBe("off");
+  expect(chosenSolo(open("empty-model"), [], null)).toBe("off");
+  expect(chosenSolo(open("settings"), [], project)).toBe("off");
+});
+
+test("Solo mode is available where git is: the chosen folder in the first setup, the project in the Empty Model mode (until the host says otherwise)", () => {
+  const folders = [{ root: "/work/app", inGit: true }, { root: "/work/lib", inGit: false }];
+  const first = { ...open("first"), solo: "folders" as const };
+  expect(soloAvailable(first, folders, null)).toBe(true);
+  expect(chosenSolo(first, folders, null)).toBe("folders");
+  expect(soloAvailable({ ...first, root: "/work/lib" }, folders, null)).toBe(false);
+  expect(chosenSolo({ ...first, root: "/work/lib" }, folders, null)).toBe("off");
+  expect(soloAvailable({ ...first, root: null }, folders, null)).toBe(false);
+  expect(soloAvailable(open("empty-model"), [], null)).toBe(true);
+  expect(soloAvailable(open("empty-model"), [], { available: false, solo: "off", tracked: [] })).toBe(false);
+});
+
+test("the Solo rows say On or Off and, when on, Exclude; they are changed only against a project's value, with the value they replace", () => {
+  expect(soloRows("off", null).map((r) => [r.title, r.value, r.changed, r.was])).toEqual([["Solo Mode", "Off", false, null]]);
+  expect(soloRows("folders", null).map((r) => [r.title, r.value, r.changed, r.was, r.isDefault])).toEqual([["Solo Mode", "On", false, null, false], ["Exclude", "Whole folders", false, null, true]]);
+  expect(soloRows("files", "off").map((r) => [r.title, r.value, r.changed, r.was])).toEqual([["Solo Mode", "On", true, "Off"], ["Exclude", "Only Trama's files", true, null]]);
+  expect(soloRows("files", "folders").map((r) => [r.title, r.changed, r.was])).toEqual([["Solo Mode", false, null], ["Exclude", true, "Whole folders"]]);
+  expect(soloRows("off", "files").map((r) => [r.title, r.value, r.changed, r.was])).toEqual([["Solo Mode", "Off", true, "On"]]);
+  expect(soloRows("folders", "folders").every((r) => !r.changed)).toBe(true);
+});
+
+test("the summary puts the Solo rows at the end of the Project step, in the first setup and the Empty Model mode, never in the settings", () => {
+  const titles = (mode: "first" | "settings" | "empty-model") => summaryRows(schema, open(mode), {}, [{ name: "app", root: "/work/app", inGit: true }]).filter((r) => r.step === "Project").map((r) => r.title);
+  expect(titles("first")).toEqual(["Skills Dir", "Solo Mode"]);
+  expect(titles("empty-model")).toEqual(["Skills Dir", "Solo Mode"]);
+  expect(titles("settings")).toEqual(["Skills Dir"]);
 });

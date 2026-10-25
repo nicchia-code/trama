@@ -70,6 +70,7 @@ test("the groups, the subgroups of Advanced and their keys keep the order of the
         ["Drifts", ["trama.advisorScanner", "trama.asyncDriftResolver"]],
         ["Agents", ["trama.parallelExecution", "trama.subagentsContextSharing", "trama.autoUpdateStaleProposals"]],
         ["omp Chat", ["trama.ompChat", "trama.ompChatApproval", "trama.ompChatIntentTracing"]],
+        ["Notifications", ["trama.ntfyServer", "trama.ntfyTopic"]],
       ],
     ],
   ]);
@@ -265,14 +266,37 @@ test("omp Chat Approval is a select right after omp Chat in its subgroup: yolo b
   expect(settingsSchema(manifest).find((s) => s.key === "trama.ompChatApproval")?.control).toBe("enum");
 });
 
-test("omp Chat Intent Tracing is a checkbox last in Advanced, on by default, user scope, with its explicit title and description", () => {
+test("omp Chat Intent Tracing is a checkbox last in the omp Chat subgroup, on by default, user scope, with its explicit title and description", () => {
   const tracing = properties["trama.ompChatIntentTracing"];
   expect(tracing?.type).toBe("boolean");
   expect(tracing?.default).toBe(true);
   expect(tracing?.scope).toBe("application");
   expect(tracing?.markdownDescription).toBe("On: in omp Chat the agent writes why it calls each tool. Off saves tokens. Applies to conversations started afterwards.");
   expect(settingTitle("trama.ompChatIntentTracing")).toBe("omp Chat Intent Tracing");
-  const keys = advancedKeys();
+  const keys = SETTING_GROUPS[SETTING_GROUPS.length - 1]?.subgroups?.find((sub) => sub.title === "omp Chat")?.keys ?? [];
   expect(keys[keys.length - 1]).toBe("trama.ompChatIntentTracing");
   expect(settingsSchema(manifest).find((s) => s.key === "trama.ompChatIntentTracing")?.control).toBe("boolean");
+});
+
+test("the Notifications subgroup is the last of Advanced, after omp Chat: ntfy Server then ntfy Topic, both text fields read from the user settings only, with explicit titles and the descriptions of the Settings tab", () => {
+  const advanced = SETTING_GROUPS[SETTING_GROUPS.length - 1];
+  expect(advanced?.subgroups?.map((sub) => sub.title)).toEqual(["Appearance", "Drifts", "Agents", "omp Chat", "Notifications"]);
+  expect(advanced?.subgroups?.at(-1)?.keys).toEqual(["trama.ntfyServer", "trama.ntfyTopic"]);
+  expect(properties["trama.ntfyServer"]).toEqual({ type: "string", default: "https://ntfy.sh", scope: "application", markdownDescription: "Server that receives Trama's notifications. The default is the public ntfy.sh." });
+  expect(properties["trama.ntfyTopic"]).toEqual({
+    type: "string",
+    default: "",
+    scope: "application",
+    markdownDescription: "Topic for a notification when omp Chat jobs finish or wait for you. Empty (the default) sends nothing; on ntfy.sh anyone who knows it can read them.",
+  });
+  expect(settingTitle("trama.ntfyServer")).toBe("ntfy Server");
+  expect(settingTitle("trama.ntfyTopic")).toBe("ntfy Topic");
+  const all = settingsSchema(manifest);
+  expect(all.filter((s) => s.subgroup === "Notifications").map((s) => [s.key, s.control, s.group])).toEqual([
+    ["trama.ntfyServer", "text", "Advanced"],
+    ["trama.ntfyTopic", "text", "Advanced"],
+  ]);
+  // The older `trama.ntfy` is neither declared nor grouped.
+  expect(properties["trama.ntfy"]).toBeUndefined();
+  expect(SETTING_GROUPS.flatMap(groupKeys)).not.toContain("trama.ntfy");
 });

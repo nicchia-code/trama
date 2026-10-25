@@ -1,7 +1,7 @@
 import { EMPTY_SPECS } from "../src/core/specs";
 import { describe, expect, test } from "bun:test";
 import type { FileChange } from "../src/core/diff";
-import { REFINEMENT_OFF, REFINING_REASON, RESUME_REASON, QUEUED_REASON, TO_REFINE_TIP, WAITING_RUN_TIP, type DriftCard, type TaskCard } from "../extension/src/webview/board/logic";
+import { decisionBlockers, PAUSED_TIP, REFINEMENT_OFF, REFINING_REASON, refineStatus, RESUME_REASON, QUEUED_REASON, STILL_WRITTEN_REASON, TO_REFINE_TIP, WAITING_RUN_TIP, type DriftCard, type TaskCard } from "../extension/src/webview/board/logic";
 import type { RefinementView } from "../extension/src/protocol";
 import type { AnnouncementView, DriftView, HistoryView, ProposalView, Snapshot, TaskView } from "../src/core/snapshot";
 import { boardDecisionCount } from "../src/core/board-decisions";
@@ -15,6 +15,7 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   id: "0007",
   created: null,
   refining: false,
+  writer: null,
   title: "Returns",
   body: "",
   kind: "change",
@@ -37,7 +38,7 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   specsChange: { entries: [], notesBefore: null }, scope: [],
   ...over,
 });
-const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", created: null, job: null, prepared: null, title: "Code refunds late", body: "line one\n\nline two\nline three", previous: [], origin: [], task: null, unifies: [], unifiedInto: null, refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, ...over });
+const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", created: null, job: null, prepared: null, title: "Code refunds late", body: "line one\n\nline two\nline three", previous: [], origin: [], task: null, unifies: [], unifiedInto: null, refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, merge: false, ...over });
 const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", created: null, title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTag: null, agent: false, progress: null, finished: null, unchanged: null, blockedBy: [], heldByDrift: false, file: "tasks/0012-refunds.md", images: [], ...over });
 const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], resolutionDrifts: [], drifts: [], unifiedDrifts: [], finishingDrifts: [], finishingProposals: [], finishingTasks: [], tasks: [], tasksSinceScan: 0, announcements: [], numbers: { proposal: {}, task: {}, drift: {} }, specs: EMPTY_SPECS, specsPresent: false, history: [], historyFaults: [], ...over });
 const file = (change: FileChange["change"], details: string[], path = "checkout/order.md"): FileChange => ({ path, change, details });
@@ -58,7 +59,7 @@ test("groups the snapshot into card columns: Backlog holds the Proposals and the
 });
 
 test("a handed-over resolution replaces only its listed open Drift cards", () => {
-  const resolution = proposal({ id: "res", created: "2026-10-02T10:00:00.000Z", kind: "resolution", resolves: [{ drift: "0003", title: "Code refunds late", previous: [], unifies: [], decision: "Closed, nothing changes", note: null }] });
+  const resolution = proposal({ id: "res", created: "2026-10-02T10:00:00.000Z", kind: "resolution", resolves: [{ drift: "0003", title: "Code refunds late", previous: [], unifies: [], decision: "Closed, nothing changes", note: null, merge: false }] });
   const board = buildBoard(snapshot({ proposals: [proposal({ id: "before", created: "2026-10-01T10:00:00.000Z" }), resolution], drifts: [drift({ id: "0003", created: "2026-09-30T10:00:00.000Z" }), drift({ id: "0004", created: "2026-10-03T10:00:00.000Z" })] }));
   const cards = board[0]!.cards;
   expect(cards[1]).toMatchObject({ kind: "proposal", resolution: true, heading: "Resolution Proposal res", resolves: [{ drift: "0003" }] });
@@ -241,7 +242,59 @@ test("the refinement: running and queued Proposals wait, a stopped one resumes o
   expect(stopped.rejectBlocker).toBe(RESUME_REASON);
   expect(stopped.badges[0]).toMatchObject({ label: "to refine", tone: "primary", tooltip: "Refining stopped before the hand-over. Approve resumes it." });
   expect(RESUME_REASON).toBe("Approve to resume refining first");
-  expect(proposalCard(proposal({ refining: true }), NUMBERS, new Map(), [], NO_MODELS, undefined, null, REFINEMENT_OFF).refine).toBeNull();
+  // Off, the same Draft is not hidden: it is paused, with its own reasons (below).
+  expect(proposalCard(proposal({ refining: true }), NUMBERS, new Map(), [], NO_MODELS, undefined, null, REFINEMENT_OFF).refine).toBe("paused");
+});
+
+const WRITER = { phase: "writing", note: "Reading the order" } as const;
+
+test("a Draft an agent writes is in refining with the function on or off, from its writer, with no Cancel and no queue", () => {
+  const draft = proposal({ id: "0009", refining: true, writer: WRITER });
+  for (const refinement of [refinementOf(), refinementOf({ enabled: false })]) {
+    const card = proposalCard(draft, NUMBERS, new Map(), [], NO_MODELS, undefined, null, refinement);
+    expect(card.refine).toBe("elsewhere");
+    expect(card.badges[0]).toMatchObject({ label: "refining", tone: "info", tooltip: "The agent is refining this Proposal on the current Model", accessibleName: "The agent is refining this Proposal on the current Model" });
+    expect(card.refinePhase).toBe("Refining");
+    expect(card.refineNote).toBe("Reading the order");
+    expect(card.blocker).toBe(REFINING_REASON);
+    expect(card.rejectBlocker).toBe(REFINING_REASON);
+    expect(card.reworkBlocker).toBe(REFINING_REASON);
+  }
+  // A question round of that agent is open: the phase line says so.
+  expect(proposalCard(draft, NUMBERS, new Map(), [], NO_MODELS, undefined, null, refinementOf(), true).refinePhase).toBe("Waiting for your answers");
+  // The writer wins over the queue of this window: it is never queued.
+  expect(proposalCard(draft, NUMBERS, new Map(), [], NO_MODELS, undefined, null, refinementOf({ queued: [{ proposal: "0009", waiting: "slot" }] })).refine).toBe("elsewhere");
+  // An agent that declared nothing has no note.
+  expect(proposalCard(proposal({ id: "0009", refining: true, writer: { phase: "writing", note: null } }), NUMBERS, new Map(), [], NO_MODELS, undefined, null, refinementOf()).refineNote).toBeNull();
+});
+
+test("a Draft left half-way that nothing writes, with the function off, is paused with its reason on Approve, Reject and the arrow", () => {
+  const card = proposalCard(proposal({ id: "0009", refining: true }), NUMBERS, new Map(), [], NO_MODELS, undefined, null, refinementOf({ enabled: false }));
+  expect(card.refine).toBe("paused");
+  expect(STILL_WRITTEN_REASON).toBe("Still being written. Turn on Auto-update Stale Proposals to resume refining");
+  expect(card.blocker).toBe(STILL_WRITTEN_REASON);
+  expect(card.rejectBlocker).toBe(STILL_WRITTEN_REASON);
+  expect(card.reworkBlocker).toBe(STILL_WRITTEN_REASON);
+  expect(PAUSED_TIP).toBe("Refining stopped before the hand-over. Turn on Auto-update Stale Proposals to resume it.");
+  expect(card.badges[0]).toMatchObject({ label: "to refine", tone: "primary", tooltip: PAUSED_TIP, accessibleName: PAUSED_TIP });
+  expect(card.refinePhase).toBeNull();
+  // With the function on, the same Draft resumes on Approve.
+  expect(proposalCard(proposal({ id: "0009", refining: true }), NUMBERS, new Map(), [], NO_MODELS, undefined, null, refinementOf()).blocker).toBeNull();
+});
+
+test("the reasons of a Draft being written come right after the finishing reason and before the Run and every other reason, on Approve and Reject", () => {
+  const stale = ["a.md"];
+  const run = { runInProgress: true };
+  const elsewhere = proposal({ id: "0007", refining: true, stale, writer: WRITER });
+  const card = proposalCard(elsewhere, NUMBERS, new Map(), ["0007"], NO_MODELS, undefined, null, refinementOf(run));
+  expect(card.blocker).toBe(`The agent is still finishing. ${REFINING_REASON}. ${RUN_IN_PROGRESS}`);
+  expect(card.rejectBlocker).toBe(`The agent is still finishing. ${REFINING_REASON}`);
+  const paused = proposalCard(proposal({ id: "0007", refining: true, stale }), NUMBERS, new Map(), ["0007"], NO_MODELS, undefined, null, refinementOf({ enabled: false, ...run }));
+  expect(paused.blocker).toBe(`The agent is still finishing. ${STILL_WRITTEN_REASON}. ${RUN_IN_PROGRESS}. ${approveBlocker(proposal({ stale }))}`);
+  expect(paused.rejectBlocker).toBe(`The agent is still finishing. ${STILL_WRITTEN_REASON}`);
+  // The Diagram's details use the same function: one computation for both.
+  const status = refineStatus(elsewhere, refinementOf(run));
+  expect(decisionBlockers(elsewhere, status, NUMBERS, refinementOf(run), "The agent is still finishing")).toEqual({ approve: card.blocker, reject: card.rejectBlocker });
 });
 
 test("a Run of this window in progress blocks Approve with its reason, after the finishing reason", () => {
@@ -251,7 +304,8 @@ test("a Run of this window in progress blocks Approve with its reason, after the
   const card = proposalCard(proposal({ id: "0007" }), NUMBERS, new Map(), ["0007"], NO_MODELS, undefined, null, refinementOf(run));
   expect(card.blocker).toBe(`The agent is still finishing. ${RUN_IN_PROGRESS}`);
   const refining = proposalCard(proposal({ id: "0007", stale: ["a.md"] }), NUMBERS, new Map(), [], NO_MODELS, undefined, null, refinementOf({ running: ["0007"], runInProgress: true }), true);
-  expect(refining.blocker).toBe(`${RUN_IN_PROGRESS}. ${REFINING_REASON}`);
+  // The reason the agent is refining comes before the Run's.
+  expect(refining.blocker).toBe(`${REFINING_REASON}. ${RUN_IN_PROGRESS}`);
   expect(refining.rejectBlocker).toBe(REFINING_REASON);
 });
 
@@ -319,7 +373,7 @@ test("a Task waiting for a fix Task stays in Active with the fix Task, and no ca
 });
 
 test("the number of cards that wait for a decision counts the Backlog cards (Proposals and red Drift cards), not Active, or the Drifts a delivered resolution lists", () => {
-  const resolution = proposal({ id: "res", created: "2026-10-02T10:00:00.000Z", kind: "resolution", resolves: [{ drift: "0005", title: "Code refunds late", previous: [], unifies: [], decision: "Closed, nothing changes", note: null }] });
+  const resolution = proposal({ id: "res", created: "2026-10-02T10:00:00.000Z", kind: "resolution", resolves: [{ drift: "0005", title: "Code refunds late", previous: [], unifies: [], decision: "Closed, nothing changes", note: null, merge: false }] });
   const fix: TaskView["blockedBy"] = [{ kind: "fix", task: "0009", title: "Fix refunds", drift: "0004", driftTitle: "Refunds differ" }];
   const snap = snapshot({
     proposals: [proposal({ id: "0007", created: "2026-10-01T10:00:00.000Z" }), resolution],
@@ -330,6 +384,13 @@ test("the number of cards that wait for a decision counts the Backlog cards (Pro
   expect(columns[0]?.cards.map((card) => card.key)).toEqual(["proposal:0007", "proposal:res", "drift:0003", "drift:0004"]);
   expect(boardDecisionCount(snap)).toBe(4);
   expect(boardDecisionCount(snap)).toBe(columns[0]?.cards.length ?? 0);
+});
+
+test("with the function off, a Draft left half-way that no agent writes does not await a decision; one an agent writes still does", () => {
+  const snap = snapshot({ proposals: [proposal({ id: "0001" }), proposal({ id: "0002", refining: true }), proposal({ id: "0003", refining: true, writer: WRITER })] });
+  expect(boardDecisionCount(snap)).toBe(3);
+  expect(boardDecisionCount(snap, true)).toBe(3);
+  expect(boardDecisionCount(snap, false)).toBe(2);
 });
 
 const announcement = (over: Partial<AnnouncementView> = {}): AnnouncementView => ({ id: "abc123", kind: "proposal", title: "Refunds", phase: "preparing", notes: [], announced: "2026-01-01T10:00:00.000Z", ...over });
@@ -465,7 +526,7 @@ test("a resolution's card has one row per Drift, written by number, with the dec
     snapshot({
       numbers: NUMBERS,
       proposals: [
-        proposal({ id: "0007", kind: "resolution", resolves: [{ drift: "0003", title: "Late refunds", previous: [], unifies: [], decision: "Code fixed with option Fix the code", note: "do it today" }, { drift: "0044", title: "Old", previous: [], unifies: [], decision: "(already resolved)", note: null }] }),
+        proposal({ id: "0007", kind: "resolution", resolves: [{ drift: "0003", title: "Late refunds", previous: [], unifies: [], decision: "Code fixed with option Fix the code", note: "do it today", merge: false }, { drift: "0044", title: "Old", previous: [], unifies: [], decision: "(already resolved)", note: null, merge: false }] }),
         proposal({ id: "0009" }),
       ],
     }),
@@ -482,7 +543,7 @@ test("a resolution's card has one row per Drift, written by number, with the dec
 test("an open resolution's rows list its Drifts, and no card is made for those Drifts", () => {
   const cards = buildBoard(
     snapshot({
-      proposals: [proposal({ id: "0007", kind: "resolution", resolves: [{ drift: "0003", title: "Late refunds", previous: [], unifies: [], decision: "Code fixed with option Fix the code", note: null }, { drift: "0044", title: "Old", previous: [], unifies: [], decision: "(already resolved)", note: null }] })],
+      proposals: [proposal({ id: "0007", kind: "resolution", resolves: [{ drift: "0003", title: "Late refunds", previous: [], unifies: [], decision: "Code fixed with option Fix the code", note: null, merge: false }, { drift: "0044", title: "Old", previous: [], unifies: [], decision: "(already resolved)", note: null, merge: false }] })],
       drifts: [drift({ id: "0003" })],
     }),
   )[0]?.cards ?? [];

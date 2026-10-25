@@ -1,9 +1,11 @@
 import type { ModelSuggestion } from "../../host/model-lists";
 import type { ComboboxOption } from "../ui/combobox";
 import type { ThemeSetting } from "../theme";
-import type { SettingSchema, SettingsValues } from "../../host/settings-schema";
+import { NTFY_SERVER_KEY, NTFY_TOPIC_KEY, type SettingSchema, type SettingsValues } from "../../host/settings-schema";
+import type { SoloKind } from "../../../../src/core/solo-mode";
 import type { ToWebview } from "../../protocol";
 import { ompTooOldText } from "../../../../src/core/omp-version";
+import { ntfyTarget } from "../../../../src/core/ntfy";
 
 export interface SettingsGroup {
   title: string;
@@ -135,3 +137,52 @@ export function systemCertificatesLine(state: CertificatesState | null): { tone:
   if (state.count === undefined || when === undefined) return { tone: "exporting", text: "Exporting system certificates…" };
   return { tone: "ready", text: `${state.count} certificates, exported ${when}.` };
 }
+
+/** What the host says about the test notification, from its `testNotification` message without its type; null while none was sent. */
+export type TestNotificationState = Omit<Extract<ToWebview, { type: "testNotification" }>, "type">;
+
+/** Why Send test notification is not available, or null when it is: an empty topic, or a server or topic that is not valid, read from the saved settings. */
+export function testNotificationBlock(values: Readonly<Record<string, SettingsValues>>): string | null {
+  const target = ntfyTarget(values[NTFY_SERVER_KEY]?.user, values[NTFY_TOPIC_KEY]?.user);
+  if (target.state === "off") return "Set an ntfy topic first.";
+  return target.state === "invalid" ? "Fix the ntfy server or topic first." : null;
+}
+
+/** The line under Send test notification: that the test was sent, or why it was not; nothing before the first test and while one is being sent. */
+export function testNotificationLine(state: TestNotificationState | null): { tone: "sent" | "failed"; text: string } | null {
+  if (state === null || state.state === "sending") return null;
+  if (state.state === "sent") return { tone: "sent", text: "Test notification sent." };
+  return { tone: "failed", text: `Test notification not sent: ${state.reason ?? "the request failed"}.` };
+}
+
+/** The explanation under the title of the `Solo Mode` row, as Markdown. */
+export const SOLO_EXPLANATION = "Use Trama alone in a repository where the others do not: Trama's files stay in this working copy, kept out of git by `.git/info/exclude`. They are versioned nowhere else.";
+
+/** The note under the control of the `Solo Mode` row, always shown. */
+export const SOLO_NOTE = "Only this workspace.";
+
+/** Shown, in secondary text, when the folder is not in a git repository: the control is off and disabled. */
+export const SOLO_NEEDS_GIT_TEXT = "Solo mode needs a git repository.";
+
+/** The warning above the list of Trama's files that git still tracks. */
+export const SOLO_TRACKED_WARNING = "These Trama files are tracked by git, so their changes are still committed:";
+
+/** The two kinds of an active Solo mode, in the order of the `Exclude` field, each with its entry and the description of the chosen one (Markdown). */
+export const SOLO_EXCLUDE_OPTIONS: readonly { value: Exclude<SoloKind, "off">; label: string; description: string }[] = [
+  { value: "folders", label: "Whole folders", description: "Keeps out of git `.trama/`, the agent skills folder and `.omp/`." },
+  { value: "files", label: "Only Trama's files", description: "Keeps out of git `.trama/`, the `trama-*` skills and the files Trama writes in `.omp/`, for folders the team also uses." },
+];
+
+/** How many tracked files the warning lists before `and <N> more`. */
+const SOLO_TRACKED_SHOWN = 10;
+
+/** The tracked files of Trama as the warning shows them: at most 10 paths, then the number of the others (0 when there are none). */
+export function trackedPreview(tracked: readonly string[]): { shown: string[]; more: number } {
+  return { shown: tracked.slice(0, SOLO_TRACKED_SHOWN), more: Math.max(0, tracked.length - SOLO_TRACKED_SHOWN) };
+}
+
+/** What the host's `soloMode` says, without its type; null until the first message (and always outside a project): the row is not shown then. */
+export type SoloState = Omit<Extract<ToWebview, { type: "soloMode" }>, "type">;
+
+/** The setting the `Solo Mode` row follows in the `Project` group of the Settings tab and of the wizard's step. */
+export const SKILLS_DIR_KEY = "trama.skillsDir";

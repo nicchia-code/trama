@@ -5,7 +5,7 @@ import { joinReasons } from "../../../../src/core/design";
 import { REQUIRED_STATUS, appliesUnder } from "../../../../src/core/required";
 import type { DriftView, ProposalView } from "../../../../src/core/snapshot";
 import type { RefinementView } from "../../protocol";
-import { approveBlocker, decisionLabel, QUEUED_REASON, type RefineStatus, driftReworkBlocker, finishingBlocker, recurringLabel, REFINEMENT_OFF, REFINING_REASON, refineApproveBlocker, refineStatus, RESUME_REASON, resolvedRows, TO_REFINE_TIP, unifiedLabel } from "../board/logic";
+import { decisionBlockers, decisionLabel, isRefining, MERGE_LABEL, PAUSED_TIP, QUEUED_REASON, type RefineStatus, driftReworkBlocker, finishingBlocker, recurringLabel, REFINEMENT_OFF, REFINING_REASON, refineStatus, resolvedRows, TO_REFINE_TIP, unifiedLabel } from "../board/logic";
 import { driftComparison } from "../drift-compare";
 import { dismissBlocker } from "../dismiss";
 import { InlineMarkdown, Markdown } from "../markdown";
@@ -51,7 +51,7 @@ export function ActionButton({
   onClick: () => void;
 }) {
   const button = (
-    <Button variant={variant} size="sm" disabled={disabled} aria-description={tooltip} onClick={onClick}>
+    <Button variant={variant} size="sm" disabled={disabled} aria-disabled={disabled || undefined} aria-description={tooltip} onClick={onClick}>
       {Icon ? <Icon aria-hidden="true" focusable="false" /> : null}
       {label}
     </Button>
@@ -156,6 +156,20 @@ export function RecurringBadge({ previous }: { previous: readonly { id: string; 
         </Badge>
       </TooltipTrigger>
       <TooltipContent>{recurringLabel(previous)}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** The badge of a Drift from a merge: it only says the code may be right, and opens nothing. */
+export function MergeBadge() {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge variant="outline" aria-label={MERGE_LABEL} data-badge>
+          Merge
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent>{MERGE_LABEL}</TooltipContent>
     </Tooltip>
   );
 }
@@ -286,6 +300,7 @@ function ResolvesBlock({ proposal, numbers, showDrift }: { proposal: ProposalVie
                   <span className="title break-words">{row.title}</span>
                   {row.unifies.length > 0 ? <UnifiedBadge count={row.unifies.length} /> : null}
                   {row.previous.length > 0 ? <RecurringBadge previous={row.previous} /> : null}
+                  {row.merge ? <MergeBadge /> : null}
                   <span className="break-words text-muted-foreground">{row.decision}</span>
                 </button>
               </TooltipTrigger>
@@ -301,9 +316,10 @@ function ResolvesBlock({ proposal, numbers, showDrift }: { proposal: ProposalVie
 /** Heading of the changed-files block: the Stale wording when refining is off, else what the refining status means. */
 function refineHeading(refine: RefineStatus | null): string {
   if (refine === null) return "Stale: the Model changed since the Proposal was written";
-  if (refine === "running") return REFINING_REASON;
+  if (isRefining(refine)) return REFINING_REASON;
   if (refine === "queued") return QUEUED_REASON;
   if (refine === "stopped") return "Refining stopped before the hand-over. Approve resumes it.";
+  if (refine === "paused") return PAUSED_TIP;
   return "To refine: the Model changed since the Proposal was written. Approve refines it first.";
 }
 
@@ -326,8 +342,7 @@ function ProposalBlock({
   const open = p.requires.filter((r) => appliesUnder(r.status));
   const unusable = p.requires.filter((r) => !appliesUnder(r.status));
   const refine = refineStatus(p, refinement);
-  const blocker = joinReasons([finishing, refine === null ? approveBlocker(p, numbers, refinement.runInProgress) : refineApproveBlocker(refine, p, numbers, refinement)]);
-  const rejectReason = joinReasons([finishing, refine === "running" ? REFINING_REASON : refine === "stopped" ? RESUME_REASON : null]);
+  const { approve: blocker, reject: rejectReason } = decisionBlockers(p, refine, numbers, refinement, finishing);
   return (
     <section className="mt-4.5 rounded-md border border-dashed border-blue-600 p-3 dark:border-blue-400">
       <div className="text-[11px] tracking-wide text-muted-foreground uppercase">
@@ -477,6 +492,7 @@ export function DetailsPanel({
         <div className="flex flex-wrap items-center gap-1.5">
           {drift && drift.unifies.length > 0 ? <UnifiedBadge count={drift.unifies.length} /> : null}
           {previous && previous.length > 0 ? <RecurringBadge previous={previous} /> : null}
+          {drift?.merge ? <MergeBadge /> : null}
           {drift?.unifiedInto != null ? (
             <Badge variant="outline" data-state="unified">
               Unified

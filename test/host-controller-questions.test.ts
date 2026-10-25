@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, mock, test } from "bun:test";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { questionAborted, type QuestionRequest } from "../src/core/questions";
 
 // A minimal editor: one webview panel that records what it is shown and what it is sent.
@@ -100,7 +100,7 @@ test("a question round opens the panel even when the workspace has no Trama proj
   const round = session.current();
 
   expect(panels).toHaveLength(1);
-  expect(panels[0]?.title).toBe(basename(dir));
+  expect(panels[0]?.title).toBe("Get Started");
   expect(round).not.toBeNull();
   // The webview says it is ready: the overlay of the open round is sent to it, though there is no snapshot.
   panels[0]?.receive?.({ type: "ready" });
@@ -131,7 +131,7 @@ test("reopening the panel with an open round shows the round without offering to
 
   expect(informationMessages).toHaveLength(1);
   expect(panels).toHaveLength(1);
-  expect(panels[0]?.title).toBe(basename(dir));
+  expect(panels[0]?.title).toBe("Get Started");
   expect(session.current()?.id).toBe(round?.id);
   panels[0]?.receive?.({ type: "ready" });
   expect(panels[0]?.messages).toContainEqual({ type: "questions", round: expect.objectContaining({ id: round?.id }) });
@@ -141,21 +141,51 @@ test("reopening the panel with an open round shows the round without offering to
   controller.dispose();
 });
 
-test("panel title follows the System heading and falls back when the Model becomes unreadable", async () => {
+test("panel title is the name of the view shown and a refresh never changes it", async () => {
   cpSync(join(import.meta.dir, "../examples/shop"), dir, { recursive: true });
   workspaceFolders = [{ uri: { fsPath: dir, scheme: "file" } }];
   const controller = new Controller({ fsPath: dir } as never);
   await controller.open();
   const panel = panels.at(-1);
-  expect(panel?.title).toBe("Shop");
+  expect(panel?.title).toBe("Board");
 
+  const names = { diagram: "Diagram", requirements: "Requirements", specs: "Specs", history: "History", settings: "Settings", board: "Board" };
+  for (const [view, name] of Object.entries(names)) {
+    panel?.receive?.({ type: "viewChanged", view });
+    expect(panel?.title).toBe(name);
+  }
+
+  panel?.receive?.({ type: "viewChanged", view: "specs" });
   writeFileSync(join(dir, ".trama/model/system.md"), "#  New System  \n");
   (controller as unknown as { refresh(): void }).refresh();
-  expect(panel?.title).toBe("New System");
-
+  expect(panel?.title).toBe("Specs");
   writeFileSync(join(dir, ".trama/model/system.md"), "not a valid System");
   (controller as unknown as { refresh(): void }).refresh();
-  expect(panel?.title).toBe(basename(dir));
+  expect(panel?.title).toBe("Specs");
+  controller.dispose();
+});
+
+test("a panel opened on a view carries its name, and Settings stays Settings under the guided setup", async () => {
+  cpSync(join(import.meta.dir, "../examples/shop"), dir, { recursive: true });
+  workspaceFolders = [{ uri: { fsPath: dir, scheme: "file" } }];
+  const controller = new Controller({ fsPath: dir } as never);
+  await controller.show("history");
+  expect(panels.at(-1)?.title).toBe("History");
+  panels.at(-1)?.closed?.();
+
+  await controller.openSettings({ type: "guidedSetup", mode: "settings" } as never);
+  const panel = panels.at(-1);
+  expect(panel?.title).toBe("Settings");
+  panel?.receive?.({ type: "viewChanged", view: "settings" });
+  expect(panel?.title).toBe("Settings");
+  controller.dispose();
+});
+
+test("a window without folders opens the panel titled Settings", async () => {
+  workspaceFolders = [];
+  const controller = new Controller({ fsPath: dir } as never);
+  await controller.openSettings();
+  expect(panels.at(-1)?.title).toBe("Settings");
   controller.dispose();
 });
 

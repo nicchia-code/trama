@@ -303,6 +303,30 @@ describe.skipIf(!posix)("the turns", () => {
     }
   });
 
+  test("the developer's answer to a permission request and each of his messages are signalled once; an answer that was not accepted is not", async () => {
+    const session = await client().start(launch("", {}, ["--model", "m/one", "acp"]));
+    try {
+      const requests: PermissionRequest[] = [];
+      const answered: string[] = [];
+      let sent = 0;
+      session.onPermissionRequest((request) => requests.push(request));
+      session.onPermissionAnswered((id) => answered.push(id));
+      session.onSend(() => sent++);
+      const turn = session.sendPrompt({ text: "perm" });
+      await until(() => requests.length === 1);
+      session.answerPermission("unknown", "once");
+      session.answerPermission(requests[0]!.requestId, "nope");
+      expect(answered).toEqual([]);
+      void session.send({ text: "after" }, "queue", () => undefined);
+      expect(sent).toBe(1);
+      session.answerPermission(requests[0]!.requestId, "once");
+      expect(answered).toEqual([requests[0]!.requestId]);
+      await turn;
+    } finally {
+      await session.stop();
+    }
+  });
+
   test("a message held for a permission request is not delivered when Stop cancels the request", async () => {
     const session = await client().start(launch("", {}, ["--model", "m/one", "acp"]));
     try {

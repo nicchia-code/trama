@@ -7,7 +7,7 @@ import { TramaError, UsageError } from "../../../src/core/errors";
 import { clearDoneTasks } from "../../../src/core/clear-done";
 import { deleteTask } from "../../../src/core/delete-task";
 import { findInstructionFiles } from "../../../src/core/instruction-files";
-import { type ApprovalBlock, approvalBlock, approveProposal, getProposal, health, listProposals, type Proposal, rejectProposal, requiredProposals, resolutionHolding, touchedFiles } from "../../../src/core/proposals";
+import { type ApprovalBlock, approvalBlock, approveProposal, getProposal, health, listProposals, type Proposal, rejectProposal, requiredProposals, resolutionHolding, stillBeingWritten, touchedFiles } from "../../../src/core/proposals";
 import { type PreparedQuestion, preparedOutcome, preparedStatus } from "../../../src/core/prepared";
 import { reworkProposalBlocker, reworkProposalDrifts, resolveDriftBlocker, resolveDriftsBlocker, runWindowBlocker, unifiableDrifts, unifyDriftsBlockers, writePreparedResolution } from "../../../src/core/resolution";
 import type { QuestionAnswer } from "../../../src/core/questions";
@@ -19,9 +19,10 @@ import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
 import { attachedDrift, blockedTasks, dismissDrift, getDrift, getTask, getTaskOrNull, listDrifts, listTasks, originDesign, requireNotAttached } from "../../../src/core/work";
 import type { AgentAction, NavigateOptions, RefinementView, RunEstimateView, SetupChoice, ToHost, ToWebview, ViewName, WorkspaceFolderView } from "../protocol";
 import type { MenuViewName } from "../menu-protocol";
-import { listAnnouncements } from "../../../src/core/announcements";
+import { VIEW_LABELS } from "../view-labels";
+import { type Announcement, listAnnouncements } from "../../../src/core/announcements";
 import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
-import { configuredAsyncDriftResolver, configuredAutoUpdateStaleProposals, configuredMaxParallelAgents, configuredModels, configuredOmpPath, configuredParallelExecution, configuredSkillsDir, configuredSystemCertificates, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, installOmp, launchAgent, type LogoutOutcome, launched, loginOmp, logoutOmp, openAskMore, settings, startHeldJob } from "./agent";
+import { configuredAsyncDriftResolver, configuredAutoUpdateStaleProposals, configuredMaxParallelAgents, configuredModels, configuredNtfyTarget, configuredOmpPath, configuredParallelExecution, configuredSkillsDir, configuredSystemCertificates, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, installOmp, launchAgent, type LogoutOutcome, launched, loginOmp, logoutOmp, openAskMore, settings, startHeldJob } from "./agent";
 import { bundledUnifyInstructions } from "./bundled";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
 import { driftWork, driftsFinishing, localProjectJobs, onAgentStopped, onDriftResolutionChange, onProposalDelivered, onStoppedFollowing, proposalsFinishing, receiveNotice, releaseFiledWork, type RunAll, tasksFinishing, unifyingDrifts } from "./drift-resolution";
@@ -59,19 +60,25 @@ import {
   refinementView,
   switchedOff,
   withdraw,
+  writtenNow,
 } from "./refinement";
 import { planRuns, runSequence, runSequenceTogether, startRuns, type AppliedModel, type PlannedRun } from "./run-groups";
 import { runAllEstimate } from "./run-all-estimate";
 import { ompModels } from "./model-lists";
 import { ensureOmpUpdated, findOmp, forgetUpdateCheck } from "./omp-update";
 import { cursorKeySaved, onCursorApiKeyChanged, removeCursorApiKey, saveCursorApiKey } from "./cursor-api-key";
+import { ntfyToken, ntfyTokenSaved, onNtfyTokenChanged, removeNtfyToken, saveNtfyToken } from "./ntfy-token";
+import { sendNtfy } from "./away-notices";
+import { testText } from "../../../src/core/away-notices";
 import { ompLoginProvider } from "../omp-login";
 import { ompStatus } from "./omp-status";
 import { exportFailureMessage, onSystemCertificatesChanged, runExport, systemCertificatesState } from "./system-certificates";
 import { confirmScanSystem } from "./scan-confirm";
 import { planSettingChange, settingsSchema, settingTitle, type SettingPlan, type SettingSchema, type SettingsValues } from "./settings-schema";
 import { resolveMarkdownFile } from "./paths";
+import type { SoloKind } from "../../../src/core/solo-mode";
 import { checkSkills, fileFolders, findProject, initializeProject, NO_PROJECT_WARNING, updateSkills } from "./project";
+import { inGitRepository, soloModeMessage, writeSoloMode } from "./solo-mode";
 import { folderChildren, folderInside, gitIgnored, type RawEntry } from "./folder-tree";
 import { askMoreTarget } from "./question-state";
 import type { QuestionSession } from "./question-session";
@@ -122,6 +129,19 @@ async function askCursorApiKey(): Promise<string | undefined> {
   });
   const key = typed?.trim();
   return key === undefined || key === "" ? undefined : key;
+}
+
+/** The masked input box of the ntfy access token: the text without spaces around it, or undefined for Esc. A blank text cannot be confirmed. */
+async function askNtfyToken(): Promise<string | undefined> {
+  const typed = await vscode.window.showInputBox({
+    title: "ntfy Access Token",
+    prompt: "Paste the access token of your ntfy server.",
+    password: true,
+    ignoreFocusOut: true,
+    validateInput: (text) => (text.trim() === "" ? "Enter an access token." : undefined),
+  });
+  const token = typed?.trim();
+  return token === undefined || token === "" ? undefined : token;
 }
 
 const notBlank = (message: string) => (value: string) => (value.trim() === "" ? message : undefined);
@@ -238,7 +258,7 @@ export class Controller implements vscode.Disposable {
       } catch {
         // A folder that cannot be read counts as empty.
       }
-      return { name: folder.name, root, hasFiles };
+      return { name: folder.name, root, hasFiles, inGit: inGitRepository(root) };
     });
   }
 
@@ -308,6 +328,7 @@ export class Controller implements vscode.Disposable {
   private setPanelView(view: ViewName | undefined): void {
     if (view === this.panelView) return;
     this.panelView = view;
+    if (view !== undefined && this.panel) this.panel.title = VIEW_LABELS[view];
     for (const listener of [...this.shownViewListeners]) listener(view);
   }
 
@@ -367,17 +388,29 @@ export class Controller implements vscode.Disposable {
           finish("The folder to initialize is not in the workspace any more.");
           return;
         }
-        project = await initializeProject(root);
+        project = await initializeProject(root, message.solo);
         if (project === undefined) {
           finish(null);
           return;
         }
         this.refresh();
+        this.postSolo();
       } else {
         project = findProject();
         if (project === undefined && message.mode === "empty-model") {
           finish("This workspace has no Trama project.");
           return;
+        }
+        // Solo mode of an empty-Model wizard: written after the settings and before the path, only when the choice differs from the project's value; a failed write is a failed save.
+        if (project !== undefined && message.solo !== undefined) {
+          try {
+            writeSoloMode(project, message.solo, true);
+          } catch (error) {
+            this.postSolo();
+            finish(`Could not save Solo Mode: ${describeError(error).replace(/\.$/, "")}.`);
+            return;
+          }
+          this.postSolo();
         }
       }
     } catch (err) {
@@ -565,6 +598,48 @@ export class Controller implements vscode.Disposable {
     this.post({ type: "cursorApiKey", saved: cursorKeySaved() });
   }
 
+  /** Sends the panel whether an ntfy access token is saved: only that, never the token. */
+  private postNtfyToken(): void {
+    this.post({ type: "ntfyToken", saved: ntfyTokenSaved() });
+  }
+
+  /**
+   * Set/Change access token: the masked input box of the editor, then the token in the secret storage (a new one replaces the old). Esc, or a secret storage that fails (the
+   * editor tells the developer), changes nothing; the panel is told the state as it is either way, so the focus goes back to the button.
+   */
+  private async saveTypedNtfyToken(): Promise<void> {
+    const token = await askNtfyToken();
+    if (token !== undefined) await saveNtfyToken(token);
+    this.postNtfyToken();
+  }
+
+  /** Remove access token: no confirmation; the panel is told the state as it is when the secret storage fails. */
+  private async removeSavedNtfyToken(): Promise<void> {
+    await removeNtfyToken();
+    this.postNtfyToken();
+  }
+
+  /** True while a test notification of this window is on its way: a second one is refused. */
+  private testingNotification = false;
+
+  /**
+   * Send test notification: one request, no retry, to the server and topic of now with the saved token, whatever omp Chat or a job is doing; the panel hears `sending`, then `sent` or
+   * `failed` with the reason. Refused, with nothing said, while another test runs or when the server or the topic is not valid (the button is not available then).
+   */
+  private async sendTestNotification(): Promise<void> {
+    const target = configuredNtfyTarget();
+    if (this.testingNotification || target.state !== "ready") return;
+    this.testingNotification = true;
+    this.post({ type: "testNotification", state: "sending" });
+    try {
+      const root = findProject()?.root;
+      const outcome = await sendNtfy({ url: target.url, topic: target.topic, text: testText(root === undefined ? undefined : basename(root)), token: ntfyToken() });
+      this.post(outcome.ok ? { type: "testNotification", state: "sent" } : { type: "testNotification", state: "failed", reason: outcome.reason });
+    } finally {
+      this.testingNotification = false;
+    }
+  }
+
   /**
    * Set/Change API key: the masked input box of the editor, then, when the key is saved in the secret storage (a new key replaces the old one), the panel is told, and the omp
    * state, the providers and the model suggestions are read again, and omp is checked at `ompPath` (or the saved `trama.ompPath`), as at the end of a login terminal. Esc, or a
@@ -738,6 +813,27 @@ export class Controller implements vscode.Disposable {
     this.post({ type: "settings", schema, values });
   }
 
+  /** Sends the `Solo Mode` row the project's Solo mode as it is now; nothing without a project. */
+  private postSolo(): void {
+    const project = findProject();
+    if (project === undefined) return;
+    try {
+      this.post(soloModeMessage(project));
+    } catch (err) {
+      this.post({ type: "error", message: describeError(err) });
+    }
+  }
+
+  /** The `Solo Mode` row changed: writes it into the project; a failed write is an editor error with the reason. The row is told the real value either way. */
+  private setSolo(project: Project, solo: SoloKind): void {
+    try {
+      writeSoloMode(project, solo);
+    } catch (err) {
+      void vscode.window.showErrorMessage(`Trama: could not save Solo Mode: ${describeError(err).replace(/\.$/, "")}.`);
+    }
+    this.postSolo();
+  }
+
   /** Carries out a Settings plan. A refused plan saves nothing. The Settings tab is sent again either way, so its controls show the values that really hold. */
   private async applyPlan(plan: SettingPlan): Promise<void> {
     if (!plan.ok) {
@@ -763,10 +859,16 @@ export class Controller implements vscode.Disposable {
     this.stopEstimateTimer();
   }
 
+  /** The view a panel being created opens on: the one asked for, else the Board in a Trama project, Get Started in a folder that is none, Settings without folders. */
+  private openingView(): ViewName {
+    if (this.pendingView) return this.pendingView.view;
+    if (!vscode.workspace.workspaceFolders?.length) return "settings";
+    return findProject() ? "board" : "getstarted";
+  }
+
   private create(): void {
     const dist = vscode.Uri.joinPath(this.extensionUri, "dist");
-    const title = this.projectTitle();
-    const panel = vscode.window.createWebviewPanel("trama", title, vscode.ViewColumn.Active, {
+    const panel = vscode.window.createWebviewPanel("trama", VIEW_LABELS[this.openingView()], vscode.ViewColumn.Active, {
       enableScripts: true,
       retainContextWhenHidden: true,
       localResourceRoots: [dist, ...this.imageRoots()],
@@ -796,6 +898,8 @@ export class Controller implements vscode.Disposable {
         this.postCursorApiKey();
         void this.refreshOmp(true);
       }),
+      // Another window saved or removed the ntfy token: the Settings tab shows the token of now.
+      onNtfyTokenChanged(() => this.postNtfyToken()),
       ...(this.questions ? [this.questions.onChange((round) => this.post({ type: "questions", round }))] : []),
     ];
 
@@ -854,19 +958,6 @@ export class Controller implements vscode.Disposable {
     return [watcher.onDidCreate(onChange), watcher.onDidChange(onChange), watcher.onDidDelete(onChange)];
   }
 
-
-  private projectTitle(project = findProject()): string {
-    const folder = project?.root ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    // A window without folders has no System to name: the panel, which shows only the settings there, keeps the product's name.
-    const fallback = folder === undefined ? "Trama" : basename(folder);
-    try {
-      return project ? loadModel(project).system.name.trim() || fallback : fallback;
-    } catch {
-      return fallback;
-    }
-  }
-
-
   /** Posts a fresh snapshot; if the files cannot be read, posts the error and the view keeps its last snapshot. */
   private refresh(): void {
     // Turning the setting off empties the refinement queue: a Proposal already being refined goes on.
@@ -875,10 +966,8 @@ export class Controller implements vscode.Disposable {
     this.post({ type: "project", present: project !== undefined });
     if (!project) {
       this.post({ type: "workspaceFolders", folders: this.workspaceFolderViews() });
-      if (this.panel) this.panel.title = this.projectTitle(undefined);
       return;
     }
-    if (this.panel) this.panel.title = this.projectTitle(project);
     // The Proposals that waited for a Run of this window are settled once that Run has ended.
     if (this.refinement.waiting.length > 0 && !ownWindowRuns(project.root)) this.releaseWaiting(project);
     try {
@@ -890,7 +979,6 @@ export class Controller implements vscode.Disposable {
       const webview = this.panel?.webview;
       const snapshot = webview ? withImageUris(built, (path) => webview.asWebviewUri(vscode.Uri.file(path)).toString()) : built;
       const models: BoardModels = this.modelMemory ? boardModels(this.modelMemory, snapshot.proposals) : { proposals: {} };
-      if (this.panel) this.panel.title = snapshot.system.name.trim() || this.projectTitle(project);
       // The Drifts an agent was asked to resolve are forgotten once no resolution runs, so a later Resolve is not held by them.
       if (!work.resolving) this.namedByResolution.clear();
       const asyncResolver = configuredAsyncDriftResolver();
@@ -991,6 +1079,8 @@ export class Controller implements vscode.Disposable {
     }
     if (message.type === "ompStatusWanted") {
       this.postCursorApiKey();
+      this.postNtfyToken();
+      this.postSolo();
       this.postSystemCertificates();
       await this.refreshOmp();
       return;
@@ -1029,6 +1119,18 @@ export class Controller implements vscode.Disposable {
       await this.removeSavedCursorKey(message.ompPath);
       return;
     }
+    if (message.type === "setNtfyToken") {
+      await this.saveTypedNtfyToken();
+      return;
+    }
+    if (message.type === "removeNtfyToken") {
+      await this.removeSavedNtfyToken();
+      return;
+    }
+    if (message.type === "sendTestNotification") {
+      await this.sendTestNotification();
+      return;
+    }
     if (message.type === "instructionFilesWanted") {
       await this.postInstructionFiles(message.root);
       return;
@@ -1052,7 +1154,9 @@ export class Controller implements vscode.Disposable {
     if (message.type === "ready") {
       this.refresh();
       this.postSettings();
+      this.postSolo();
       this.postCursorApiKey();
+      this.postNtfyToken();
       this.postSystemCertificates();
       if (this.questions) this.post({ type: "questions", round: this.questions.current() });
       if (this.pendingView !== undefined) {
@@ -1067,6 +1171,13 @@ export class Controller implements vscode.Disposable {
     }
     if (message.type === "setSetting") {
       await this.applyPlan(planSettingChange(this.manifestSettings(), message.key, message.value));
+      // The files git tracks under the skills folder depend on it.
+      if (message.key === "trama.skillsDir") this.postSolo();
+      return;
+    }
+    if (message.type === "setSoloMode") {
+      const soloProject = findProject();
+      if (soloProject !== undefined) this.setSolo(soloProject, message.solo);
       return;
     }
     if (message.type === "writeDesignRequest") {
@@ -1324,23 +1435,31 @@ export class Controller implements vscode.Disposable {
     this.refresh();
   }
 
-  /** Whether `proposal` is refinable now; `writing` says a refinement of this window already writes it. */
-  private refinableProposal(project: Project, proposal: Proposal, writing = false): boolean {
+  /** Whether `proposal` is refinable now; `writing` says an agent writes the Draft (`writtenNow`), which is never refined. */
+  private refinableProposal(project: Project, proposal: Proposal, writing: boolean): boolean {
     return refinable({ kind: proposal.data.kind, attached: attachedDrift(project, proposal.id) !== null, open: proposal.data.status === "open", stale: health(project, proposal).stale.length > 0, draftRefining: proposal.data.refining === true, writing });
   }
 
-  /** Whether the Proposal `id` is refinable now. Unknown Proposals are not. */
+  /** Whether the Proposal `id` is refinable now, a Draft that an agent writes not included (a refinement of this window at work on it, or any live announcement bound to it). Unknown Proposals are not. */
   private refinableNow(project: Project, id: string): boolean {
     try {
-      return this.refinableProposal(project, getProposal(project, id));
+      const proposal = getProposal(project, id);
+      return this.refinableProposal(project, proposal, proposal.data.status === "draft" && writtenNow(id, this.refinement.running, listAnnouncements(project)));
     } catch {
       return false;
     }
   }
 
-  /** Why the Proposal `id` cannot be refined now (its reason), or null when it can: not refinable, or an approval block refinement does not clear. */
+  /**
+   * Why the Proposal `id` cannot be refined now (its reason), or null when it can: not refinable, or an approval block refinement does not clear.
+   * The refinement this window is starting for it, and the announcement its agent binds, are no reason: they are the refinement itself.
+   */
   private refinementRefusal(project: Project, id: string): string | null {
-    if (!this.refinableNow(project, id)) return "Refine this Proposal is unavailable: it is no longer stale or no longer refinable.";
+    try {
+      if (!this.refinableProposal(project, getProposal(project, id), false)) return "Refine this Proposal is unavailable: it is no longer stale or no longer refinable.";
+    } catch {
+      return "Refine this Proposal is unavailable: it is no longer stale or no longer refinable.";
+    }
     return refinementBlock(project, id)?.reason ?? null;
   }
 
@@ -1395,6 +1514,7 @@ export class Controller implements vscode.Disposable {
   private refineAllTake(project: Project): string[] {
     const held = new Set([...this.refinement.queued, ...this.refinement.running.keys(), ...this.refinement.waiting]);
     const finishing = proposalsFinishing(project.root);
+    const announced = listAnnouncements(project);
     const order = new Map(listProposals(project).map((proposal) => [proposal.id, proposal]));
     const candidates: PickFact[] = [];
     for (const id of backlogOrder([...order.values()].map((proposal) => ({ id: proposal.id, created: proposal.data.created })))) {
@@ -1402,7 +1522,7 @@ export class Controller implements vscode.Disposable {
       // Only an Open change, or a Draft left refining, can be refined: the others are skipped before anything costly is read.
       if (proposal === undefined || held.has(id) || proposal.data.kind !== "change" || (proposal.data.status !== "open" && proposal.data.refining !== true)) continue;
       try {
-        if (!this.refinableProposal(project, proposal)) continue;
+        if (!this.refinableProposal(project, proposal, proposal.data.status === "draft" && writtenNow(id, this.refinement.running, announced))) continue;
         const block = refinementBlock(project, id);
         if (finishing.includes(id) || (block !== null && block.kind !== "waiting")) candidates.push({ id, block: "other", requires: [] });
         else candidates.push({ id, block: block === null ? "none" : "requires", requires: requiredProposals(project, proposal).map((required) => required.id) });
@@ -1631,7 +1751,7 @@ export class Controller implements vscode.Disposable {
     const refuse = (): boolean => {
       const current = getProposal(project, id);
       let reason: string | null = null;
-      if (current.data.status !== "open") reason = `Proposal ${name} is ${current.data.status}`;
+      if (current.data.status !== "open") reason = current.data.status === "draft" ? stillBeingWritten(project, current, "rejected") : `Proposal ${name} is ${current.data.status}`;
       else if (attachedDrift(project, id) !== null) {
         try {
           requireNotAttached(project, id);
@@ -1714,8 +1834,8 @@ export class Controller implements vscode.Disposable {
     const send = async (resolved: ResolvedAction, announceProposal?: DesignAnnouncement | LaunchAnnouncement, instruction: Instruction = buildPrompt(resolved), checkSend: () => string | null = () => null, model?: RunModel, extra: LaunchJobOptions = {}) => {
       let refused: string | null = null;
       const canSend = () => (refused = refusal() ?? checkSend()) === null;
-      const rememberScan = resolved.kind === "scan" ? (startedAt: number) => rememberDeliveredScan(project, startedAt) : undefined;
-      const result = await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, canSend, resolved.kind === "implement" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" || resolved.kind === "rework-resolution" ? "resolve" : resolved.kind === "unify-drifts" ? "unify" : resolved.kind === "scan" ? "scan" : resolved.kind === "refine" ? "refine" : undefined, rememberScan, { filesDrifts: mayFileDrifts(resolved), severalTasks: resolved.kind === "implement-all", model, ...(resolved.kind === "implement" ? { task: resolved.task } : {}), ...extra });
+      const rememberScan = resolved.kind === "scan" || resolved.kind === "mergeScan" ? (startedAt: number) => rememberDeliveredScan(project, startedAt) : undefined;
+      const result = await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, canSend, resolved.kind === "implement" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" || resolved.kind === "rework-resolution" ? "resolve" : resolved.kind === "unify-drifts" ? "unify" : resolved.kind === "scan" || resolved.kind === "mergeScan" ? "scan" : resolved.kind === "refine" ? "refine" : undefined, rememberScan, { filesDrifts: mayFileDrifts(resolved), severalTasks: resolved.kind === "implement-all", model, ...(resolved.kind === "implement" ? { task: resolved.task } : {}), ...(resolved.kind === "reconcileMerge" ? { subAgents: false } : {}), ...extra });
       if (refused !== null) throw new TramaError(refused);
       return result;
     };
@@ -1764,6 +1884,12 @@ export class Controller implements vscode.Disposable {
         await send(action, { kind: "check", title: "Scanning System" });
         return;
       }
+      case "mergeScan":
+        await send(action, { kind: "check", title: "Scanning System" });
+        return;
+      case "reconcileMerge":
+        await send(action);
+        return;
       case "implement": {
         const task = getTask(project, action.task).id;
         await send({ kind: "implement", task }, undefined, undefined, undefined, this.runModelOfTask(project, task));
@@ -1780,7 +1906,7 @@ export class Controller implements vscode.Disposable {
         if (runs.length <= 1) {
           // The only Run's job is the Run all: it keeps what the time-left estimate needs, under the identity its job will have.
           const id = randomUUID();
-          const runAll: RunAll = { launchedAt, parallel, groups: [{ jobId: id, tasks: only?.tasks ?? [], seats: limit, terminal: null, ended: false }], high: null, progress: 0 };
+          const runAll: RunAll = { launchedAt, parallel, groups: [{ jobId: id, tasks: only?.tasks ?? [], seats: limit, terminal: null, ended: false }], reference: null, plan: null, progress: 0 };
           await send({ kind: "implement-all", group: only?.group }, undefined, undefined, undefined, only?.run, { id, runAll });
           return;
         }
@@ -1788,7 +1914,7 @@ export class Controller implements vscode.Disposable {
         // The places each Run gets are decided at the launch, as the sequence decides them; the Runs are told apart by their Task lists.
         const seated = parallel ? (({ now, waiting }) => [...now, ...waiting])(startRuns(runs, limit)) : runs.map((run) => ({ ...run, seats: limit }));
         const jobIds = new Map<readonly string[], string>(runs.map((run) => [run.tasks, randomUUID()]));
-        const runAll: RunAll = { launchedAt, parallel, groups: seated.map((run) => ({ jobId: jobIds.get(run.tasks) as string, tasks: run.tasks, seats: run.seats, terminal: null, ended: false })), high: null, progress: 0 };
+        const runAll: RunAll = { launchedAt, parallel, groups: seated.map((run) => ({ jobId: jobIds.get(run.tasks) as string, tasks: run.tasks, seats: run.seats, terminal: null, ended: false })), reference: null, plan: null, progress: 0 };
         startHeldJob(project.root, "run", held, runAll);
         const launch = (planned: PlannedRun & { seats?: number }, onEnd: (abnormal?: string) => void) => this.launchSequenceRun(project, planned, jobIds.get(planned.tasks), onEnd);
         const finish = (abnormal?: string) => endHeldJob(project.root, held, abnormal);

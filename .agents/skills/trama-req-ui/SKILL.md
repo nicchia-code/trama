@@ -25,6 +25,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 
 - **Interfaccia del lavoro dell'agente** (`agents.md`): Usa quando mostri richieste di design, terminale dell'agente, agente e modelli e gli avvisi del controllo di esecuzione. Sections: `design-request`, `agent-terminal`, `agent-launching`, `time`, `developer.INSTALL_OMP`.
 - **Interfaccia di Ask more** (`ask-more.md`): Usa quando costruisci o cambi Ask more, le modali dei dettagli di Task e Drift sulla Board o il pulsante Ask more nelle domande. Sections: `developer.ASK_MORE`, `developer.DELETE_TASK`.
+- **Away notifications interface** (`away-notifications.md`): Use when writing the texts of Trama's ntfy notifications or building the Notifications sub-group of the Settings tab. Sections: `away-notifications`, `notice`, `developer.SET_NTFY_TOKEN`, `developer.SEND_TEST_NOTIFICATION`.
 - **Board interface** (`board.md`): Usa quando mostri le colonne, le schede e i pulsanti della Board. Sections: `panel/Board`.
 - **Livelli del Diagramma** (`diagram.md`): Usa quando costruisci o cambi i livelli del Diagramma: la radice, Whole System, il livello di un Actor, il breadcrumb e il riquadro al passaggio del puntatore. Sections: `diagram`, `diagram/System level`, `diagram/Whole System level`, `diagram/Actor level`.
 - **Interfaccia del focus** (`focus.md`): Usa quando mostri il focus nel Diagramma, nei Requisiti o nelle Specs, o i pulsanti View e i chip che lo aprono. Sections: `focus`.
@@ -44,6 +45,8 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Scheda Settings** (`settings-specs.md`): Usa quando costruisci o cambi la scheda Settings del pannello. Sections: `panel/Settings`.
 - **Passi del wizard di setup** (`setup-wizard-steps.md`): Usa quando costruisci o cambi il contenuto dei passi Path, omp, Models, Folders e Summary del wizard di setup. Sections: `setup-wizard/Path`, `setup-wizard/omp`, `setup-wizard/Models`, `setup-wizard/Folders`, `setup-wizard/Summary`.
 - **Wizard di setup** (`setup-wizard.md`): Usa quando costruisci o cambi il wizard di setup e Guided setup: disposizione, indicatore dei passi, barra dei pulsanti e impostazioni dei passi. Sections: `setup-wizard`.
+- **Solo merge** (`solo-merge.md`): Use when building Merge in the side menu with Solo mode: the button, its lines, the branch list, the confirmations and the merge notices. Sections: `solo-merge`.
+- **Solo mode** (`solo-mode.md`): Use when building the Solo Mode row of the Settings tab and of the setup wizard's Project step. Sections: `solo-switch`.
 - **Scheda Specs** (`specs.md`): Usa quando costruisci o cambi la scheda Specs del pannello. Sections: `panel/Specs`.
 - **System certificates** (`system-certificates.md`): Use when building the System Certificates setting, its state and Refresh, its command and warnings, or the text that tells a certificate error. Sections: `developer.REFRESH_SYSTEM_CERTIFICATES`.
 - **Task progress interface** (`task-progress.md`): Use when showing the percentage the agent declared on a Task, on the Board or in the command line. Sections: `task/Taken by the agent`.

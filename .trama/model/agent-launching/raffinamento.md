@@ -21,6 +21,10 @@ Alla fine del lavoro dell'agente Trama guarda la Proposal raffinata:
 
 La coda vive nella memoria della finestra: riaprire l'editor la perde e le Proposal che aspettavano tornano da raffinare. Ogni finestra conta solo i raffinamenti che ha lanciato lei. Spegnere la funzione svuota la coda, e le Proposal che aspettavano tornano obsolete come senza la funzione; i raffinamenti in corso finiscono come gli altri. Un raffinamento non è un Run né una risoluzione: non ferma e non è fermato da Run, Resolve, Unify Drifts, scan, design e import.
 
+A Draft that an agent is writing is never offered for a decision, whoever launched that agent: this window's queue, another window, an agent started before the editor was reopened or by hand. Trama recognises that work from the agent's announcement still bound to the Draft. Its card stays in its place in Backlog marked as being refined, with the phase and the latest note of that agent, and Approve, Reject and Rework with feedback are unavailable, saying that the agent is refining it; there is nothing to cancel, because the work is not in this window's queue. This holds whether the function is on or off. When that agent stops, the Draft is again one left half-way, to refine, and Approve resumes it.
+
+With the function off, a Draft left half-way that no agent is writing keeps its card in its place, marked to refine, but Approve, Reject and Rework with feedback are unavailable, saying that it is still being written and that turning the function on resumes the refinement. An approval or a rejection that reaches Trama anyway, because the panel had not redrawn yet, is refused as for any Draft, saying the Proposal is still being written.
+
 ## States
 
 ### Fermo (initial)

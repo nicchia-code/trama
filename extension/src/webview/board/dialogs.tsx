@@ -1,7 +1,7 @@
 import { MessageCircleQuestion, Tag, Trash2, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import type { ModelSuggestion } from "../../host/model-lists";
-import { DriftCompare, RecurringBadge, UnifiedBadge, UnifiesList } from "../diagram/panel";
+import { DriftCompare, MergeBadge, RecurringBadge, UnifiedBadge, UnifiesList } from "../diagram/panel";
 import { Markdown } from "../markdown";
 import { composeRoleValue, DEFAULT_LEVEL, modelOptions, splitRoleValue, thinkingLevels, withModel } from "../settings/logic";
 import { ThinkingLevelSelect } from "../settings/thinking-level";
@@ -159,6 +159,7 @@ export function DriftDetailsDialog({ card, onClose }: { card: DriftCard | undefi
               <DialogTitle className="text-[15px] leading-snug break-words">{`${card.name.text} ${card.title}`}</DialogTitle>
               {card.drift.unifies.length > 0 ? <UnifiedBadge count={card.drift.unifies.length} /> : null}
               {card.drift.previous.length > 0 ? <RecurringBadge previous={card.drift.previous} /> : null}
+              {card.drift.merge ? <MergeBadge /> : null}
             </div>
           </DialogHeader>
           {card.refs.length > 0 ? <RefChips refs={card.refs} /> : null}

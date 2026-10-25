@@ -4,8 +4,9 @@ Usa quando mostri Get Started, Start from Scratch, Import from Code o il Diagram
 
 ## panel/Get Started
 
-- Il pannello mostra soltanto Get Started e Settings, che il developer sceglie dal menu laterale (`ui#menu-laterale`). Il titolo della scheda del pannello è il nome della prima cartella dell'area di lavoro.
+- Il pannello mostra soltanto Get Started e Settings, che il developer sceglie dal menu laterale (`ui#menu-laterale`). The title of the panel's tab is `Get Started`, or `Settings` while it shows the settings (`ui#panel`).
 - La scheda mostra il wizard di setup (`ui#setup-wizard`). Nei passi `Path` e `Summary`, e solo in quelli, sotto la frase del passo e prima del suo contenuto, l'avviso: «Trama will create a `.trama` folder that describes this project. It holds no secrets and is meant to be committed. It also writes the agent skills and the Trama sub-agent definition into this project, which are meant to be committed too.» Gli altri passi non lo mostrano.
+- With `Solo Mode` on in the `Project` step (`ui#solo-switch`), the same notice, in the same place, reads instead: «Trama will create a `.trama` folder that describes this project, and write the agent skills and the Trama sub-agent definition into this project. Solo mode keeps them out of git in this working copy only: they are never committed and are versioned nowhere else.»
 
 ## panel/Diagram
 

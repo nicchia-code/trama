@@ -1,11 +1,14 @@
 import { randomBytes } from "node:crypto";
+import { basename } from "node:path";
 import * as vscode from "vscode";
 import { boardDecisionCount } from "../../../../src/core/board-decisions";
 import { buildSnapshot } from "../../../../src/core/snapshot";
-import type { MenuSituation, MenuViewName, ToMenuWebview } from "../../menu-protocol";
+import type { Project } from "../../../../src/core/store";
+import type { MenuSituation, MenuViewName, MergeMenuState, ToMenuWebview } from "../../menu-protocol";
 import type { AgentAction, ViewName } from "../../protocol";
 import { describeError } from "../controller";
-import { driftsFinishing, proposalsFinishing, tasksFinishing } from "../drift-resolution";
+import { driftsFinishing, onDriftResolutionChange, proposalsFinishing, tasksFinishing } from "../drift-resolution";
+import { configuredAutoUpdateStaleProposals } from "../agent";
 import { webviewHtml } from "../html";
 import { configuredTheme } from "../omp-chat/view";
 import { findProject } from "../project";
@@ -24,6 +27,26 @@ export interface MenuPanel {
   onDidChangeShownView(listener: (view: ViewName | undefined) => void): { dispose(): void };
 }
 
+/** What the menu asks of Merge of Solo mode (`SoloMerge`). */
+export interface MenuMerge {
+  /** Merge as the menu shows it; undefined with Solo mode off. */
+  state(): MergeMenuState | undefined;
+  merge(): Promise<void>;
+  openMergeEditor(): Promise<void>;
+  reconcile(): Promise<void>;
+  abort(): Promise<void>;
+  /** Fired when `state()` may have changed. */
+  readonly onDidChange: vscode.Event<void>;
+}
+
+/** The name the view carries outside a Trama project: the product's, which is also the name of the icon in the activity bar. */
+const PRODUCT_NAME = "Trama";
+
+/** The name of a project: the name of its System (the H1 of `system.md`, as the Snapshot reads it) without the spaces around it, else the name of the project's folder when it is empty or the Model cannot be read (`systemName` undefined). */
+export function projectName(project: Project, systemName: string | undefined): string {
+  return systemName?.trim() || basename(project.root);
+}
+
 /** The window's situation for the menu: the folder that counts for the panel (`findProject`) decides between a project and a plain folder. */
 export function menuSituation(): MenuSituation {
   if (!vscode.workspace.workspaceFolders?.length) return "noFolder";
@@ -40,11 +63,14 @@ export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
   private view: vscode.WebviewView | undefined;
   private badge: vscode.ViewBadge | undefined;
   private timer: NodeJS.Timeout | undefined;
+  /** The name of the project of the last state computed in a project. */
+  private name = PRODUCT_NAME;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly panel: MenuPanel,
     private readonly tramaFiles: vscode.FileSystemWatcher,
+    private readonly soloMerge: MenuMerge,
   ) {
     this.model = new MenuModel(this.surface());
   }
@@ -63,6 +89,9 @@ export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
         if (event.affectsConfiguration("trama")) this.refresh();
       }),
       this.panel.onDidChangeShownView(() => this.refresh()),
+      // Merge of Solo mode: git, the files of the working copy and the jobs of the agent decide whether it is available.
+      this.soloMerge.onDidChange(onChange),
+      onDriftResolutionChange(onChange),
     );
   }
 
@@ -76,6 +105,9 @@ export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
       scriptUri: view.webview.asWebviewUri(vscode.Uri.joinPath(dist, "menu.js")).toString(),
     });
     view.badge = this.badge;
+    // The title is the project's name from the first display, not only from the first state the webview asks for.
+    this.model.state();
+    this.showTitle(view, menuSituation());
     const received = view.webview.onDidReceiveMessage((raw: unknown) => this.model.receive(raw));
     // The menu shows what is true now each time it becomes visible.
     const visibility = view.onDidChangeVisibility(() => {
@@ -98,6 +130,11 @@ export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
     this.timer = setTimeout(() => this.refresh(), DEBOUNCE_MS);
   }
 
+  /** The title of the view (`WebviewView.title`, written at run time): the project's name in a project, `Trama` otherwise. */
+  private showTitle(view: vscode.WebviewView, situation: MenuSituation): void {
+    view.title = situation === "project" ? this.name : PRODUCT_NAME;
+  }
+
   /** Sends the state again; with no view there is nothing to show and no badge to set, and the webview asks for it when it is made. */
   private refresh(): void {
     if (this.view) this.model.refresh();
@@ -110,7 +147,10 @@ export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
 
   private surface(): MenuSurface {
     return {
-      post: (message: ToMenuWebview) => void this.view?.webview.postMessage(message),
+      post: (message: ToMenuWebview) => {
+        if (this.view && message.type === "menuState") this.showTitle(this.view, message.situation);
+        void this.view?.webview.postMessage(message);
+      },
       setBadge: (badge) => {
         this.badge = badge;
         if (this.view) this.view.badge = badge;
@@ -122,8 +162,10 @@ export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
         if (project === undefined) return undefined;
         try {
           const snapshot = buildSnapshot(project, driftsFinishing(project.root), proposalsFinishing(project.root), tasksFinishing(project.root));
-          return { decisions: boardDecisionCount(snapshot), tasksSinceScan: snapshot.tasksSinceScan };
+          this.name = projectName(project, snapshot.system.name);
+          return { decisions: boardDecisionCount(snapshot, configuredAutoUpdateStaleProposals()), tasksSinceScan: snapshot.tasksSinceScan };
         } catch {
+          this.name = projectName(project, undefined);
           return undefined;
         }
       },
@@ -131,6 +173,11 @@ export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
       show: (view) => this.guarded(() => this.panel.show(view)),
       scan: () => this.guarded(() => this.panel.launch({ kind: "scan" })),
       openFolder: () => void vscode.commands.executeCommand("workbench.action.files.openFolder"),
+      mergeState: () => this.soloMerge.state(),
+      startMerge: () => this.guarded(() => this.soloMerge.merge()),
+      openMergeEditor: () => this.guarded(() => this.soloMerge.openMergeEditor()),
+      reconcileMerge: () => this.guarded(() => this.soloMerge.reconcile()),
+      abortMerge: () => this.guarded(() => this.soloMerge.abort()),
     };
   }
 }

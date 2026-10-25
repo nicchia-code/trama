@@ -3,7 +3,7 @@ import { type ReactNode, useRef, useState } from "react";
 import type { FocusRequest } from "../../protocol";
 import { cardNameOf, ID_NAMES } from "../../../../src/core/card-names";
 import { joinReasons } from "../../../../src/core/design";
-import { IdTag, RecurringBadge, UnifiedBadge } from "../diagram/panel";
+import { IdTag, MergeBadge, RecurringBadge, UnifiedBadge } from "../diagram/panel";
 import { cn } from "../lib/utils";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
@@ -205,6 +205,7 @@ function ResolvesList({ card }: { card: ProposalCard }) {
                 <span className="title break-words">{row.title}</span>
                 {row.unifies.length > 0 ? <UnifiedBadge count={row.unifies.length} /> : null}
                 {row.previous.length > 0 ? <RecurringBadge previous={row.previous} /> : null}
+                {row.merge ? <MergeBadge /> : null}
                 <span className="break-words text-muted-foreground">{row.decision}</span>
               </button>
             </Tip>
@@ -233,7 +234,7 @@ function ProposalCardView({ card }: { card: ProposalCard }) {
       card={card}
       kind={card.resolution ? "resolution" : "proposal"}
       label={`${card.heading}: ${card.title}`}
-      className={cn("cursor-pointer", card.refine === "running" ? "border-l-border board-working" : card.resolution ? "border-l-amber-500 dark:border-l-amber-400" : "border-l-blue-600 dark:border-l-blue-400")}
+      className={cn("cursor-pointer", card.refine === "running" || card.refine === "elsewhere" ? "border-l-border board-working" : card.resolution ? "border-l-amber-500 dark:border-l-amber-400" : "border-l-blue-600 dark:border-l-blue-400")}
       // A click on the card, outside its buttons, badges and links, opens its body too.
       onClick={(event) => {
         if (leavesCardAlone(event)) return;
@@ -320,6 +321,7 @@ function DriftCardView({ card }: { card: DriftCard }) {
         <IdTag name={card.name} className="text-[11px] font-semibold text-muted-foreground" />
         {card.drift.unifies.length > 0 ? <UnifiedBadge count={card.drift.unifies.length} /> : null}
         {card.drift.previous.length > 0 ? <RecurringBadge previous={card.drift.previous} /> : null}
+        {card.drift.merge ? <MergeBadge /> : null}
         {card.resolving ? <ResolvingBadge /> : null}
         {card.unifying ? <UnifyingBadge /> : null}
       </Head>

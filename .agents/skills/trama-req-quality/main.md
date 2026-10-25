@@ -24,7 +24,7 @@ Use for performance, security, privacy, accessibility, offline, localisation or 
 
 ## panel/Settings
 
-- Sicurezza: la scheda Settings scrive solo nelle impostazioni utente (`ConfigurationTarget.Global`), mai in quelle del workspace, quindi non modifica nessun file del repository. L'host accetta solo chiavi dichiarate nel manifest e valori conformi al loro schema.
+- Sicurezza: la scheda Settings scrive solo nelle impostazioni utente (`ConfigurationTarget.Global`), mai in quelle del workspace, quindi non modifica nessun file del repository. L'host accetta solo chiavi dichiarate nel manifest e valori conformi al loro schema. The only exception is the `Solo Mode` row (`tech#solo-switch`), which is not a setting: it writes only `.trama/solo/`, which ignores itself, and git's local `info/exclude`, never a file git tracks.
 - Privacy e sicurezza dei suggerimenti dei modelli: l'estensione non apre nessun file di Cursor. `omp models --json` si avvia senza shell, con argomenti fissi, con il programma omp di Trama (`tech#agent-launching`); aggiunge al PATH di omp solo la cartella di `trama.ompPath` o quella di bun. Trama non fa nessuna chiamata di rete per i suggerimenti. Un suggerimento è solo testo nel webview, costruito con `textContent` e attributi, mai come markup. Il motivo di un errore di omp è un testo fisso con il percorso usato o con il codice di uscita, mai l'output di omp né il suo stderr.
 - Prestazioni: preparare l'elenco non blocca la scheda: i campi si possono usare subito e la tendina compare quando l'elenco arriva; omp ha al massimo 15 s, poi l'elenco è vuoto e compare il motivo della scadenza.
 

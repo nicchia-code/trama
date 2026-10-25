@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
+import type { RunAllPlan } from "../../../src/core/run-estimate";
 
 /** Trama-launched jobs, retained only in memory for their live editor windows. */
 export type JobKind = "run" | "resolve" | "scan" | "prepared" | "unify" | "refine";
@@ -32,9 +33,11 @@ export interface RunAll {
   /** `trama.parallelExecution` as read at the launch. */
   parallel: boolean;
   groups: RunAllGroup[];
-  /** The high limit, in minutes, of the first estimate; null until the estimate first exists. */
-  high: number | null;
-  /** The highest progress, between 0 and 0.95, already reached; it never goes back (`runAllProgress`). */
+  /** The reference, in milliseconds from the launch, beyond which the Run all is longer than expected; null until a Run has taken its first Task. */
+  reference: number | null;
+  /** The plan the reference was made with, and every choice and Task seen since; null while there is no reference. */
+  plan: RunAllPlan | null;
+  /** The highest progress, between 0 and 0.95, already reached outside the state longer than expected; it never goes back there (`runAllProgress`). */
   progress: number;
 }
 

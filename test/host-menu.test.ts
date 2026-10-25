@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, expect, mock, test } from "bun:test";
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 // A minimal editor: webview panels and one webview view that record what they are shown and sent, and a watcher the test fires.
 interface FakePanel {
@@ -93,7 +93,7 @@ mock.module("vscode", () => ({
 
 // The modules load after mock.module replaced "vscode", so they are imported here, as the other host tests do.
 const { Controller } = await import("../extension/src/host/controller");
-const { MenuView } = await import("../extension/src/host/menu/view");
+const { MenuView, projectName } = await import("../extension/src/host/menu/view");
 const { boardDecisionCount } = await import("../src/core/board-decisions");
 const { buildSnapshot } = await import("../src/core/snapshot");
 const { projectAt } = await import("../src/core/store");
@@ -118,6 +118,9 @@ beforeEach(() => {
   providers = {};
   watcherListeners.length = 0;
   configListeners.length = 0;
+  mergeCalls.length = 0;
+  mergeListeners.length = 0;
+  mergeState = undefined;
   for (const key of Object.keys(configuration)) delete configuration[key];
   workspaceFolders = [{ uri: { fsPath: project, scheme: "file" } }];
 });
@@ -221,6 +224,7 @@ test("the controller tells the menu the view the panel shows, and that it closed
 });
 
 interface FakeView {
+  title?: string;
   visible: boolean;
   badge: { value: number; tooltip: string } | undefined;
   messages: any[];
@@ -266,11 +270,25 @@ const watcher = () =>
     onDidDelete: () => ({ dispose() {} }),
   }) as never;
 
+// Merge of Solo mode as the menu sees it: the state it answers, what it was asked, and the listeners of its changes.
+const mergeCalls: string[] = [];
+const mergeListeners: (() => void)[] = [];
+let mergeState: { available: boolean; reason?: string; trackedTrama: boolean; open?: { branch: string; conflict: boolean } } | undefined;
+const soloMerge = () =>
+  ({
+    state: () => mergeState,
+    merge: async () => void mergeCalls.push("merge"),
+    openMergeEditor: async () => void mergeCalls.push("openMergeEditor"),
+    reconcile: async () => void mergeCalls.push("reconcile"),
+    abort: async () => void mergeCalls.push("abort"),
+    onDidChange: (listener: () => void) => (mergeListeners.push(listener), { dispose() {} }),
+  }) as never;
+
 const states = (view: FakeView) => view.messages.filter((message) => message.type === "menuState");
 
 test("the menu view is a webview view kept alive while hidden, with the menu's script, and the extension never reveals it", async () => {
   const controller = new Controller(extensionUri);
-  const menu = new MenuView(extensionUri, controller, watcher());
+  const menu = new MenuView(extensionUri, controller, watcher(), soloMerge());
   menu.register();
   expect(Object.keys(providers)).toEqual(["trama.home"]);
   const view = fakeView();
@@ -286,7 +304,7 @@ test("the menu view is a webview view kept alive while hidden, with the menu's s
 
 test("the menu asks for its state when it is ready and gets the theme and the numbers of the Snapshot, with the badge on the icon", () => {
   const controller = new Controller(extensionUri);
-  const menu = new MenuView(extensionUri, controller, watcher());
+  const menu = new MenuView(extensionUri, controller, watcher(), soloMerge());
   menu.register();
   const view = fakeView();
   providers["trama.home"]?.resolveWebviewView(view);
@@ -302,7 +320,7 @@ test("the menu asks for its state when it is ready and gets the theme and the nu
 
 test("the state follows the panel's view and its closing, the settings, and the menu becoming visible", async () => {
   const controller = new Controller(extensionUri);
-  const menu = new MenuView(extensionUri, controller, watcher());
+  const menu = new MenuView(extensionUri, controller, watcher(), soloMerge());
   menu.register();
   const view = fakeView();
   providers["trama.home"]?.resolveWebviewView(view);
@@ -323,9 +341,31 @@ test("the state follows the panel's view and its closing, the settings, and the 
   controller.dispose();
 });
 
+test("Merge of Solo mode: the state carries merge only when the flow gives one, a change of it sends the state again, and the four messages reach the flow", async () => {
+  const controller = new Controller(extensionUri);
+  const menu = new MenuView(extensionUri, controller, watcher(), soloMerge());
+  menu.register();
+  const view = fakeView();
+  providers["trama.home"]?.resolveWebviewView(view);
+  view.receive?.({ type: "ready" });
+  expect("merge" in (states(view).at(-1) as object)).toBe(false);
+
+  mergeState = { available: false, reason: "inProgress", trackedTrama: false, open: { branch: "origin/main", conflict: true } };
+  const before = states(view).length;
+  for (const listener of mergeListeners) listener();
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  expect(states(view)).toHaveLength(before + 1);
+  expect(states(view).at(-1)).toMatchObject({ merge: mergeState });
+
+  for (const type of ["merge", "openMergeEditor", "reconcileMerge", "abortMerge"]) view.receive?.({ type });
+  expect(mergeCalls).toEqual(["merge", "openMergeEditor", "reconcile", "abort"]);
+  menu.dispose();
+  controller.dispose();
+});
+
 test("a change of the files of `.trama/` sends the state again, with the panel closed", async () => {
   const controller = new Controller(extensionUri);
-  const menu = new MenuView(extensionUri, controller, watcher());
+  const menu = new MenuView(extensionUri, controller, watcher(), soloMerge());
   menu.register();
   const view = fakeView();
   providers["trama.home"]?.resolveWebviewView(view);
@@ -341,7 +381,7 @@ test("a change of the files of `.trama/` sends the state again, with the panel c
 
 test("the situation is noFolder without folders, notProject in a folder with no `.trama/`, and project otherwise", () => {
   const controller = new Controller(extensionUri);
-  const menu = new MenuView(extensionUri, controller, watcher());
+  const menu = new MenuView(extensionUri, controller, watcher(), soloMerge());
   menu.register();
   const view = fakeView();
   providers["trama.home"]?.resolveWebviewView(view);
@@ -359,7 +399,7 @@ test("the situation is noFolder without folders, notProject in a folder with no 
 
 test("an entry of the menu does what the command does; Open Folder runs the editor's picker and nothing else", async () => {
   const controller = new Controller(extensionUri);
-  const menu = new MenuView(extensionUri, controller, watcher());
+  const menu = new MenuView(extensionUri, controller, watcher(), soloMerge());
   menu.register();
   const view = fakeView();
   providers["trama.home"]?.resolveWebviewView(view);
@@ -378,7 +418,7 @@ test("an entry of the menu does what the command does; Open Folder runs the edit
 // The modal answer is a mock value the controller awaits; no event marks when that await has finished, so one macrotask flush is the signal here.
 test("Scan System from the menu asks the modal question first: Cancel launches nothing and opens no panel", async () => {
   const controller = new Controller(extensionUri);
-  const menu = new MenuView(extensionUri, controller, watcher());
+  const menu = new MenuView(extensionUri, controller, watcher(), soloMerge());
   menu.register();
   const view = fakeView();
   providers["trama.home"]?.resolveWebviewView(view);
@@ -393,7 +433,7 @@ test("Scan System from the menu asks the modal question first: Cancel launches n
 
 test("Scan System from the menu asks once; Scan launches the scan without opening the panel", async () => {
   const controller = new Controller(extensionUri);
-  const menu = new MenuView(extensionUri, controller, watcher());
+  const menu = new MenuView(extensionUri, controller, watcher(), soloMerge());
   menu.register();
   const view = fakeView();
   providers["trama.home"]?.resolveWebviewView(view);
@@ -404,4 +444,95 @@ test("Scan System from the menu asks once; Scan launches the scan without openin
   expect(panels).toHaveLength(0);
   menu.dispose();
   controller.dispose();
+});
+
+/** A throwaway copy of the example project, so a test can rewrite its Model. */
+function copyOfProject(): string {
+  const root = mkdtempSync(join(tmpdir(), "trama-menu-title-"));
+  cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+  return root;
+}
+
+test("the title of the view is the name of the System in a project, as soon as the view is resolved and with no state asked for", () => {
+  const controller = new Controller(extensionUri);
+  const menu = new MenuView(extensionUri, controller, watcher(), soloMerge());
+  menu.register();
+  const view = fakeView();
+  providers["trama.home"]?.resolveWebviewView(view);
+  expect(view.title).toBe("Shop");
+  view.receive?.({ type: "ready" });
+  expect(view.title).toBe("Shop");
+  menu.dispose();
+  controller.dispose();
+});
+
+test("the title follows a change of the name of the System, without the spaces around it", async () => {
+  const root = copyOfProject();
+  workspaceFolders = folder(root);
+  const controller = new Controller(extensionUri);
+  const menu = new MenuView(extensionUri, controller, watcher(), soloMerge());
+  menu.register();
+  const view = fakeView();
+  providers["trama.home"]?.resolveWebviewView(view);
+  view.receive?.({ type: "ready" });
+  expect(view.title).toBe("Shop");
+  writeFileSync(join(root, ".trama/model/system.md"), "#  New System  \n");
+  for (const listener of watcherListeners) listener();
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  expect(view.title).toBe("New System");
+  menu.dispose();
+  controller.dispose();
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("the title is the name of the project's folder when the Model cannot be read or the System has no name, and comes back with the Model", async () => {
+  const root = copyOfProject();
+  workspaceFolders = folder(root);
+  const controller = new Controller(extensionUri);
+  const menu = new MenuView(extensionUri, controller, watcher(), soloMerge());
+  menu.register();
+  const view = fakeView();
+  providers["trama.home"]?.resolveWebviewView(view);
+  view.receive?.({ type: "ready" });
+  const retitle = async (system: string) => {
+    writeFileSync(join(root, ".trama/model/system.md"), system);
+    for (const listener of watcherListeners) listener();
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    return view.title;
+  };
+  expect(await retitle("not a valid System")).toBe(basename(root));
+  expect(await retitle("#   \n")).toBe(basename(root));
+  expect(await retitle("# Back\n")).toBe("Back");
+  menu.dispose();
+  controller.dispose();
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("without a folder, and in a folder that is no Trama project, the title is Trama", () => {
+  const controller = new Controller(extensionUri);
+  const menu = new MenuView(extensionUri, controller, watcher(), soloMerge());
+  menu.register();
+  const view = fakeView();
+  workspaceFolders = [];
+  providers["trama.home"]?.resolveWebviewView(view);
+  expect(view.title).toBe("Trama");
+  workspaceFolders = folder(project);
+  view.receive?.({ type: "ready" });
+  expect(view.title).toBe("Shop");
+  workspaceFolders = folder(plain);
+  view.receive?.({ type: "ready" });
+  expect(view.title).toBe("Trama");
+  workspaceFolders = [];
+  view.receive?.({ type: "ready" });
+  expect(view.title).toBe("Trama");
+  menu.dispose();
+  controller.dispose();
+});
+
+test("projectName gives the System's name trimmed, else the folder's name", () => {
+  const root = projectAt(project);
+  expect(projectName(root, "  Shop ")).toBe("Shop");
+  expect(projectName(root, "   ")).toBe(basename(project));
+  expect(projectName(root, "")).toBe(basename(project));
+  expect(projectName(root, undefined)).toBe(basename(project));
 });

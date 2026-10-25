@@ -6,13 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type MergedState, mergeMachine } from "../src/core/merge";
 import { buildModel } from "../src/core/model";
-import { editInProposal, newProposal } from "../src/core/proposals";
+import { editInProposal, newProposal, rebaseInProposal } from "../src/core/proposals";
 import { handOver } from "./handover";
 import { buildSnapshot } from "../src/core/snapshot";
 import { type Project, projectAt } from "../src/core/store";
 import { moveTask, newDrift, newTask } from "../src/core/work";
 import type { FileMap, Machine } from "../src/core/types";
-import { announce, bindDraft, listAnnouncements } from "../src/core/announcements";
+import { announce, bindDraft, declareNote, listAnnouncements, removeBoundTo } from "../src/core/announcements";
 import { resolveDriftInProposal } from "../src/core/resolution";
 
 
@@ -133,6 +133,29 @@ test("the announcement of a refinement is bound to its Proposal: no ghost of its
   const draft = newProposal(p, "Draft title", "", { origin: { terminal: "ef34gh" } });
   const ghost = announce(p, { kind: "proposal", title: "Draft title", proposal: draft.id, source: "request", terminal: "ef34gh" });
   expect(buildSnapshot(p).announcements.map((a) => a.id)).toContain(ghost.id);
+});
+
+test("a Draft left refining carries the writer: the phase and latest note of the live announcement bound to it, whoever launched it; none when nothing is bound", () => {
+  const left = newProposal(p, "Left half-way");
+  const written = newProposal(p, "Written");
+  const open = newProposal(p, "Open");
+  rebaseInProposal(p, left.id);
+  rebaseInProposal(p, written.id);
+  handOver(p, open.id);
+  const writerOf = (id: string) => buildSnapshot(p).proposals.find((x) => x.id === id)?.writer;
+  expect([writerOf(left.id), writerOf(written.id), writerOf(open.id)]).toEqual([null, null, null]);
+  // An announcement the window did not launch (another terminal) is bound to the Draft: its phase and notes are the ghost's.
+  const bound = announce(p, { kind: "proposal", title: "Written", proposal: written.id, source: "request", terminal: "ef34gh" });
+  expect(writerOf(written.id)).toEqual({ phase: "writing", note: null });
+  declareNote(p, { id: bound.id, text: "Reading the order", terminal: "ef34gh" });
+  declareNote(p, { id: bound.id, text: "Checking the Model", terminal: "ef34gh" });
+  expect(writerOf(written.id)).toEqual({ phase: "writing", note: "Checking the Model" });
+  expect(writerOf(left.id)).toBeNull();
+  // Its card carries it: the announcement still has no ghost of its own.
+  expect(buildSnapshot(p).announcements.map((a) => a.id)).not.toContain(bound.id);
+  // Delivered or withdrawn, the Draft is again one left half-way.
+  removeBoundTo(p, written.id);
+  expect(writerOf(written.id)).toBeNull();
 });
 
 test("a Proposal that would leave the Model invalid reports the errors instead of failing the snapshot", () => {

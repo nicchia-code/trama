@@ -28,13 +28,13 @@ beforeAll(() => {
 
 afterEach(cleanup);
 
-const FOLDER = { name: "app", root: "/work/app", hasFiles: true };
+const FOLDER = { name: "app", root: "/work/app", hasFiles: true, inGit: false };
 
 function setup(options: { mode?: "first" | "settings" | "empty-model"; choice?: "import" | "scratch"; values?: Record<string, SettingsValues>; folders?: (typeof FOLDER)[]; now?: () => number } = {}) {
   const posted: ToHost[] = [];
   const closed: string[] = [];
   const controller = new WizardController({ post: (message) => posted.push(message), onClose: (reason, mode) => closed.push(`${reason}:${mode}`) }, options.now);
-  const utils = render(<Wizard controller={controller} openLink={() => {}} notice={<p>The notice</p>} />);
+  const utils = render(<Wizard controller={controller} openLink={() => {}} notice={() => <p>The notice</p>} />);
   const mode = options.mode ?? "first";
   act(() => {
     controller.receiveSettings({ type: "settings", schema, values: options.values ?? {} });
@@ -225,7 +225,7 @@ test("Start from Scratch on a folder with files shows the warning in the step; I
 });
 
 test("with several folders Path offers a select with the name of each, the first chosen", () => {
-  setup({ folders: [FOLDER, { name: "lib", root: "/work/lib", hasFiles: false }] });
+  setup({ folders: [FOLDER, { name: "lib", root: "/work/lib", hasFiles: false, inGit: false }] });
   const select = screen.getByRole("combobox", { name: "Folder to initialize as a Trama project" });
   expect(select.textContent).toBe("app");
 });
@@ -683,7 +683,7 @@ test("the first setup confirms with the folder, the path and the excluded folder
   expect(foldersCard.textContent).toContain("src");
   expect(foldersCard.querySelector(".font-mono")?.textContent).toBe("src");
   press("Set up Trama");
-  expect(posted.at(-1)).toEqual({ type: "confirmSetup", mode: "first", choice: "import", root: "/work/app", values: [], excluded: ["src"] });
+  expect(posted.at(-1)).toEqual({ type: "confirmSetup", mode: "first", choice: "import", root: "/work/app", values: [], excluded: ["src"], solo: "off" });
   act(() => controller.receiveSetup({ type: "setup", busy: false, error: null }));
   expect(screen.queryByRole("alert")).toBeNull();
   expect(heading()).toBe("Summary");
@@ -698,7 +698,7 @@ test("a value changed from outside while the wizard is open does not change what
 });
 
 test("a new folder to initialize forgets the folders chosen to leave out", () => {
-  const { controller } = setup({ folders: [FOLDER, { name: "lib", root: "/work/lib", hasFiles: false }] });
+  const { controller } = setup({ folders: [FOLDER, { name: "lib", root: "/work/lib", hasFiles: false, inGit: false }] });
   act(() => controller.chooseWay("import"));
   act(() => controller.chooseFolder("/work/app"));
   act(() => controller.openStep("Path"));
@@ -1069,4 +1069,165 @@ test("cancelling the wizard leaves the saved value as it was and sends no confir
   expect(closed).toEqual(["cancel:settings"]);
   expect(posted.some((m) => m.type === "confirmSetup" || m.type === "setSetting")).toBe(false);
   expect(controller.isOpen()).toBe(false);
+});
+
+// ---- Solo mode ----
+
+const GIT_FOLDER = { ...FOLDER, inGit: true };
+const soloTold = (controller: WizardController, state: { available?: boolean; solo?: "off" | "folders" | "files"; tracked?: string[] }) => act(() => controller.receiveSoloMode({ type: "soloMode", available: true, solo: "off", tracked: [], ...state }));
+const soloBox = () => screen.getByRole("checkbox", { name: "Solo Mode" });
+const exclude = () => screen.getByRole("combobox", { name: "Exclude" });
+const chooseExclude = (name: string) => {
+  fireEvent.pointerDown(exclude(), { button: 0, ctrlKey: false, pointerType: "mouse" });
+  fireEvent.click(screen.getByRole("option", { name }));
+};
+const summaryCard = (step: string) => screen.getByRole("button", { name: `Edit ${step}` }).closest("[data-slot='card']") as HTMLElement;
+
+test("the Project step of the first setup shows Solo Mode after Skills Directory, off, with the note, and no list of tracked files", () => {
+  const { controller } = setup({ choice: "scratch", folders: [GIT_FOLDER] });
+  advanceTo(controller, "Project");
+  const skills = screen.getByRole("textbox");
+  expect(skills.compareDocumentPosition(soloBox()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(soloBox().getAttribute("aria-checked")).toBe("false");
+  expect(screen.getByText("Only this workspace.")).not.toBeNull();
+  expect(screen.queryByRole("combobox", { name: "Exclude" })).toBeNull();
+  fireEvent.click(soloBox());
+  expect(soloBox().getAttribute("aria-checked")).toBe("true");
+  expect(exclude().textContent).toBe("Whole folders");
+  chooseExclude("Only Trama's files");
+  expect(exclude().textContent).toBe("Only Trama's files");
+  expect(screen.queryByText("These Trama files are tracked by git, so their changes are still committed:")).toBeNull();
+});
+
+test("outside a git repository the first setup's control is off and disabled with the reason; a folder in git enables it", () => {
+  const { controller } = setup({ choice: "scratch", folders: [FOLDER, { name: "lib", root: "/work/lib", hasFiles: false, inGit: true }] });
+  advanceTo(controller, "Project");
+  expect((soloBox() as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText("Solo mode needs a git repository.")).not.toBeNull();
+  act(() => controller.chooseFolder("/work/lib"));
+  expect((soloBox() as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.queryByText("Solo mode needs a git repository.")).toBeNull();
+});
+
+test("the Guided setup of the settings has no Solo Mode row, in the step or in the summary, and its confirmation carries no solo", () => {
+  const { controller, posted } = setup({ mode: "settings" });
+  advanceTo(controller, "Project");
+  expect(screen.queryByRole("checkbox", { name: "Solo Mode" })).toBeNull();
+  advanceTo(controller, "Summary");
+  expect(screen.queryByText("Solo Mode")).toBeNull();
+  press("Save settings");
+  expect(posted.at(-1)).not.toHaveProperty("solo");
+});
+
+test("the Empty Model wizard starts from the project's Solo mode, and nothing is posted before the confirmation", () => {
+  const { controller, posted } = setup({ mode: "empty-model", choice: "import" });
+  soloTold(controller, { solo: "files" });
+  advanceTo(controller, "Project");
+  expect(soloBox().getAttribute("aria-checked")).toBe("true");
+  expect(exclude().textContent).toBe("Only Trama's files");
+  fireEvent.click(soloBox());
+  expect(soloBox().getAttribute("aria-checked")).toBe("false");
+  expect(posted.some((m) => m.type === "setSoloMode" || m.type === "confirmSetup")).toBe(false);
+  // A message of the host later does not take the choice away.
+  soloTold(controller, { solo: "files" });
+  expect(soloBox().getAttribute("aria-checked")).toBe("false");
+});
+
+test("the Empty Model wizard outside a git repository shows the control off and disabled", () => {
+  const { controller } = setup({ mode: "empty-model", choice: "import" });
+  soloTold(controller, { available: false });
+  advanceTo(controller, "Project");
+  expect((soloBox() as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText("Solo mode needs a git repository.")).not.toBeNull();
+});
+
+test("the summary of the first setup says Solo Mode On or Off, and Exclude with the chosen value only when on, not marked as changed", () => {
+  const { controller } = setup({ choice: "scratch", folders: [GIT_FOLDER] });
+  advanceTo(controller, "Project");
+  advanceTo(controller, "Summary");
+  expect(within(summaryCard("Project")).getByText("Solo Mode").closest("div")?.textContent).toContain("Off");
+  expect(within(summaryCard("Project")).queryByText("Exclude")).toBeNull();
+  act(() => controller.openStep("Project"));
+  fireEvent.click(soloBox());
+  advanceTo(controller, "Summary");
+  const card = summaryCard("Project");
+  expect(within(card).getByText("Solo Mode").closest("div")?.textContent).toContain("On");
+  expect(within(card).getByText("Exclude").closest("div")?.textContent).toContain("Whole folders");
+  expect(card.textContent).not.toContain("changed");
+  expect(card.textContent).not.toContain("was ");
+});
+
+test("the summary of the Empty Model wizard marks Solo Mode and Exclude as changed, with the value each replaces", () => {
+  const { controller } = setup({ mode: "empty-model", choice: "import" });
+  soloTold(controller, { solo: "files" });
+  advanceTo(controller, "Project");
+  chooseExclude("Whole folders");
+  advanceTo(controller, "Summary");
+  let card = summaryCard("Project");
+  expect(within(card).getByText("Exclude").closest("div")?.textContent).toContain("Whole folders");
+  expect(within(card).getByText("Exclude").closest("div")?.textContent).toContain("was Only Trama's files");
+  expect(within(card).getByText("Solo Mode").closest("div")?.textContent).not.toContain("was");
+  act(() => controller.openStep("Project"));
+  fireEvent.click(soloBox());
+  advanceTo(controller, "Summary");
+  card = summaryCard("Project");
+  expect(within(card).getByText("Solo Mode").closest("div")?.textContent).toContain("Off");
+  expect(within(card).getByText("Solo Mode").closest("div")?.textContent).toContain("was On");
+  expect(within(card).queryByText("Exclude")).toBeNull();
+});
+
+test("the confirmation carries solo: the chosen value, and in the Empty Model mode the project's value when nothing was chosen", () => {
+  const first = setup({ choice: "scratch", folders: [GIT_FOLDER] });
+  advanceTo(first.controller, "Project");
+  fireEvent.click(soloBox());
+  chooseExclude("Only Trama's files");
+  advanceTo(first.controller, "Summary");
+  press("Set up Trama");
+  expect(first.posted.at(-1)).toMatchObject({ type: "confirmSetup", mode: "first", solo: "files" });
+  cleanup();
+  const guided = setup({ mode: "empty-model", choice: "scratch" });
+  soloTold(guided.controller, { solo: "folders" });
+  advanceTo(guided.controller, "Summary");
+  press("Save and start");
+  expect(guided.posted.at(-1)).toMatchObject({ type: "confirmSetup", mode: "empty-model", solo: "folders" });
+});
+
+test("a first setup folder outside git sends solo off whatever was chosen before", () => {
+  const { controller, posted } = setup({ choice: "scratch", folders: [GIT_FOLDER, { name: "lib", root: "/work/lib", hasFiles: false, inGit: false }] });
+  advanceTo(controller, "Project");
+  fireEvent.click(soloBox());
+  act(() => controller.chooseFolder("/work/lib"));
+  advanceTo(controller, "Summary");
+  press("Set up Trama");
+  expect(posted.at(-1)).toMatchObject({ type: "confirmSetup", solo: "off" });
+});
+
+test("the notice of Get Started tells Solo mode on Path and Summary once it is chosen in the Project step, and goes back to the usual one when it is not", () => {
+  const posted: ToHost[] = [];
+  const page = render(<></>);
+  const view = mountGetStarted((node) => page.rerender(<>{node}</>), { post: (message) => posted.push(message), navigate: () => {}, openLink: () => {} });
+  act(() => {
+    view.projectPresent(false);
+    view.receiveSettings({ type: "settings", schema, values: {} });
+    view.receiveFolders({ type: "workspaceFolders", folders: [GIT_FOLDER] });
+  });
+  const usual = /It holds no secrets and is meant to be committed/;
+  const solo = /Solo mode keeps them out of git in this working copy only: they are never committed and are versioned nowhere else\./;
+  expect(screen.getByText(usual)).not.toBeNull();
+  fireEvent.click(screen.getByRole("radio", { name: /Start from Scratch/ }));
+  press("Next");
+  act(() => view.receiveAgentCheck({ type: "agentCheck", ompPath: "", state: "done", ok: true, missing: false, version: "18.12.6", models: 1, providers: [] }));
+  press("Next");
+  press("Next");
+  expect(heading()).toBe("Project");
+  expect(screen.queryByText(usual)).toBeNull();
+  fireEvent.click(soloBox());
+  press("Next");
+  press("Next");
+  expect(heading()).toBe("Summary");
+  expect(screen.getByText(solo).textContent).toBe("Trama will create a .trama folder that describes this project, and write the agent skills and the Trama sub-agent definition into this project. Solo mode keeps them out of git in this working copy only: they are never committed and are versioned nowhere else.");
+  expect(screen.queryByText(usual)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Edit Path" }));
+  expect(heading()).toBe("Path");
+  expect(screen.getByText(solo)).not.toBeNull();
 });

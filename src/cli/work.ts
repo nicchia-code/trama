@@ -5,6 +5,7 @@ import { requiredReasons } from "../core/required";
 import { bullets, describeRef, requirementsBlock } from "../core/describe";
 import { hasContent, loadProject, type ProjectModel, resolveProjectRef } from "../core/requirements";
 import type { Project } from "../core/store";
+import { readSoloMode } from "../core/solo-mode";
 import { type ShortNumbers, syncShortNumbers } from "../core/short-numbers";
 import { formatDiagnostic } from "../core/model";
 import { type Blocker, concernSameThing } from "../core/blocking";
@@ -164,7 +165,7 @@ function withCheckNote(task: Task): string {
   return [...lines.slice(0, title + 1), "", "Closed without changes.", "", "## Check note", "", task.data.unchanged, ...lines.slice(title + 1)].join("\n");
 }
 
-const driftSummary = (d: Drift, numbers: ShortNumbers, closed: { task: string; note: string | null } | null) => ({ id: d.id, number: numbers.label("drift", d.id), title: d.title, status: d.data.status, resolution: d.data.resolution, refs: d.data.refs, proposal: d.data.proposal, task: d.data.task, origin: d.data.origin, previous: d.data.previous, unifies: d.data.unifies, unifiedInto: d.data.unifiedInto, job: d.data.job, closedUnchanged: closed });
+const driftSummary = (d: Drift, numbers: ShortNumbers, closed: { task: string; note: string | null } | null) => ({ id: d.id, number: numbers.label("drift", d.id), title: d.title, status: d.data.status, resolution: d.data.resolution, refs: d.data.refs, proposal: d.data.proposal, task: d.data.task, origin: d.data.origin, previous: d.data.previous, unifies: d.data.unifies, unifiedInto: d.data.unifiedInto, merge: d.data.merge, job: d.data.job, closedUnchanged: closed });
 
 function refsBlock(project: ProjectModel, refs: string[], full = false): string {
   return bullets(refs.map((r) => `- \`${r}\`\n${describeRef(project, r, full).split("\n").map((l) => `  > ${l}`).join("\n")}`), "_No references._");
@@ -340,6 +341,7 @@ export function driftShowView(p: Project, drift: Drift): Result {
   const unifiesBlock = drift.data.unifies.length === 0 ? [] : ["", "## Unifies", "", ...drift.data.unifies.map((id) => `- ${id} ${allDrifts.find((d) => d.id === id)?.title ?? "(no longer exists)"}`)];
   const md = [
     `# ${drift.title}`,
+    ...(drift.data.merge ? ["From a merge"] : []),
     ...(unifiedLine === "" ? [] : [unifiedLine]),
     ...(closed ? [`Dismissed by Task ${taskName(closed.task)} without changes`] : []),
     "",
@@ -377,7 +379,7 @@ export function driftListView(p: Project, all: boolean, refs: string[] = [], fil
   const drifts = filter.unprepared === true ? unpreparedDrifts(p, concerned) : concerned;
   const tasks = listTasks(p);
   const md = bullets(
-    drifts.map((d) => `- ${numbers.name("drift", d.id)} [${d.data.status}] ${d.title}${d.data.previous.length === 0 ? "" : " (recurring)"}${d.data.unifies.length === 0 ? "" : ` (unifies ${d.data.unifies.length})`}${d.data.unifiedInto === null ? "" : ` (unified into ${numbers.name("drift", d.data.unifiedInto)})`}${closedUnchanged(p, d, tasks) ? " (dismissed, no changes)" : ""}${d.data.proposal ? ` (Proposal ${numbers.name("proposal", d.data.proposal)})` : ""}`),
+    drifts.map((d) => `- ${numbers.name("drift", d.id)} [${d.data.status}] ${d.title}${d.data.previous.length === 0 ? "" : " (recurring)"}${d.data.merge ? " (merge)" : ""}${d.data.unifies.length === 0 ? "" : ` (unifies ${d.data.unifies.length})`}${d.data.unifiedInto === null ? "" : ` (unified into ${numbers.name("drift", d.data.unifiedInto)})`}${closedUnchanged(p, d, tasks) ? " (dismissed, no changes)" : ""}${d.data.proposal ? ` (Proposal ${numbers.name("proposal", d.data.proposal)})` : ""}`),
     "_No Drifts._",
   );
   return { md: `# Drifts\n\n${md}`, json: { drifts: drifts.map((d) => ({ ...driftSummary(d, numbers, closedUnchanged(p, d, tasks)), prepared: preparedFlag(preparedStatus(p, d, model)) })) } };
@@ -461,7 +463,7 @@ export function boardView(p: Project): Result {
       ...proposals.map((i) => `- Proposal ${i.number ?? i.id}${i.stale ? " (stale)" : ""}${i.refining ? " (refining)" : ""}: ${i.title}${resolvesMark(i)}${nestedDrifts(i.id)}`),
       ...drifts.map((d) => {
         const nested = attachedLine(d.proposal, "  ");
-        return `- Drift ${d.number ?? d.id}: ${d.title}${d.previous.length === 0 ? "" : " (recurring)"}${d.unifies.length === 0 ? "" : ` (unifies ${d.unifies.length})`}${nested || (d.proposal ? ` (Proposal ${numbers.name("proposal", d.proposal)})` : "")}`;
+        return `- Drift ${d.number ?? d.id}: ${d.title}${d.previous.length === 0 ? "" : " (recurring)"}${d.merge ? " (merge)" : ""}${d.unifies.length === 0 ? "" : ` (unifies ${d.unifies.length})`}${nested || (d.proposal ? ` (Proposal ${numbers.name("proposal", d.proposal)})` : "")}`;
       }),
     ]),
     "",
@@ -482,6 +484,7 @@ export function boardView(p: Project): Result {
       todo: flat("todo"),
       doing: flat("doing"),
       done: flat("done"),
+      solo: readSoloMode(p),
     },
   };
 }

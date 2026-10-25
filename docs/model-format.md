@@ -1,6 +1,6 @@
 # Model file format
 
-Everything Trama stores lives in `.trama/` at the root of the user's repository, as plain Markdown files versioned with git. Requirements are described at the end of this file.
+Everything Trama stores lives in `.trama/` at the root of the user's repository, as plain Markdown files versioned with git, except in Solo mode, where `.trama/` is kept out of git (see `.trama/solo/mode.json` below). Requirements are described at the end of this file.
 
 ```
 .trama/
@@ -25,7 +25,12 @@ Everything Trama stores lives in `.trama/` at the root of the user's repository,
     0012-cancel-refund.md
   drifts/
     0003-refund-after-shipping.md
+  solo/                        # only while Solo mode is on, never versioned
+    .gitignore                 # `*`
+    mode.json                  # { "exclusions": "folders" | "files" }
 ```
+
+`solo/mode.json` records Solo mode of the working copy, not of the project: its folder has a `.gitignore` containing `*`, so the file stays local even where `.trama/` is tracked. It is absent when Solo mode is off; a file that is not valid JSON, or whose `exclusions` is neither `folders` nor `files`, counts as on with `folders`. Trama writes it together with a block between `# trama solo mode` and `# end trama solo mode` in `.git/info/exclude` that keeps `.trama/`, the skills and `.omp/` out of git (`folders`) or only the files Trama writes (`files`); the README describes both kinds.
 
 ## IDs
 
@@ -300,6 +305,7 @@ A Drift is not part of the Model, so it may name code, but only where it helps. 
 
 - `origin` is the Task the agent was implementing when it filed the Drift (`task` in `drift new`). It must name an existing Task. A Drift filed by a Scan has none, and Drifts written before the field existed have none.
 - `previous` is the resolved Drift this one follows, which makes it recurring: the one named by `previous` in `drift new`, or else the Drift that the origin Task fixes. It must be resolved by fixing the code or with a Proposal, and it is written at creation and never changed. Absent when there is none, which includes Drifts written before the field existed.
+- `merge: true` marks a Drift from a merge: the scan after a Merge in Solo mode found it in a file the merge brought, so the code may be right. It is written only when true, at creation, and never changed; any other value reads as not from a merge. A unified Drift has it when at least one of the Drifts it merges has it. `drift show` prints `From a merge` after the title, `drift list` and `project show` mark the Drift `(merge)`, and the Snapshot and `--json` carry `merge`.
 - Whether a Task is **blocked** is never stored: it is worked out from the Drifts, the Tasks and their `refs` whenever it is asked. An open Drift blocks its origin Task and every Task that is not Done and concerns the same thing, that is, when a reference of one is the same as, or inside, a reference of the other (a Machine contains its States and Transitions, a Feature its Machines; a Requirement section of an element counts as that element; the General section of an Area only equals itself). A Drift resolved as `fix-code` leaves its origin Task, if not Done, waiting for the fix Task (the Drift's `task`) until that Task is Done. A Done Task is never blocked.
 - The agent cannot move a blocked Task to `doing`; the developer can move it, and a blocked Task already in `doing` stays there.
 

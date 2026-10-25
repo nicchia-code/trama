@@ -193,6 +193,11 @@ export function editDrift(p: Project, id: string, input: { prepared?: PreparedIn
   if (input.prepared !== undefined) {
     const question = checkQuestion(drift, input.prepared.question);
     const decisions = checkDecisions(drift, question, input.prepared.decisions, attached !== null);
+    // A Drift from a merge recommends the behaviour the code already has: never a fix of the code, and adopting the attached Proposal when there are no fix options.
+    const recommended = decisions[question.recommended]?.decision;
+    const noFixOptions = driftOptions(drift).length === 0;
+    if (drift.data.merge && (recommended === "fix-code" || (noFixOptions && recommended !== "proposal")))
+      throw refuse("prepared.question.recommended", noFixOptions ? "a Drift from a merge recommends adopting the attached Proposal" : 'a Drift from a merge recommends the behaviour the code already has (a "proposal" or "dismissed" decision), not a fix of the code');
     const value: PreparedQuestion = { question, decisions, fingerprint: referencesFingerprint(loadProject(p), drift.data.refs), prepared: new Date().toISOString() };
     body = withPreparedSection(drift, JSON.stringify(value, null, 2));
   }

@@ -13,11 +13,32 @@ import {
   type SavedJob,
   savedEnv,
   SESSION_NOT_RESUMED_REASON,
+  type TurnEnd,
   within,
   withoutSavedConversation,
   withSavedConversation,
 } from "../../../../src/core/omp-chat-conversation";
 import { type ChatViewPort, type Disposable, type OmpClientPort, type OmpLaunch, type OmpPrompt, OmpStartFailure, type OmpSessionPort, type PendingInstruction } from "./ports";
+
+/**
+ * What the window's away notices (`away-notices.ts`) hear of the conversations. Every call but `opened` is about a conversation with Trama's hook, the only ones that give
+ * notices; `opened` is told of every conversation (`job` says it has the hook), for a conversation of omp Chat opening cancels a finished notice.
+ */
+export interface ConversationNotices {
+  opened(conversation: ConversationInfo, job: boolean): void;
+  /** The conversation went from the window, however it ended. */
+  closed(conversation: ConversationInfo): void;
+  /** `omp-acp.TURN_ENDED` from Agent running, once the job ended and the conversation moved. */
+  turnEnded(conversation: ConversationInfo, end: TurnEnd): void;
+  /** `omp-acp.EXITED`, with whether the agent was in Agent running. */
+  exited(conversation: ConversationInfo, wasRunning: boolean): void;
+  /** A `session/update` or a message of the developer. */
+  activity(conversation: ConversationInfo): void;
+  /** A `session/request_permission` waits for the developer. */
+  permissionAsked(conversation: ConversationInfo, request: string): void;
+  /** The developer chose an option of the request, or it was answered `cancelled`. */
+  permissionSettled(conversation: ConversationInfo, request: string): void;
+}
 
 /** What the conversations need of the rest of the host (`agent.ts`): the end of a job's work, the registry of agent processes, the dialogs and the settings. */
 export interface ConversationHooks {
@@ -43,6 +64,8 @@ export interface ConversationHooks {
   resumeLaunch(root: string, args: string[], env: Record<string, string>): Promise<OmpLaunch>;
   /** A modal confirmation of the editor: true when the developer pressed `button`. */
   confirm(message: string, detail: string, button: string): Promise<boolean>;
+  /** What the window's away notices hear of the conversations. */
+  notices: ConversationNotices;
 }
 
 /** Where the open conversations are saved: `ExtensionContext.workspaceState`. */
@@ -72,6 +95,8 @@ interface Conversation extends ConversationInfo {
   openedAt: string;
   exitListener?: Disposable;
   turnListener?: Disposable;
+  /** The listeners of the away notices on the session's port, disposed when the conversation closes. */
+  noticeListeners?: Disposable[];
   /** An Ask more that has not had its first message: nothing of it is saved, and a window that closes ends it at once. */
   empty?: true;
 }
@@ -144,6 +169,11 @@ export class OmpConversations {
     return conversation === undefined ? undefined : { name: conversation.name, root: conversation.root };
   }
 
+  /** Whether a job conversation of this window is in Agent running: one with Trama's hook (or a job of the registry) whose agent works. Ask more and General never count. */
+  workingJobs(): boolean {
+    return [...this.conversations.values()].some((conversation) => (conversation.hook || conversation.job !== undefined) && conversation.state === "running");
+  }
+
   /** Opens a conversation. On a failed start nothing stays open or saved, and the reason is returned: the caller sends the same instruction to a terminal. */
   async open(spec: OpenConversation): Promise<OpenResult> {
     if (spec.instruction !== undefined) return this.openHeld(spec, spec.instruction);
@@ -160,12 +190,14 @@ export class OmpConversations {
       openedAt: new Date().toISOString(),
     };
     this.conversations.set(spec.id, conversation);
+    this.hooks.notices.opened(conversation, spec.hook);
     let session: OmpSessionPort;
     try {
       // The first message is the prompt of the job's work: the client marks it, and omp's answer to it ends the work.
       session = await this.client.start({ ...spec.launch, hook: spec.hook }, spec.first, (pid) => this.hooks.registerProcess(conversation, pid));
     } catch (err) {
       this.conversations.delete(spec.id);
+      this.hooks.notices.closed(conversation);
       this.hooks.unregisterProcess(conversation);
       return notOpened(err);
     }
@@ -194,6 +226,7 @@ export class OmpConversations {
       empty: true,
     };
     this.conversations.set(spec.id, conversation);
+    this.hooks.notices.opened(conversation, spec.hook);
     const instruction: PendingInstruction = {
       placeholder: held.placeholder,
       compose: (message) => held.compose(message),
@@ -205,6 +238,7 @@ export class OmpConversations {
       session = await this.client.start({ ...spec.launch, hook: spec.hook }, undefined, (pid) => this.hooks.registerProcess(conversation, pid));
     } catch (err) {
       this.conversations.delete(spec.id);
+      this.hooks.notices.closed(conversation);
       this.hooks.unregisterProcess(conversation);
       this.view.close(spec.id);
       return notOpened(err);
@@ -341,6 +375,7 @@ export class OmpConversations {
     const decision = resumeDecision(entry);
     this.view.open({ id: conversation.id, name: conversation.name }, session, { focus: false, ...(decision.notice === undefined ? {} : { notice: decision.notice }) });
     this.step(conversation, { type: "omp-acp.SESSION_RESUMED", wasRunning: decision.wasRunning });
+    this.hooks.notices.opened(conversation, conversation.hook);
     this.view.setWorking(conversation.id, conversation.state === "running");
   }
 
@@ -353,13 +388,28 @@ export class OmpConversations {
     const current = (): boolean => this.conversations.get(conversation.id) === conversation;
     conversation.exitListener = session.onExit((exit) => {
       if (!current()) return;
+      const before = conversation.state;
       this.step(conversation, { type: "omp-acp.EXITED", code: exit.code, signal: exit.signal, ...(exit.details === undefined ? {} : { details: exit.details }) });
+      if (conversation.hook && (before === "running" || before === "idle")) this.hooks.notices.exited(conversation, before === "running");
     });
     // A conversation with Trama's hook is a job's work whether or not it has a job in the registry, and so is a job without the hook: its turn end ends the work.
     if (conversation.hook || conversation.job !== undefined) {
       conversation.turnListener = session.onTurnEnd((end) => {
-        if (current()) this.step(conversation, { type: "omp-acp.TURN_ENDED", end });
+        if (!current()) return;
+        const before = conversation.state;
+        this.step(conversation, { type: "omp-acp.TURN_ENDED", end });
+        if (conversation.hook && before === "running") this.hooks.notices.turnEnded(conversation, end);
       });
+    }
+    // The signals of the away notices come from the session's own port, once per request: the view replays the requests that wait when the webview comes back, the port does not.
+    if (conversation.hook) {
+      conversation.noticeListeners = [
+        session.onUpdate(() => this.hooks.notices.activity(conversation)),
+        session.onSend(() => this.hooks.notices.activity(conversation)),
+        session.onPermissionRequest((request) => this.hooks.notices.permissionAsked(conversation, request.requestId)),
+        session.onPermissionAnswered((requestId) => this.hooks.notices.permissionSettled(conversation, requestId)),
+        session.onPermissionCancelled((requestId) => this.hooks.notices.permissionSettled(conversation, requestId)),
+      ];
     }
   }
 
@@ -410,7 +460,9 @@ export class OmpConversations {
       case "close":
         conversation.exitListener?.dispose();
         conversation.turnListener?.dispose();
+        for (const listener of conversation.noticeListeners ?? []) listener.dispose();
         this.conversations.delete(conversation.id);
+        this.hooks.notices.closed(conversation);
         this.saved = withoutSavedConversation(this.saved, conversation.id);
         void this.store.update(CONVERSATIONS_KEY, this.saved);
         this.view.close(conversation.id);

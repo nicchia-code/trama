@@ -13,5 +13,8 @@ Le impostazioni di Trama cambiano nell'editor, da qualunque parte: dalla scheda 
 ### CURSOR_API_KEY_CHANGED
 La chiave API di Cursor che Trama conserva nel portachiavi dell'editor è stata salvata, cambiata o tolta in un'altra finestra dell'editor dello stesso utente. Il portachiavi è condiviso da tutte le finestre, quindi la chiave nuova vale già per ogni omp che questa finestra avvia; la finestra in cui il developer l'ha cambiata non riceve l'Evento.
 
+### NTFY_TOKEN_CHANGED
+The ntfy access token that Trama keeps in the editor's keychain was saved, changed or removed in another editor window of the same user. The keychain is shared by every window, so the new token already applies to this window's next notification; the window in which the developer changed it does not receive the Event.
+
 ### WINDOW_CLOSED
 La finestra dell'editor con il progetto si chiude o si ricarica, e con lei finiscono i processi che l'estensione vi aveva avviato, compresi quelli delle conversazioni di omp Chat. Riguarda solo ciò che appartiene a quella finestra.

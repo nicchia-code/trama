@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, test, vi } from "bun:test";
 import { CONVERSATIONS_KEY, RESUME_PROMPT, type SavedConversation, type TurnEnd } from "../src/core/omp-chat-conversation";
 import { type ConversationHooks, type ConversationInfo, type ConversationStore, OmpConversations } from "../extension/src/host/omp-chat/conversations";
-import { type ChatViewPort, type Disposable, type OmpClientPort, type OmpExit, type OmpLaunch, type OmpPrompt, OmpStartFailure, type OmpSessionPort, type PendingInstruction } from "../extension/src/host/omp-chat/ports";
+import { type ChatViewPort, type Disposable, type OmpClientPort, type OmpExit, type OmpLaunch, type OmpPrompt, OmpStartFailure, type OmpSessionPort, type PendingInstruction, type PermissionRequest } from "../extension/src/host/omp-chat/ports";
+import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { instructedMessage } from "../extension/src/host/prompts";
 
 class FakeSession implements OmpSessionPort {
@@ -14,11 +15,17 @@ class FakeSession implements OmpSessionPort {
   stopOptions: ({ deactivating?: boolean } | undefined)[] = [];
   private exitListeners: ((exit: OmpExit) => void)[] = [];
   private turnEndListeners: ((end: TurnEnd) => void)[] = [];
+  private updateListeners: ((notification: SessionNotification) => void)[] = [];
+  private sendListeners: (() => void)[] = [];
+  private permissionListeners: ((request: PermissionRequest) => void)[] = [];
+  private cancelledListeners: ((requestId: string) => void)[] = [];
+  private answeredListeners: ((requestId: string) => void)[] = [];
   constructor(readonly sessionId: string) {}
   async sendPrompt(prompt: OmpPrompt): Promise<void> {
     this.prompts.push(prompt);
   }
   async send(prompt: OmpPrompt): Promise<void> {
+    for (const listener of this.sendListeners) listener();
     this.prompts.push(prompt);
   }
   cancel(): void {
@@ -43,7 +50,16 @@ class FakeSession implements OmpSessionPort {
   get listeningToTurnEnd(): boolean {
     return this.turnEndListeners.length > 0;
   }
-  onUpdate(): Disposable {
+  onUpdate(listener: (notification: SessionNotification) => void): Disposable {
+    this.updateListeners.push(listener);
+    return { dispose: () => undefined };
+  }
+  /** omp sends a `session/update`. */
+  update(): void {
+    for (const listener of this.updateListeners) listener({ sessionId: "s", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "x" } } });
+  }
+  onSend(listener: () => void): Disposable {
+    this.sendListeners.push(listener);
     return { dispose: () => undefined };
   }
   onTurn(): Disposable {
@@ -53,13 +69,29 @@ class FakeSession implements OmpSessionPort {
     return { dispose: () => undefined };
   }
   answerForm(): void {}
-  onPermissionRequest(): Disposable {
+  onPermissionRequest(listener: (request: PermissionRequest) => void): Disposable {
+    this.permissionListeners.push(listener);
     return { dispose: () => undefined };
   }
-  onPermissionCancelled(): Disposable {
+  onPermissionCancelled(listener: (requestId: string) => void): Disposable {
+    this.cancelledListeners.push(listener);
     return { dispose: () => undefined };
   }
-  answerPermission(): void {}
+  onPermissionAnswered(listener: (requestId: string) => void): Disposable {
+    this.answeredListeners.push(listener);
+    return { dispose: () => undefined };
+  }
+  answerPermission(requestId = ""): void {
+    for (const listener of this.answeredListeners) listener(requestId);
+  }
+  /** omp asks a permission. */
+  askPermission(requestId: string): void {
+    for (const listener of this.permissionListeners) listener({ requestId, toolCall: { toolCallId: "call-1" }, options: [] });
+  }
+  /** The request is answered `cancelled`. */
+  cancelPermission(requestId: string): void {
+    for (const listener of this.cancelledListeners) listener(requestId);
+  }
   async models(): Promise<{ available: { id: string; name: string }[] }> {
     return { available: [] };
   }
@@ -183,6 +215,8 @@ interface Calls {
   interrupted: string[];
   restored: { id: string; job: string }[];
   confirms: { message: string; detail: string; button: string }[];
+  /** What the away notices heard, one entry per call. */
+  notices: string[];
 }
 
 let client: FakeClient;
@@ -208,6 +242,15 @@ const hooks = (): ConversationHooks => ({
     calls.confirms.push({ message, detail, button });
     return confirmAnswer;
   },
+  notices: {
+    opened: (conversation, isJob) => calls.notices.push(`opened ${conversation.id} ${isJob ? "job" : "plain"}`),
+    closed: (conversation) => calls.notices.push(`closed ${conversation.id}`),
+    turnEnded: (conversation, end) => calls.notices.push(`turnEnded ${conversation.id} ${JSON.stringify(end)}`),
+    exited: (conversation, wasRunning) => calls.notices.push(`exited ${conversation.id} ${wasRunning ? "running" : "idle"}`),
+    activity: (conversation) => calls.notices.push(`activity ${conversation.id}`),
+    permissionAsked: (conversation, request) => calls.notices.push(`permissionAsked ${conversation.id} ${request}`),
+    permissionSettled: (conversation, request) => calls.notices.push(`permissionSettled ${conversation.id} ${request}`),
+  },
 });
 
 /** Lets the promise chains the host started settle. */
@@ -224,7 +267,7 @@ beforeEach(() => {
   client = new FakeClient();
   view = new FakeView();
   store = new FakeStore();
-  calls = { ended: [], stopped: [], agentStopped: [], registered: [], unregistered: [], interrupted: [], restored: [], confirms: [] };
+  calls = { ended: [], stopped: [], agentStopped: [], registered: [], unregistered: [], interrupted: [], restored: [], confirms: [], notices: [] };
   autoExit = true;
   confirmAnswer = true;
   projectRoot = "/p";
@@ -800,5 +843,89 @@ describe("the resume", () => {
     await conversations.resume();
     expect(client.resumed).toHaveLength(2);
     expect(view.opened.map((o) => o.name).sort()).toEqual(["Design", "T3"]);
+  });
+});
+
+describe("what the away notices hear", () => {
+  test("a conversation with the hook is opened as a job, a conversation without it is not, and each is told closed when it goes", async () => {
+    autoExit = false;
+    const conversations = make();
+    await conversations.open(spec);
+    await conversations.open({ id: "qqq111", root: "/p", name: "Ask", launch: { ...launch, args: ["acp", "--yolo"] }, focus: true, hook: false });
+    expect(calls.notices).toEqual(["opened abc123 job", "opened qqq111 plain"]);
+    await conversations.closeRequested("qqq111");
+    expect(calls.notices).toContain("closed qqq111");
+  });
+
+  test("a failed start is opened and closed again, so nothing is left in the notices", async () => {
+    client.failStart = "omp exited with code 1";
+    await make().open(spec);
+    expect(calls.notices).toEqual(["opened abc123 job", "closed abc123"]);
+  });
+
+  test("the end of the work from Agent running is told once the job ended and the conversation closed with autoExit, with its end", async () => {
+    const conversations = make();
+    await conversations.open(spec);
+    client.sessions[0]?.turnEnd();
+    expect(calls.notices).toEqual(["opened abc123 job", "closed abc123", 'turnEnded abc123 {"stopReason":"end_turn"}']);
+    expect(calls.ended).toEqual([{ id: "abc123" }]);
+  });
+
+  test("a turn end of a conversation at rest is not told", async () => {
+    autoExit = false;
+    const conversations = make();
+    await conversations.open(spec);
+    client.sessions[0]?.turnEnd();
+    client.sessions[0]?.turnEnd({ stopReason: "refusal" });
+    expect(calls.notices.filter((entry) => entry.startsWith("turnEnded"))).toEqual(['turnEnded abc123 {"stopReason":"end_turn"}']);
+  });
+
+  test("the end of the process is told with whether the agent was in Agent running", async () => {
+    autoExit = false;
+    const conversations = make();
+    await conversations.open(spec);
+    client.sessions[0]?.exit({ code: 1, signal: null });
+    expect(calls.notices).toContain("exited abc123 running");
+    await conversations.open({ ...spec, id: "def456", job: { ...job, id: "job-2" } });
+    client.sessions[1]?.turnEnd();
+    client.sessions[1]?.exit({ code: 0, signal: null });
+    expect(calls.notices).toContain("exited def456 idle");
+  });
+
+  test("the updates and the messages of the developer of a conversation with the hook are activity", async () => {
+    autoExit = false;
+    const conversations = make();
+    await conversations.open(spec);
+    client.sessions[0]?.update();
+    await client.sessions[0]?.send({ text: "hi" });
+    expect(calls.notices.filter((entry) => entry.startsWith("activity"))).toEqual(["activity abc123", "activity abc123"]);
+  });
+
+  test("a permission request is told once, from the session's port, and its answer or cancellation settles it", async () => {
+    autoExit = false;
+    const conversations = make();
+    await conversations.open(spec);
+    client.sessions[0]?.askPermission("permission-1");
+    client.sessions[0]?.answerPermission("permission-1");
+    client.sessions[0]?.askPermission("permission-2");
+    client.sessions[0]?.cancelPermission("permission-2");
+    expect(calls.notices.filter((entry) => entry.startsWith("permission"))).toEqual(["permissionAsked abc123 permission-1", "permissionSettled abc123 permission-1", "permissionAsked abc123 permission-2", "permissionSettled abc123 permission-2"]);
+  });
+
+  test("a resumed conversation is told opened as a job, and nothing else", async () => {
+    store.values.set(CONVERSATIONS_KEY, [{ id: "abc123", name: "T3", sessionId: "s-1", state: "idle", args: launch.args, env: {}, hook: true, openedAt: "2026-01-01T00:00:00.000Z" }]);
+    await make().resume();
+    expect(calls.notices).toEqual(["opened abc123 job"]);
+  });
+
+  test("only conversations with the hook or a job are working jobs, and only in Agent running", async () => {
+    autoExit = false;
+    const conversations = make();
+    await conversations.open({ id: "qqq111", root: "/p", name: "Ask", launch: { ...launch, args: ["acp", "--yolo"] }, focus: true, hook: false });
+    expect(conversations.workingJobs()).toBe(false);
+    await conversations.open(spec);
+    expect(conversations.workingJobs()).toBe(true);
+    client.sessions[1]?.turnEnd();
+    expect(conversations.workingJobs()).toBe(false);
   });
 });

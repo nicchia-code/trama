@@ -1244,6 +1244,12 @@ describe("automatic terminal exit", () => {
       delete inspected.asyncDriftResolver;
     }
   });
+  test("the reconciliation of a merge carries neither the sub-agent limit nor the sub-agent sentence", async () => {
+    const { launchAgent } = await import("../extension/src/host/agent");
+    const reconcile = "Use the trama-merge skill to resolve the conflicts of the merge of `origin/main` in progress.";
+    expect(await launchAgent(dir, reconcile, "Merge", undefined, undefined, undefined, undefined, { subAgents: false })).toBe("terminal");
+    expect(typed.at(-1)).toBe(`'omp' '${reconcile} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
+  });
   test("an instruction is built when it is sent, and is not sent if the delivery conditions change", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
     let scope = "the Drift open before the instruction is sent";
@@ -2914,6 +2920,8 @@ describe("omp Chat conversations in place of terminals", () => {
       answerForm() {},
       onPermissionRequest: none,
       onPermissionCancelled: none,
+      onPermissionAnswered: none,
+      onSend: none,
       answerPermission() {},
       models: async () => ({ available: [] }),
       setModel: async () => undefined,

@@ -10,6 +10,7 @@ import importSkill from "../../skills/trama-import/SKILL.md" with { type: "text"
 import resolveDrifts from "../../skills/trama-resolve-drifts/SKILL.md" with { type: "text" };
 import scan from "../../skills/trama-scan/SKILL.md" with { type: "text" };
 import compare from "../../skills/trama-compare/SKILL.md" with { type: "text" };
+import merge from "../../skills/trama-merge/SKILL.md" with { type: "text" };
 import { SKILL_DIRS } from "../core/requirement-skills";
 import { normalizeLf } from "../core/line-endings";
 import { readTextLf, writeFileEnsuringDir } from "../core/store";
@@ -24,6 +25,7 @@ export const SKILLS: Record<string, string> = {
   "trama-import/SKILL.md": normalizeLf(importSkill),
   "trama-resolve-drifts/SKILL.md": normalizeLf(resolveDrifts),
   "trama-compare/SKILL.md": normalizeLf(compare),
+  "trama-merge/SKILL.md": normalizeLf(merge),
 };
 
 /** Skill folders that earlier versions installed and that no longer exist. */

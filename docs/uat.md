@@ -76,8 +76,9 @@ Startup regression check: open the panel, switch through Diagram, Board and Requ
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | 1 | Press Ctrl+Shift+P, type `Trama`, look at the list | Among them: **Trama: Open**, **Trama: Import from Code**. No **Trama: Scan System** (the whole System is scanned from **Scan System** in the side menu), no initialize command (no **Trama: Initialize Project**) and no design command: design requests start only from the Board button (**Add Work Item…**). **Trama: Send to agent (closing the tab sends it too)** is not in the list | ☐ |
-| 2 | Run **Trama: Open** | One new editor tab titled `Trama`, in the editor area | ☐ |
+| 2 | Run **Trama: Open** | One new editor tab titled `Board` (the name of the view it shows, never `Trama` or the name of the System), in the editor area | ☐ |
 | 3 | Look at the top of the panel | No tab bar and no Settings wheel; the panel shows one view, chosen from the side menu (**Board** carries the grey number `4` there) | ☐ |
+| 3a | Look at the header of the side menu, then change the first line of `system.md` to `# Acme` and look again | `TRAMA: SHOP` (the name of the System; the icon in the activity bar is still named `Trama`); after the change `TRAMA: ACME`. With the Model made unreadable or the first line `#` alone, the folder name (`TRAMA: SHOP` with the folder `shop`); in a window without folders or in a folder with no `.trama/`, only `TRAMA` | ☐ |
 | 4 | Look at the top of the panel | No red banner | ☐ |
 | 5 | Look at the Diagram breadcrumb | Only `System` | ☐ |
 | 6 | Run **Developer: Open Webview Developer Tools** (palette) and open its Console tab | No red errors. A yellow `custom wheel sensitivity` warning from Cytoscape is expected and harmless. No `Content Security Policy` violation | ☐ |
@@ -85,19 +86,19 @@ Startup regression check: open the panel, switch through Diagram, Board and Requ
 ### A2. Open twice
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | With the panel open in another editor tab, run **Trama: Open** again | The existing `Trama` tab is brought to front. There is still exactly one `Trama` tab | ☐ |
+| 1 | With the panel open in another editor tab, run **Trama: Open** again | The existing panel tab is brought to front. There is still exactly one panel tab | ☐ |
 
 ### A3. Close and reopen
 | # | Action | Expected | ✓ |
 |---|---|---|---|
-| 1 | Close the `Trama` tab, run **Trama: Open** | A new tab opens at the System level with the current data | ☐ |
+| 1 | Close the panel tab, run **Trama: Open** | A new tab opens at the System level with the current data | ☐ |
 
 ### A4. State survives tab switching
 | # | Action | Expected | ✓ |
 |---|---|---|---|
 | 1 | Diagram: drill to `checkout › order` (see B3–B5) and choose Proposal `0001` in the selector | Breadcrumb `System › checkout › order`, selector shows `0001 · Returns after shipping` | ☐ |
 | 2 | Click the **Board** tab, then the **Diagram** tab | Same breadcrumb, same selector value, same zoom and pan as before | ☐ |
-| 3 | Open another editor tab, come back to `Trama` | Same as above; the diagram is not blank or redrawn from the start | ☐ |
+| 3 | Open another editor tab, come back to the panel tab | Same as above; the diagram is not blank or redrawn from the start | ☐ |
 
 ### A5. Reload window 🔍
 | # | Action | Expected | ✓ |
@@ -684,7 +685,7 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 | J4c | In a project with an empty Model run **Trama: Import from Code**, also with the panel closed; then in a project with a Model run it again | With the empty Model the panel opens in front on the Settings view, with the wizard in the Empty Model mode and Import from Code chosen. Running the command again, or pressing **Import from Code** on the Diagram, while that wizard is open keeps it as it is; pressing **Start from Scratch** starts it over on that path. With a Model nothing opens: the agent gets `Use the trama-import skill on this repository.` and no sentence about folders | ☐ |
 | J4d | In a project, open Settings and press **Guided setup** (top right, tooltip `Review the main settings step by step`) | The button and the form give way to the wizard in the Settings mode: `omp`, `Models`, `Project`, `Advanced`, `Summary`, with **Cancel** and no **Back** on `omp`. The confirm button reads **Save settings**; it saves only the changed keys and returns to the form. **Cancel** returns to the form with nothing saved. Change a setting from the editor's own settings while the wizard is open: the wizard keeps its value and the summary compares with the one that holds now | ☐ |
 | J4e | Open the **Settings** view in a project, in the light and the dark theme, then narrow the panel to about 480 px and to about 300 px | One centred column of at most about 720 px (the whole width minus the margins when narrower); the page never scrolls sideways and nothing leaves the column or is cut. The title `Settings` is the page heading, with **Guided setup** on its row at the right; under about 480 px the button goes under the title, at the left. There is no grid of side-by-side columns, no index and no group selector | ☐ |
-| J4f | Read the page from the top to the bottom | The groups `omp`, `Models`, `Project` and `Advanced`, one under the other, each with its title and, under it in secondary text, the sentence of the same step of the wizard (`omp is required: Trama runs every agent with omp.`, `Choose the model for each kind of work.`, `Choose where Trama installs the agent skills.`, `Theme and optional features.`); `Advanced` has the subtitles `Appearance`, `Drifts`, `Agents` and `omp Chat` in that order. There is no `Features` group. `Auto Exit` and `Language` are at the end of `omp`, `Language` is an editable text field with no note under it. Each setting has its bold title (a checkbox is left of it), its explanation under it, the control and, for an enum, the description of the chosen value; no «i» and no bubble; under `Analysis`, `Execution` and `Scan` the advice in bold (`Your most capable model.`, `A mid-range model.`, `A fast, light model.`) comes before the explanation | ☐ |
+| J4f | Read the page from the top to the bottom | The groups `omp`, `Models`, `Project` and `Advanced`, one under the other, each with its title and, under it in secondary text, the sentence of the same step of the wizard (`omp is required: Trama runs every agent with omp.`, `Choose the model for each kind of work.`, `Choose where Trama installs the agent skills.`, `Theme and optional features.`); `Advanced` has the subtitles `Appearance`, `Drifts`, `Agents`, `omp Chat` and `Notifications` in that order, the last only in the Settings tab (under `ntfy Topic` it has the buttons of the access token and `Send test notification` on its own row). There is no `Features` group. `Auto Exit` and `Language` are at the end of `omp`, `Language` is an editable text field with no note under it. Each setting has its bold title (a checkbox is left of it), its explanation under it, the control and, for an enum, the description of the chosen value; no «i» and no bubble; under `Analysis`, `Execution` and `Scan` the advice in bold (`Your most capable model.`, `A mid-range model.`, `A fast, light model.`) comes before the explanation | ☐ |
 | J4g | In the `omp` group look under the sentence and after the settings; set `Omp Path` to a path that does not exist, then empty it | Under the sentence, before the settings, the bordered box of the wizard's `omp` step: `Checking omp…` with a spinning icon, then `omp <version> answered with <N> models.` with the check icon, or, in the warning colour, `omp not found at <path>. Trama cannot work without omp.` with **Install omp** inside the box. The tab never says `Updating omp to …` nor `Could not update omp`. The box is checked again every time the view is shown, when `Omp Path` changes and when the installer terminal ends | ☐ |
 | J4h | In a project with an `AGENTS.md` at the folder's root, open Settings; turn `Ignore Instruction Files` on and off; press the link; leave the view and come back after deleting the file | After the settings of `omp`, the warning box `Agent instruction files found…` with a link `Open AGENTS.md`; the line `Trama's omp jobs ignore these files.` appears and goes away as the setting changes. The link opens the file in an editor tab that is not a preview, and the panel stays on Settings. Back on the view the search is done again and, with no file, the box is gone. With no project, or while the search runs, there is no box | ☐ |
 | J5 | `cat /tmp/trama-empty/.trama/model/system.md` | `# Trama empty` heading and `Describe what this System is and who it is for.` | ☐ |
@@ -972,6 +973,134 @@ Written from the Requirements. Set the model roles in user settings and remove t
 
 Not verified: the `--slow` option and the Advisor Scanner overlay (`modelRoles.advisor`) with a suffixed value, which omp 18.12.6 did not check at startup; a level changed in the model of an omp Chat conversation mid-session keeps the thinking level the conversation already has.
 
+
+---
+
+## AC. Away notifications
+
+Written from the Requirements (`quality#notice`). Needs omp Chat on and a topic you can watch: the ntfy app on a phone subscribed to it, or a page of the server. Use a topic nobody else knows: on the public ntfy.sh the topic works as a password. Set `trama.ntfyTopic` (and, for a server of your own, `trama.ntfyServer`) in the Notifications subgroup of Advanced, and remove them at the end.
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| AC1 | 🪙 With `trama.autoExit` on, press **Scan System** and wait for the scan to end | One notification arrives at once when the job ends: title `<project> - Scan finished`, message `Trama is waiting for you.`, ✅ in front of the title, normal priority. No click action, no button | ☐ |
+| AC2 | 🪙 Turn `trama.autoExit` off and repeat | The conversation stays open at rest and the notification arrives about 30 seconds after the last activity in it; typing a message in the conversation, or a new `session/update`, within those 30 seconds delays it by 30 seconds from then | ☐ |
+| AC3 | 🪙 Repeat AC2, and within the 30 seconds open **Ask more** (or any other conversation) | The notification never arrives | ☐ |
+| AC4 | 🪙 Press **Stop** in a job's conversation while it works | No notification | ☐ |
+| AC5 | 🪙 Press **Run all** with Tasks that need two models, so two Runs | Exactly one notification, after the last Run ends, `<project> - <n> jobs finished` | ☐ |
+| AC6 | 🪙 Leave a question round of a job unanswered for 30 seconds | One notification `<project> - <name> asks a question`, ❓, high priority. Answering or skipping the round before the 30 seconds sends nothing; going back to a question does not restart them | ☐ |
+| AC7 | 🪙 Set `trama.ompChatApproval` to `ask`, start a Run whose agent needs a permission and leave the request unanswered for 30 seconds | One notification `<project> - <name> asks permission`, 🔐, high priority. Choosing an option, pressing Stop or closing the conversation within the 30 seconds sends nothing. With `yolo` no request is shown and nothing is sent | ☐ |
+| AC8 | 🪙 During a Run kill the omp process of its conversation from a terminal | At once one notification `<project> - <name> stopped`, ⚠️, high priority. The same for a Run whose model refuses or reaches its token limit. Killing the process of a conversation at rest sends nothing | ☐ |
+| AC9 | Open **Ask more** and **General**, ask each a question and wait | No notification, for the answers, the questions or the permissions of either | ☐ |
+| AC10 | 🪙 Reload the window during a Run, and let the Run end | Nothing arrives when the window reopens and the conversation resumes; one notification arrives when the work ends | ☐ |
+| AC11 | 🪙 Close the window while a notification waits for its 30 seconds | Nothing is sent | ☐ |
+| AC12 | 🪙 Set `trama.ntfyServer` to an address that does not answer and run a job to its end | Nothing is shown to the developer: no message, no notice on the Board | ☐ |
+| AC13 | 🪙 Run a job started in a terminal (turn `trama.ompChat` off) | No notification | ☐ |
+| AC14 | In the Settings tab press **Send test notification** with a valid topic | One request goes out; `Test notification sent.` shows under the button and `<project> - Test notification` arrives with 🔔 and the message `Trama's notifications reach this device.` It needs no omp Chat and no job | ☐ |
+| AC15 | Set an access token that the server refuses (**Set access token**) and press **Send test notification** | `Test notification not sent: HTTP 401.` (or `HTTP 403`) in the error colour, with no retry. With the right token the test is sent | ☐ |
+| AC16 | In the Notifications subgroup type `ntfy.sh` in `ntfy Server` and `bad topic` in `ntfy Topic`, pressing Enter or leaving each field | Nothing is saved and the fields say `Enter an http or https address without user name or password.` and `Use 1 to 64 letters, digits, - or _.`; with no topic (or an invalid one) **Send test notification** is disabled and its tooltip says `Set an ntfy topic first.` (or `Fix the ntfy server or topic first.`) | ☐ |
+| AC17 | Press **Set access token**, press Esc; press it again, try to confirm an empty text, then paste a token with spaces around it | The masked box is titled `ntfy Access Token` with the prompt `Paste the access token of your ntfy server.`; Esc changes nothing; an empty text shows `Enter an access token.` and cannot be confirmed; the token is saved without the spaces and the focus goes back to the button, which now reads **Change access token**, with the line `Access token saved` and **Remove access token** (no confirmation). The token is never shown in the panel. A token saved or removed in another window updates the subgroup | ☐ |
+
+Not verified: that the server, the topic and the token never reach a log of the editor, which unit tests cover only for Trama's own messages.
+
+
+---
+
+## AD. Solo mode (command line)
+
+Written from the Requirements (`solo-switch`). Needs a scratch folder with `git init` and the `trama` binary. Solo mode has no key in the editor settings; the Settings row and the wizard step are checked in their own sections.
+
+| # | Action | Expected | ✓ |
+|---|---|---|---|
+| AD1 | In a folder that is not a git repository run `trama project new --input '{"solo":"folders"}'` | It fails with `Solo mode needs a git repository.`; no `.trama/`, `.agents/` or `.omp/` was created | ☐ |
+| AD2 | In a folder after `git init` run `trama project new --input '{"solo":"folders"}'` | The result says `Solo mode is on`; `.trama/solo/mode.json` holds `{ "exclusions": "folders" }` and `.trama/solo/.gitignore` holds `*`; `git status --porcelain --untracked-files=all` prints nothing | ☐ |
+| AD3 | Open `.git/info/exclude` | A block `# trama solo mode`, `/.trama/`, `/.agents/skills/`, `/.omp/`, `# end trama solo mode` at the end, the other lines as they were | ☐ |
+| AD4 | Run `trama project edit --input '{"solo":"files"}'` | Only Solo mode changes (no skill is written): the block now lists `/.trama/`, `/.agents/skills/trama-*/`, `/.omp/agents/trama-analysis.md`, `/.omp/agents/trama-implementer.md` and `/.omp/WATCHDOG.yml`. A file `.agents/skills/mine/SKILL.md` or `.omp/agents/mine.md` you create shows in `git status` | ☐ |
+| AD5 | Run `trama project edit --input '{"solo":"files"}'` again and compare `.git/info/exclude` with a copy made before | The file is byte-identical | ☐ |
+| AD6 | Run `trama project show --json` | The output has `"solo": "files"` | ☐ |
+| AD7 | Run `trama project edit --input '{"solo":"folders","skillsDir":"agent/skills"}'` | The skills are installed in `agent/skills` and the block lists `/agent/skills/` instead of `/.agents/skills/` | ☐ |
+| AD8 | Track `.trama/model/system.md` with `git add -f`, then run `trama project edit --input '{"solo":"folders"}'` | It succeeds, the text says that git tracks `.trama/model/system.md` and `tracked` lists it in `--json`; its changes still show in `git status` | ☐ |
+| AD9 | Delete the block from `.git/info/exclude` (or change a path in it) and open Trama in the editor | In a few seconds the block is back as the kind and `trama.skillsDir` need, with no message; with `chmod a-w .git/info/exclude` the error `Trama: could not update the agent skills: <reason>.` shows and comes back at the next opening | ☐ |
+| AD10 | Put `.git/info/exclude` in CRLF line ends, without a final line end, then run `trama project edit --input '{"solo":"files"}'` | The other lines and their CRLF are unchanged; the block has CRLF ends | ☐ |
+| AD11 | In a subfolder `app` of a repository run `trama project new --root app --input '{"solo":"folders"}'` | The block has `/app/.trama/`, `/app/.agents/skills/` and `/app/.omp/`; the rest of the repository is untouched | ☐ |
+| AD12 | Write an invalid `.trama/solo/mode.json` (`not json`) and run `trama project show --json` | `"solo": "folders"` | ☐ |
+| AD13 | Run `trama project edit --input '{"solo":"off"}'` | `Solo mode is off.`; the block and `.trama/solo/mode.json` are gone and every other line of `.git/info/exclude` is as before | ☐ |
+| AD14 | Run `trama project edit --input '{"solo":"folders"}'` in a folder that is not a git repository | It fails with `Solo mode needs a git repository.` and `.trama/solo/mode.json` is not written | ☐ |
+
+---
+
+## AF. Solo mode (Settings row and wizard)
+
+Written from the Requirements (`solo-switch`, `setup-wizard`, `Get Started`). Needs a scratch repository (`git init`) and a scratch folder without git, each open in the editor.
+
+| # | Action | Expected | ✓ |
+|---|--------|----------|---|
+| AF1 | In a project inside a git repository open **Settings** and look at the **Project** group | After **Skills Dir** the row **Solo Mode**: title, the explanation «Use Trama alone in a repository where the others do not: …», an unchecked checkbox and, under it, `Only this workspace.`; no **Exclude** field | ☐ |
+| AF2 | Check **Solo Mode** | The checkbox and the field are disabled while it is written, then **Exclude** appears with `Whole folders` and «Keeps out of git `.trama/`, the agent skills folder and `.omp/`.»; `.git/info/exclude` has the block and `.trama/solo/mode.json` holds `folders` | ☐ |
+| AF3 | Choose `Only Trama's files` in **Exclude** | The description changes to «Keeps out of git `.trama/`, the `trama-*` skills …»; the block and `mode.json` now say `files` | ☐ |
+| AF4 | Track `.trama/model/system.md` with `git add -f`, then close and reopen **Settings** | Under **Exclude**, in the warning colour, `These Trama files are tracked by git, so their changes are still committed:` with `.trama/model/system.md` on its own line, in the monospace font | ☐ |
+| AF5 | Track 12 files of `.trama/` and reopen **Settings** | Ten paths, one per line, then `and 2 more` | ☐ |
+| AF6 | Uncheck **Solo Mode** | **Exclude** and the warning go away; the block and `.trama/solo/mode.json` are gone, every other line of `.git/info/exclude` is as before | ☐ |
+| AF7 | Make `.git/info/exclude` read-only, check **Solo Mode** | The editor shows `Trama: could not save Solo Mode: <reason>.`; the checkbox goes back to unchecked; nothing was written | ☐ |
+| AF8 | In a project in a folder without git open **Settings** | **Solo Mode** is unchecked and disabled, with `Solo mode needs a git repository.` under `Only this workspace.` | ☐ |
+| AF9 | With the keyboard only, reach **Solo Mode** and **Exclude**, change them, and read them with a screen reader | Each has the name `Solo Mode` / `Exclude`; the explanation, the note and the messages are read as the description | ☐ |
+| AF10 | In a folder without a project, open **Get Started**, choose Start from Scratch and go to **Project** | After **Skills Dir** the row **Solo Mode**, off, with `Only this workspace.`; no list of tracked files. In a folder without git it is disabled with `Solo mode needs a git repository.` | ☐ |
+| AF11 | Check **Solo Mode** and go back to **Path** | The notice reads «Trama will create a `.trama` folder that describes this project, and write the agent skills … versioned nowhere else.»; unchecked, it is the usual notice again | ☐ |
+| AF12 | Go to **Summary** | In **Project**: **Solo Mode** `On` and **Exclude** `Whole folders`, not marked as changed; nothing was written yet (no `.trama/`) | ☐ |
+| AF13 | Confirm **Set up Trama** | The project is created with Solo mode on: `.trama/solo/mode.json`, the block, and `git status` shows no file of Trama | ☐ |
+| AF14 | In a project with an empty Model and Solo mode on with `files`, open **Import from Code** (Guided setup, Empty Model) and go to **Project** | The row starts checked with `Only Trama's files` | ☐ |
+| AF15 | Choose `Whole folders` and go to **Summary** | **Exclude** `Whole folders`, highlighted, `was Only Trama's files`; confirming rewrites the block with the whole folders and then starts the path | ☐ |
+| AF16 | Open **Guided setup** from **Settings** | The **Project** step and the summary have no Solo Mode row | ☐ |
+
+---
+
+## AG. Solo mode: Merge (flow and scan)
+
+Written from the Requirements (`solo-merge`, `agent-launching`). Needs a scratch repository with Solo mode on (`trama project edit --input '{"solo":"folders"}'`), a bare remote `origin` with a branch `main` (the upstream of the checked-out `main`) and a clone where you can push commits to `origin/main` and to a branch `feature`, omp installed and the project open in the editor. Merge is started from the button of the side menu (its steps are in section AH); here it is pressed as given and the rest of the flow is observed. Each scenario starts from a clean working copy on `main`.
+
+| # | Action | Expected | ✓ |
+|---|--------|----------|---|
+| AG1 | **Clean merge.** Push to `origin/main` a commit that changes `a.txt`, press **Merge** | The notification `Fetching…`, then the list `Merge into main` with the placeholder `Choose the branch to merge`: `origin/main` first with the description `upstream`, then the other remote branches, then the local ones, each group alphabetical, with no `main` and no `origin/HEAD`. Choosing `origin/main` asks nothing, merges it (`git merge --no-edit origin/main`) and shows `Trama: merged origin/main. Scanning the System.`; a terminal or omp Chat conversation named `Scan` opens with `Use the trama-scan skill on the whole System. A merge brought in `<base>...<incoming>`: mark `merge` on every Drift whose Where in the code lies in a file `git diff --name-only <base>...<incoming>` lists.` (the two hashes are the full commits) followed by the usual sentences, the sub-agent limit included; there is no confirmation and `.trama/solo/merge.json` does not exist when the scan starts | ☐ |
+| AG2 | After AG1, wait for the agent to deliver, look at the Board and at `Scan System` | A Drift whose Where in the code lies in `a.txt` has the badge `Merge`; one in another file has none. `Scan System` is back at `Scan System` with no `· N`; `.trama/last-scan/system` was written when the instruction was delivered, as `Scan System` does | ☐ |
+| AG3 | **Fast-forward.** Push a new commit to `origin/main`, with no commit of yours since the last merge, press **Merge**, choose `origin/main` | `main` moves forward with no merge commit and the same message `Trama: merged origin/main. Scanning the System.` and the same scan start as AG1 | ☐ |
+| AG4 | **Already up to date.** Press **Merge** and choose `origin/main` again | `Trama: main is already up to date with origin/main.` as an information message; no terminal opens, nothing changes and `.trama/solo/merge.json` does not exist | ☐ |
+| AG5 | Press **Merge**, choose a local branch that is not `origin/main` (`feature`) | A modal confirmation `Merge feature into main?` with the detail `feature is not the upstream of main.` and the button `Merge`; **Cancel** (or Escape) merges nothing and starts no scan; **Merge** merges it. Choosing `origin/main` or `origin/<current branch>` asks nothing. Pressing Escape in the list closes it and does nothing | ☐ |
+| AG6 | **Failed fetch.** Make `origin` unreachable (`git remote set-url origin /nonexistent`), press **Merge** | `Fetching…` ends and the error `Trama: could not fetch: <git's first line of error>.` shows; no list opens, nothing is merged and no file is written. Restore the URL | ☐ |
+| AG7 | Create an untracked file `b.txt` that `origin/feature` also tracks, press **Merge** and choose `origin/feature` | git refuses: the error `Trama: could not merge origin/feature: <git's first line of error>.` shows, nothing is merged and `.trama/solo/merge.json` does not exist | ☐ |
+| AG8 | **Conflict resolved in the editor.** Commit on `main` a change to line 1 of `c.txt` and push a different change to the same line to `origin/main`, press **Merge** and choose `origin/main` | git stops; `.trama/solo/merge.json` holds `{ branch, base, incoming, started }` with the full hashes; the warning `Trama: merging origin/main left conflicts in 1 file.` has the buttons `Open Merge Editor`, `Reconcile with Agent` and `Abort`; closing it chooses nothing and the menu keeps showing the three ways. **Open Merge Editor** opens `c.txt` in the editor's merge editor | ☐ |
+| AG9 | Resolve the conflict in the merge editor, **Complete Merge** (or `git commit --no-edit`) | `.trama/solo/merge.json` is deleted within seconds and the scan starts as in AG1 for the same `base` and `incoming`; Trama never made the commit | ☐ |
+| AG10 | **Conflict reconciled by the agent.** Repeat AG8 with a second conflicted file and press **Reconcile with Agent** | A terminal or conversation named `Merge` opens with `Use the trama-merge skill to resolve the conflicts of the merge of `origin/main` in progress.` followed by the usual sentences without the one of the sub-agent limit; no card, no job. The agent keeps the intent of both sides and, when it cannot tell which one holds, asks one round of questions; it resolves the files, runs `git add` on those only, never commits, never runs `git merge --abort`, `git reset` or a checkout of a whole branch, does not touch `.trama/`, and ends with one line telling you to review the files in the index and commit | ☐ |
+| AG11 | Review the index (`git status`: the resolved files are staged, none has markers) and commit | The scan starts as in AG9 | ☐ |
+| AG12 | **Abort from the menu.** Repeat AG8 and press **Abort Merge** in the menu | A modal confirmation `Abort the merge of origin/main?` with the detail `Every change of the merge is undone.` and the button `Abort Merge`; cancelling does nothing. Confirming runs `git merge --abort`: the working copy is as before the merge, `.trama/solo/merge.json` is deleted and no scan starts. Choosing `Abort` in the warning of AG8 does the same | ☐ |
+| AG13 | Make `git merge --abort` fail (lock the index with `touch .git/index.lock`), then confirm the abort | The error `Trama: could not abort the merge: <reason>.` shows and the merge stays open (`.trama/solo/merge.json` and `MERGE_HEAD` still exist); remove the lock | ☐ |
+| AG14 | **Abort outside Trama.** Repeat AG8, then in a terminal run `git merge --abort` | Within seconds Trama forgets the merge (`.trama/solo/merge.json` deleted), no scan starts, and the menu shows Merge again | ☐ |
+| AG15 | **Window reloaded during a merge.** Repeat AG8, then run **Developer: Reload Window** | After the reload the menu still shows the open merge (`Merging origin/main: resolve the conflicts, then commit.`) and nothing is scanned. Resolve and commit: the scan starts | ☐ |
+| AG16 | Repeat AG8, close the editor window, resolve and commit in a terminal, then reopen the folder | The scan after the merge starts at opening, once, for the `base` and `incoming` of `.trama/solo/merge.json`, which is deleted | ☐ |
+| AG17 | Repeat AG8, close the window, run `git merge --abort` in a terminal, then reopen the folder | Trama forgets the merge at opening; no scan starts | ☐ |
+| AG18 | Write `not json` in `.trama/solo/merge.json` with no merge in progress and open the folder (or wait for a git change) | The file is deleted and no scan starts | ☐ |
+| AG19 | With the scan of AG1 launching in a setup where omp is missing | The missing-omp notice (`Install omp`, `Open Settings`) shows like any other launch; the scan is not retried | ☐ |
+
+---
+
+## AH. Solo mode: Merge in the side menu
+
+Written from the Requirements (`menu-laterale`, `solo-merge`). Needs a scratch repository with a remote and the project open in the editor, once with Solo mode on and once with it off.
+
+| # | Action | Expected | ✓ |
+|---|--------|----------|---|
+| AH1 | With Solo mode off look at the foot of the side menu | After the line only `Scan System` and `Settings`; no `Merge` and no line about tracked files | ☐ |
+| AH2 | Turn Solo mode on in **Settings** and look at the foot | After the line, `Merge` (icon `GitMerge`) comes first, then `Scan System` and `Settings`. `Merge` is the only button of the menu in the primary colour, as wide as the view, with icon and text to the left, and shows no tooltip when hovered or focused. With a clean working copy on a branch and no agent running it is enabled and has no line below | ☐ |
+| AH3 | Start a rebase that stops (`git rebase -i`, `edit`), or a merge of your own that conflicts | `Merge` is disabled, and the line below, in secondary text, reads `A merge is in progress.`; a screen reader reads `Merge` followed by the line and says the button is disabled. Finish or abort the operation and it is enabled again without reloading | ☐ |
+| AH4 | `git checkout --detach` | `Merge` is disabled with `Check out a branch to merge.` | ☐ |
+| AH5 | Change a tracked file of the code (not a file of Trama) without committing, then stage it, then stash it | With the change, staged or not, `Merge` is disabled with `Commit or stash your changes to merge.`; after the stash it is enabled. A new untracked file changes nothing. Changing `.trama/` files or the skills folder changes nothing either | ☐ |
+| AH6 | Run an agent job from this window (for example **Scan System**) and look at `Merge` | Disabled with `Wait for the agent to finish.` until the job ends, then enabled | ☐ |
+| AH7 | Make two of these true at once (changes and a running job) | Only the first reason of the order shows: `A merge is in progress.`, `Check out a branch to merge.`, `Commit or stash your changes to merge.`, `Wait for the agent to finish.` | ☐ |
+| AH8 | `git add -f .trama/model/system.md` (or any file of Trama) and commit it | Below `Merge`, in the warning colour, `Some Trama files are tracked by git: their changes enter your commits.`; `Merge` stays enabled. With a reason too, the reason comes first and the warning after it. `git rm --cached` it and the line goes away | ☐ |
+| AH9 | Press **Merge**, choose a branch that conflicts, and look at the menu | `Merge` is disabled and its line says `Merging <branch>: resolve the conflicts, then commit.`; below it, ghost buttons as wide as the view: `Open Merge Editor` (icon `GitCompare`), `Reconcile with Agent` (icon `Bot`) and `Abort Merge` (icon `X`). They post the same flows as the buttons of the notice of section AG | ☐ |
+| AH10 | Resolve and stage every conflicted file, without committing | The menu keeps `Merging <branch>…` and now shows only `Abort Merge` | ☐ |
+| AH11 | Commit the merge | Within seconds the menu goes back to the usual `Merge`, and the scan starts (section AG) | ☐ |
+| AH12 | Drag the side bar until it is narrower than 56 px | `Merge` and the ghost buttons show only their icon; the lines are hidden; a screen reader still reads their names (`Merge. <line>`, `Open Merge Editor`, `Reconcile with Agent`, `Abort Merge`); no tooltip | ☐ |
+| AH13 | Change `trama.language` to Italian and look at the menu | Every text of Merge stays in English | ☐ |
+| AH14 | With the keyboard only reach `Merge` and the buttons below it | Each is a button reached by Tab and pressed with Enter or Space; a disabled `Merge` is skipped | ☐ |
 
 ---
 

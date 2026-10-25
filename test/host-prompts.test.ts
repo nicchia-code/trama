@@ -9,6 +9,10 @@ test("each action names its skill and its scope exactly", () => {
     "Use the trama-setup skill on the project request in `.trama/requests/2026-10-04T19-05-12.md`. Bind the setup Proposal you open to it with the `request` field.",
   );
   expect(buildPrompt({ kind: "scan" })).toBe("Use the trama-scan skill on the whole System.");
+  expect(buildPrompt({ kind: "mergeScan", base: "aaaa1111", incoming: "bbbb2222" })).toBe(
+    "Use the trama-scan skill on the whole System. A merge brought in `aaaa1111...bbbb2222`: mark `merge` on every Drift whose Where in the code lies in a file `git diff --name-only aaaa1111...bbbb2222` lists.",
+  );
+  expect(buildPrompt({ kind: "reconcileMerge", branch: "origin/main" })).toBe("Use the trama-merge skill to resolve the conflicts of the merge of `origin/main` in progress.");
   expect(buildPrompt({ kind: "implement", task: "0012" })).toBe("Use the trama-implement skill on Task 0012.");
   expect(buildPrompt({ kind: "implement-all" })).toBe(
     'Use the trama-implement skill on every Task in the "todo" column. Take them from `trama task list --input \'{"runnable":true,"max":{maxParallelAgents}}\'`, one group at a time, until it says there is none.',
@@ -40,6 +44,8 @@ test("the agent terminal is named after the work: the card's short number, or a 
   expect(terminalName({ kind: "setup-request", request: "r" }, short)).toBe("Setup");
   expect(terminalName({ kind: "resolve-drifts", drift: "ab12cd34" }, short)).toBe("Drifts");
   expect(terminalName({ kind: "scan" }, short)).toBe("Scan");
+  expect(terminalName({ kind: "mergeScan", base: "a", incoming: "b" }, short)).toBe("Scan");
+  expect(terminalName({ kind: "reconcileMerge", branch: "main" }, short)).toBe("Merge");
   expect(terminalName({ kind: "implement-all" }, short)).toBe("All tasks");
   expect(terminalName({ kind: "import" }, short)).toBe("Import");
 });
@@ -94,6 +100,8 @@ test("a Run all group cut by Proposal names its Proposals and the filter, and it
 });
 test("only the instructions that may file Drifts are told so", () => {
   expect(mayFileDrifts({ kind: "scan" })).toBe(true);
+  expect(mayFileDrifts({ kind: "mergeScan", base: "a", incoming: "b" })).toBe(true);
+  expect(mayFileDrifts({ kind: "reconcileMerge", branch: "main" })).toBe(false);
   expect(mayFileDrifts({ kind: "implement", task: "abc" })).toBe(true);
   expect(mayFileDrifts({ kind: "implement-all" })).toBe(true);
   expect(mayFileDrifts({ kind: "import" })).toBe(true);

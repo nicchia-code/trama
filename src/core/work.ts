@@ -74,6 +74,8 @@ interface DriftData {
   unifies: string[];
   /** The unified Drift this one was merged into, when its resolution is `unified`; null otherwise. */
   unifiedInto: string | null;
+  /** True for a Drift filed by the scan after a Merge in Solo mode, whose Where in the code lies in files the merge brought: the code may be right. Set at creation and never changed. */
+  merge: boolean;
   option: number | null;
   note: string | null;
   resolvedBy: string | null;
@@ -140,6 +142,7 @@ function parseDrift(raw: Raw, where: string): DriftData {
     origin: idListField(raw, "origin", where),
     previous: idListField(raw, "previous", where),
     unifies: idListField(raw, "unifies", where),
+    merge: raw["merge"] === true,
     unifiedInto: idField(raw, "unifiedInto", where),
     option: positiveIntOrNull(raw, "option", where),
     note: textOrNull(raw, "note", where),
@@ -172,6 +175,7 @@ function saveItem(path: string, data: object, body: string) {
     if (copy[key] === undefined) delete copy[key];
   }
   if (Array.isArray(copy["unifies"]) && copy["unifies"].length === 0) delete copy["unifies"];
+  if (copy["merge"] !== true) delete copy["merge"];
   if (copy["unifiedInto"] === null) delete copy["unifiedInto"];
   if (copy["job"] === null) delete copy["job"];
   if (copy["resolvedBy"] === null) delete copy["resolvedBy"];
@@ -794,7 +798,7 @@ export interface PlannedDrift {
 
 export function planDrift(
   p: Project,
-  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; where: string; job?: string },
+  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; where: string; job?: string; merge?: boolean },
 ): PlannedDrift {
   const origin = input.origin ? getTask(p, input.origin).id : null;
   const previous = previousOf(p, input.previous, origin);
@@ -803,7 +807,7 @@ export function planDrift(
 
 function planDriftWith(
   p: Project,
-  input: { title: string; refs: string[]; proposal?: string; happens: string; should: string; options: DriftOption[]; where: string; job?: string },
+  input: { title: string; refs: string[]; proposal?: string; happens: string; should: string; options: DriftOption[]; where: string; job?: string; merge?: boolean },
   origin: string[],
   previous: string[],
   unifies: string[],
@@ -821,7 +825,7 @@ function planDriftWith(
   if (attached) requireAttachable(p, attached);
   if (options.length === 0 && attached === null) throw new TramaError("A Drift without Fix options needs an attached Proposal that fixes the Model or the Requirements: give `proposal` with its Draft, or two to five fix options");
   const proposal = attached?.id ?? null;
-  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin, previous, unifies, unifiedInto: null, option: null, note: null, resolvedBy: null, created: createdNow(), job: input.job?.trim() || null };
+  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin, previous, unifies, unifiedInto: null, merge: input.merge === true, option: null, note: null, resolvedBy: null, created: createdNow(), job: input.job?.trim() || null };
   const sections = [
     `## ${HAPPENS_HEADING}\n\n${happens}`,
     `## ${SHOULD_HEADING}\n\n${should}`,
@@ -839,7 +843,7 @@ export function writeDrift(p: Project, plan: PlannedDrift, announcement?: string
 
 export function newDrift(
   p: Project,
-  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; where: string; announcement?: string; job?: string },
+  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; where: string; announcement?: string; job?: string; merge?: boolean },
 ): Drift {
   return writeDrift(p, planDrift(p, input), input.announcement);
 }
@@ -917,11 +921,11 @@ export function unifiedCandidates(p: Project, named: string[], refs: string[]): 
  */
 export function newUnifiedDrift(
   p: Project,
-  input: { unifies: string[]; title: string; refs: string[]; proposal?: string; happens: string; should: string; options: DriftOption[]; where: string; announcement?: string; job?: string },
+  input: { unifies: string[]; title: string; refs: string[]; proposal?: string; happens: string; should: string; options: DriftOption[]; where: string; announcement?: string; job?: string; merge?: boolean },
 ): { drift: Drift; unified: Drift[] } {
   const unified = unifiedBy(p, input.unifies, input.proposal);
   const origin = unifiedOrigins(unified);
-  const plan = planDriftWith(p, input, origin, unifiedPrevious(p, unified, origin), unified.map((d) => d.id));
+  const plan = planDriftWith(p, { ...input, merge: input.merge === true || unified.some((d) => d.data.merge) }, origin, unifiedPrevious(p, unified, origin), unified.map((d) => d.id));
   const attached = [...new Set(unified.flatMap((d) => (d.data.proposal === null ? [] : [d.data.proposal])))];
   const saved = [
     ...unified.map((d) => ({ path: d.path, text: readFileSync(d.path, "utf8") })),

@@ -5,7 +5,8 @@ import { cn } from "../lib/utils";
 import type { OpenLink } from "../markdown";
 import { Column, InstructionFiles, OmpStatusBox, ignoresInstructionFiles, Providers, ROLE_ADVICE, STEP_SENTENCES, Subgroups } from "../setup-shared";
 import { SettingField } from "../settings/field";
-import { SYSTEM_CERTIFICATES_KEY } from "../settings/logic";
+import { SYSTEM_CERTIFICATES_KEY, SKILLS_DIR_KEY } from "../settings/logic";
+import { SoloModeRow } from "../settings/solo-mode";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
@@ -16,12 +17,15 @@ import type { WizardController, WizardSnapshot } from "./controller";
 import {
   advancedSubgroups,
   agentCheckLine,
+  chosenSolo,
   confirmLabel,
   hasPrevious,
   nextBlock,
+  offersSolo,
   ompMissing,
   previousSteps,
   showsFolderNotice,
+  soloAvailable,
   STEP_KEYS,
   type SummaryRow,
   stepPosition,
@@ -217,6 +221,11 @@ function OmpStatus({ controller, snapshot }: Pick<BodyProps, "controller" | "sna
   );
 }
 
+/** The `Solo Mode` row of the Project step, with the wizard's choice: the files git tracks are not listed here, and nothing is written before the confirmation. */
+function WizardSoloRow({ controller, snapshot, state, openLink }: BodyProps) {
+  return <SoloModeRow solo={chosenSolo(state, snapshot.folders, snapshot.projectSolo)} available={soloAvailable(state, snapshot.folders, snapshot.projectSolo)} openLink={openLink} onChange={(solo) => controller.setSolo(solo)} />;
+}
+
 /** The settings of a step, one under the other in the width of the column, each with its explanation in the page. */
 function SettingsBody({ controller, snapshot, state, openLink, step }: BodyProps & { step: WizardStep }) {
   const field = (key: string) => {
@@ -244,7 +253,9 @@ function SettingsBody({ controller, snapshot, state, openLink, step }: BodyProps
       {step === "Advanced" ? (
         <Subgroups groups={advancedSubgroups(snapshot.schema).map((group) => ({ title: group.title, items: group.keys }))} render={field} />
       ) : (
-        <div className="grid gap-5">{(STEP_KEYS[step] ?? []).map(field)}</div>
+        <div className="grid gap-5">
+          {(STEP_KEYS[step] ?? []).flatMap((key) => [field(key), ...(key === SKILLS_DIR_KEY && offersSolo(state.mode) ? [<WizardSoloRow key="solo-mode" controller={controller} snapshot={snapshot} state={state} openLink={openLink} />] : [])])}
+        </div>
       )}
       {step === "omp" ? <InstructionFiles files={snapshot.instructionFiles} ignored={ignoresInstructionFiles(snapshot.schema, state.values)} onOpen={(path) => controller.openInstructionFile(path)} /> : null}
     </div>
@@ -289,7 +300,7 @@ function SummaryLine({ row }: { row: SummaryRow }) {
 
 /** The summary: a card for each step, in the order of the steps, with its «Edit» that goes back to the step. */
 function SummaryBody({ controller, snapshot, state }: BodyProps) {
-  const rows = summaryRows(snapshot.schema, state, snapshot.current, snapshot.folders, snapshot.models?.list ?? []);
+  const rows = summaryRows(snapshot.schema, state, snapshot.current, snapshot.folders, snapshot.models?.list ?? [], snapshot.projectSolo);
   const steps = stepsOf(state).filter((step) => rows.some((row) => row.step === step));
   return (
     <div className="grid min-w-0 gap-4">
@@ -422,8 +433,8 @@ function ButtonBar({ controller, snapshot, state }: BodyProps) {
 export interface WizardProps {
   controller: WizardController;
   openLink: OpenLink;
-  /** What shows under the sentence of the Path and Summary steps, before their content (the notice of Get Started). */
-  notice?: ReactNode;
+  /** What shows under the sentence of the Path and Summary steps, before their content (the notice of Get Started); it is told whether Solo mode is chosen in the Project step. */
+  notice?: (solo: boolean) => ReactNode;
 }
 
 /** The setup wizard of one view: the title, the step indicator, the title and sentence of the step, the step and the bar of buttons. */
@@ -454,7 +465,7 @@ export function Wizard({ controller, openLink, notice }: WizardProps) {
             {state.step}
           </h2>
           <p className="mt-0 mb-5 text-muted-foreground">{STEP_SENTENCES[state.step]}</p>
-          {showsFolderNotice(state.step) ? notice : null}
+          {showsFolderNotice(state.step) ? notice?.(chosenSolo(state, snapshot.folders, snapshot.projectSolo) !== "off") : null}
           <StepBody {...props} />
         </Column>
         <ButtonBar {...props} />

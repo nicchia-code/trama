@@ -48,6 +48,14 @@ When the instruction asks you to write in a language, the texts listed below go 
 - **No first person in Trama's texts.** In what you write for Trama (questions, contexts and options of rounds, titles and bodies of Proposals, Tasks and Drifts, History entries), Trama is always "Trama" and you are "the agent": no "I", "me", "my", "we", "our", and in Italian no "io", "noi" or first-person verbs. Your replies in the conversation are not Trama's texts and do not change. Text already written is not rewritten.
 - **Self-contained Tasks.** The body of a Task is understood without the conversation that produced it: it says what must be true when done, with the conditions and consequences as the Model says them, and every decision of the interview that concerns it, because whoever implements it does not see that conversation.
 
+## After a merge
+
+When the instruction names a range `<base>...<incoming>` brought by a Merge in Solo mode (the scan runs for another Task of the same Proposal), other branches changed code without the Model, so that code may be right. Only such a scan marks Drifts from a merge; no other scan, and no Drift filed outside this scan, does.
+
+- The main agent runs `git diff --name-only <base>...<incoming>` once, and passes the range to every sub-agent that compares a Machine, in its instruction. Without sub-agents, it applies the rule itself in each comparison.
+- Every Drift whose Where in the code lies in a file listed by that command is filed with `"merge": true` (`trama drift new --input -`, or the Drift of `trama comparison move <id> delivered`). The other Drifts have no `merge` field.
+- The Fix options stay those of every Drift: keeping the code is never a Fix option. The developer is offered keeping it when the Drift is resolved.
+
 ## Steps
 
 1. **Scope.** Use the Feature you were given, or `trama model show` for the list. For each Machine, `trama model show <feature>` shows its scope; do not read the Machine itself (`trama model show <machine>`, a State, an Event, or the routes with `--input -`) nor run `trama model check`: `trama-compare` brings them in its briefing. Read the Requirements only through their `## General` sections, one Area at a time: `trama model show requirements/<area>#General` (`trama model show requirements` lists the Areas), and keep them in mind for everything. Do not read a whole Area for its other sections: they reach the comparison through its briefing.

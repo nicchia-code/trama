@@ -36,9 +36,9 @@ function hasForeignAnnouncement(root: string): boolean {
  * conversations of the window neither arm the timer nor are checked: their end is certain. At rest nothing is armed. One `setTimeout`, re-armed
  * after each finished check, so two checks never overlap; it does not keep the host process alive and is cancelled on dispose.
  * Armed again at the first job in a terminal (the job registry tells), at the first Task taken and at the first announcement of another's (the `.trama/tasks` and
- * `.trama/announcements` watcher tells).
+ * `.trama/announcements` watcher tells). `onCheck`, when given, is called after each check (the remembered merge of Solo mode is looked at then).
  */
-export function startExecutionCheck(root: () => string | undefined, files: vscode.FileSystemWatcher, after?: Promise<unknown>): vscode.Disposable {
+export function startExecutionCheck(root: () => string | undefined, files: vscode.FileSystemWatcher, after?: Promise<unknown>, onCheck?: () => void): vscode.Disposable {
   let timer: NodeJS.Timeout | undefined;
   let running = false;
   let disposed = false;
@@ -53,6 +53,7 @@ export function startExecutionCheck(root: () => string | undefined, files: vscod
     running = true;
     try {
       await runExecutionCheck(root());
+      onCheck?.();
     } catch {
       // A failed check changes nothing; the next turn tries again.
     } finally {

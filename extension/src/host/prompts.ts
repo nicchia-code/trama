@@ -40,6 +40,10 @@ export function buildPrompt(action: ResolvedAction): string {
       return `Use the trama-resolve-drifts skill to rework the rejected resolution ${action.proposal} with the developer's feedback, on the Drifts ${action.drifts.map((d) => `\`${d}\``).join(", ")}. Bind the resolution you open to it with the \`reworks\` field.`;
     case "scan":
       return "Use the trama-scan skill on the whole System.";
+    case "mergeScan":
+      return `Use the trama-scan skill on the whole System. A merge brought in \`${action.base}...${action.incoming}\`: mark \`merge\` on every Drift whose Where in the code lies in a file \`git diff --name-only ${action.base}...${action.incoming}\` lists.`;
+    case "reconcileMerge":
+      return `Use the trama-merge skill to resolve the conflicts of the merge of \`${action.branch}\` in progress.`;
     case "implement":
       return `Use the trama-implement skill on Task ${action.task}.`;
     case "implement-all":
@@ -95,7 +99,10 @@ export function terminalName(action: ResolvedAction, short: (kind: "task" | "pro
     case "import":
       return "Import";
     case "scan":
+    case "mergeScan":
       return "Scan";
+    case "reconcileMerge":
+      return "Merge";
     case "written-design":
       return "Design";
     case "setup-request":
@@ -157,6 +164,7 @@ export const AUTO_EXIT_SENTENCE = "Trama closes this session as soon as you fini
 export function mayFileDrifts(action: ResolvedAction): boolean {
   switch (action.kind) {
     case "scan":
+    case "mergeScan":
     case "implement":
     case "implement-all":
     case "import":
@@ -166,6 +174,7 @@ export function mayFileDrifts(action: ResolvedAction): boolean {
     case "setup-request":
     case "resolve-drifts":
     case "refine":
+    case "reconcileMerge":
     case "rework-resolution":
       return false;
     case "rework":

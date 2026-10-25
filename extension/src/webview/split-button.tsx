@@ -69,7 +69,7 @@ export function SplitButton({
   onClick: () => void;
 }) {
   const main = (
-    <Button variant={variant} size="sm" disabled={disabled} aria-label={aria} aria-description={(reason ?? tooltip) || undefined} className={cn("rounded-r-none", dashed && "border-dashed", full && "min-w-0 flex-1 shrink")} onClick={onClick}>
+    <Button variant={variant} size="sm" disabled={disabled} aria-disabled={disabled || undefined} aria-label={aria} aria-description={(reason ?? tooltip) || undefined} className={cn("rounded-r-none", dashed && "border-dashed", full && "min-w-0 flex-1 shrink")} onClick={onClick}>
       <Icon aria-hidden="true" focusable="false" />
       {label}
     </Button>

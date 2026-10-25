@@ -57,6 +57,30 @@ test("the round names the tab of the terminal or conversation that asked it: a p
   expect(named({ prepared: true, terminal: "abc123" })).toEqual({ name: null, prepared: true });
 });
 
+test("the observer hears a round when it is presented, with its asker, and when it ends: delivered, or the agent stopped waiting", async () => {
+  const heard: string[] = [];
+  const s = new QuestionSession(() => undefined, tabName, { opened: (round, terminal) => heard.push(`opened ${round} ${terminal}`), closed: (round) => heard.push(`closed ${round}`) });
+  const controller = new AbortController();
+  const stopped = s.present(request(), { signal: controller.signal, terminal: "abc123" });
+  const id = s.current()?.id as number;
+  expect(heard).toEqual([`opened ${id} abc123`]);
+  // Typing and a send the state refuses do not close it.
+  s.act(id, { type: "setText", text: "x" });
+  s.act(id, { type: "openSummary" });
+  s.act(id, { type: "send" });
+  expect(heard).toHaveLength(1);
+  controller.abort(questionAborted());
+  await expect(stopped).rejects.toThrow(/stopped waiting/);
+  expect(heard).toEqual([`opened ${id} abc123`, `closed ${id}`]);
+  const delivered = s.present(request(), { signal: new AbortController().signal, prepared: true });
+  const second = s.current()?.id as number;
+  s.act(second, { type: "next" });
+  s.act(second, { type: "skip" });
+  s.act(second, { type: "send" });
+  await delivered;
+  expect(heard.slice(2)).toEqual([`opened ${second} undefined`, `closed ${second}`]);
+});
+
 test("an incomplete send from the panel is refused and the round stays open", () => {
   const { s } = session();
   void s.present(request(), { signal: new AbortController().signal });

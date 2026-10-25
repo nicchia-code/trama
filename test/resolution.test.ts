@@ -271,9 +271,9 @@ describe("the Board's picture of a resolution", () => {
     const view = () => buildSnapshot(p).proposals;
     const mine = () => view().find((x) => x.id === r.id)?.resolves;
     expect(mine()).toEqual([
-      { drift: a.id, title: "A", previous: [], unifies: [], decision: "Code fixed with option Remove the code", note: "soon" },
-      { drift: b.id, title: "B", previous: [], unifies: [], decision: "Model updated to match the code", note: null },
-      { drift: c.id, title: "C", previous: [], unifies: [], decision: "Closed, nothing changes", note: null },
+      { drift: a.id, title: "A", previous: [], unifies: [], merge: false, decision: "Code fixed with option Remove the code", note: "soon" },
+      { drift: b.id, title: "B", previous: [], unifies: [], merge: false, decision: "Model updated to match the code", note: null },
+      { drift: c.id, title: "C", previous: [], unifies: [], merge: false, decision: "Closed, nothing changes", note: null },
     ]);
     expect(view().find((x) => x.id === plain.id)?.resolves).toEqual([]);
     resolveDriftInProposal(p, r.id, b.id, { decision: "dismissed" });

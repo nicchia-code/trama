@@ -1,3 +1,4 @@
+import type { SoloKind } from "../../src/core/solo-mode";
 import type { AnnouncementView, Snapshot } from "../../src/core/snapshot";
 import type { BoardModels } from "./host/proposal-models";
 import type { ModelSuggestion } from "./host/model-lists";
@@ -33,7 +34,7 @@ export interface RefinementView {
   waiting: string[];
 }
 
-/** The time left of a Run all launched from this window, as the host carries it with each picture: `null` without a Run all, `{ estimating: true }` while Trama works it out, otherwise the range in minutes (not rounded), whether the Run all lasts longer than the high limit of its first estimate, and `done`, its progress between 0 and 0.95 (the highest reached; 0.95 when `over`). */
+/** The time left of a Run all launched from this window, as the host carries it with each picture: `null` without a Run all, `{ estimating: true }` while Trama works it out, otherwise the range in minutes (not rounded), whether the Run all lasts longer than its reference (the time since the launch passes it), and `done`, its progress between 0 and 0.95 (the highest reached outside `over`; 0.95 when `over`). */
 export type RunEstimateView = null | { estimating: true } | { low: number; high: number; over: boolean; done: number };
 
 /** One group of a Run all that a sequence cuts by model: the Tasks of the Proposals in `include`, or every Task but those of the Proposals in `exclude`. `model` is the group's model; absent for the Settings group. */
@@ -45,8 +46,12 @@ export interface RunGroup {
 
 /** What the buttons can ask an external agent to do. The host turns each into a prompt for one skill. */
 export type AgentAction =
-  /** The whole System: the only scan Trama launches, from Scan System of the side menu. */
+  /** The whole System: the scan of Scan System of the side menu. */
   | { kind: "scan" }
+  /** The scan the host starts after a merge of Solo mode ended: the whole System, told which commits the merge brought in. Only the host sends it. */
+  | { kind: "mergeScan"; base: string; incoming: string }
+  /** The agent resolves the conflicts of the merge `branch` that Trama started and that is open. Only the host sends it. */
+  | { kind: "reconcileMerge"; branch: string }
   | { kind: "implement"; task: string }
   /** Every Task in "todo", in order; the agent stops at the first Drift it files. `group` cuts it to one Run of a sequence. */
   | { kind: "implement-all"; group?: RunGroup }
@@ -63,11 +68,12 @@ export type SetupChoice = "import" | "scratch";
 /** The three modes of the setup wizard: the first setup of a folder without a project, the settings of a project, a project with an empty Model. */
 export type SetupMode = "first" | "settings" | "empty-model";
 
-/** One workspace folder as the wizard lists it: `hasFiles` when its first level holds a file or a folder whose name does not start with a dot. */
+/** One workspace folder as the wizard lists it: `hasFiles` when its first level holds a file or a folder whose name does not start with a dot; `inGit` when it is inside a git working tree (Solo mode needs one). */
 export interface WorkspaceFolderView {
   name: string;
   root: string;
   hasFiles: boolean;
+  inGit: boolean;
 }
 
 /** An agent instruction file the wizard's omp step warns about: the label is shown, the absolute path is what opening it asks for. */
@@ -86,8 +92,8 @@ export interface FolderEntry {
 /** Webview -> host. The host validates everything: the webview is untrusted input. */
 export type ToHost =
   | { type: "ready" }
-  /** Every launch the panel sends but the scan of the System, which only Scan System of the side menu starts. */
-  | { type: "launch"; action: Exclude<AgentAction, { kind: "scan" }> }
+  /** Every launch the panel sends but the host-only ones: the scans (Scan System of the side menu, the scan after a merge) and the reconciling of a merge. */
+  | { type: "launch"; action: Exclude<AgentAction, { kind: "scan" | "mergeScan" | "reconcileMerge" }> }
   /** + Add Work Item: the host opens the Markdown document of a written design request. */
   | { type: "writeDesignRequest" }
   /** Ask more on a card of the Board's details windows: the host reads the card from its files at the click and opens a new chat about it. Never refused for other work. */
@@ -125,6 +131,8 @@ export type ToHost =
   | { type: "modelSuggestionsWanted"; ompPath?: string }
   /** The developer changed a Trama setting in the Settings tab: the host checks it against the manifest and saves it in the user settings. */
   | { type: "setSetting"; key: string; value: SettingValue }
+  /** The developer changed the `Solo Mode` row of the Settings tab: the host writes it into the project (`.trama/solo/` and git's local `info/exclude`) and answers with `soloMode`, also when the write failed. Not a setting of the editor. */
+  | { type: "setSoloMode"; solo: SoloKind }
   /** The developer followed an http or https link in a rendered text: the host opens it in the system browser. */
   | { type: "openLink"; url: string }
   /** The developer chose a preview of an image of a Task: the host opens that file whole in an editor tab, only if it is an image the Task has. */
@@ -143,6 +151,12 @@ export type ToHost =
   | { type: "setCursorApiKey"; ompPath?: string }
   /** The developer pressed Remove API key on the Cursor row: the host removes the saved key without asking and checks omp again. `ompPath` as in `setCursorApiKey`. */
   | { type: "removeCursorApiKey"; ompPath?: string }
+  /** The developer pressed Set/Change access token in the Notifications subgroup: the host opens a masked input box and saves the token in the editor's secret storage. The webview never has the token: no field carries it. */
+  | { type: "setNtfyToken" }
+  /** The developer pressed Remove access token: the host removes the saved token without asking. */
+  | { type: "removeNtfyToken" }
+  /** The developer pressed Send test notification: the host sends one notification to the server and topic of now, once, and answers with `testNotification`. Refused while a test runs in the window. */
+  | { type: "sendTestNotification" }
   /** The Settings tab became visible: the host sends `ompStatus`, and `modelSuggestions` from the same `omp models` call. */
   | { type: "ompStatusWanted" }
   /** Refresh next to the System Certificates state of the Settings tab: the host exports the bundle again, only while the saved setting is on and no export is running. No data. */
@@ -159,7 +173,7 @@ export type ToHost =
    * The developer confirmed the summary of the wizard. `values` holds only the keys that changed, in the order of the steps; `excluded` the
    * paths left out of the import. The host saves the keys, then (first setup) initializes `root`, then carries on with `choice`.
    */
-  | { type: "confirmSetup"; mode: SetupMode; choice?: SetupChoice; root?: string; values: { key: string; value: SettingValue }[]; excluded: string[] }
+  | { type: "confirmSetup"; mode: SetupMode; choice?: SetupChoice; root?: string; values: { key: string; value: SettingValue }[]; excluded: string[]; solo?: SoloKind }
   /** The panel now shows `view`: the host tells the side menu, which highlights that entry. */
   | { type: "viewChanged"; view: ViewName };
 
@@ -215,12 +229,18 @@ export type ToWebview =
   | { type: "systemCertificates"; exporting: boolean; count?: number; exportedAt?: string; error?: string }
   /** Whether a Cursor API key is saved in the editor's secret storage, sent at `ready`, when the Settings tab becomes visible and after every change; never the key. */
   | { type: "cursorApiKey"; saved: boolean }
+  /** Whether an access token of the ntfy server is saved in the editor's secret storage, sent at `ready`, when the Settings tab becomes visible and after every change, also another window's; never the token. */
+  | { type: "ntfyToken"; saved: boolean }
+  /** How the test notification of the Settings tab is going: being sent, sent (the server answered 2xx), or failed with `reason` (`HTTP <status>`, `no response within 10 seconds`, `the server redirected the request` or the network error's message). */
+  | { type: "testNotification"; state: "sending" | "sent" | "failed"; reason?: string }
   /** Whether the logout of the provider `provider` is running (the command and the omp check that follows it), sent with `true` after the confirmation and with `false` when that check has answered. */
   | { type: "ompLogoutState"; provider: string; running: boolean }
   /** The agent instruction files found for `root`, with `path` absolute and `label` as it is shown. No content is sent. */
   | { type: "instructionFiles"; root: string; files: InstructionFileView[] }
   /** The entries of one folder of the wizard's tree, without the ones named with a dot or ignored by git. */
   | { type: "folderChildren"; root: string; path: string; entries: FolderEntry[] }
+  /** Solo mode of the project for the `Solo Mode` row: whether the folder is in a git repository, the kind now, and the files of Trama git still tracks (relative to the project root). Sent at `ready`, when the Settings view becomes visible and after every write; never without a project. */
+  | { type: "soloMode"; available: boolean; solo: SoloKind; tracked: string[] }
   | ({ type: "navigate"; view: ViewName } & NavigateOptions)
   /** The question round being answered, drawn over the tabs; null when none is. */
   | { type: "questions"; round: QuestionRoundView | null }

@@ -13,7 +13,9 @@ import type { Slot, View, ViewContext } from "../types";
 import { Wizard } from "../wizard";
 import { WizardController } from "../wizard/controller";
 import { SettingField } from "./field";
-import { type CertificatesState, groupSettings, type OmpStatus, ompStatusLine, SYSTEM_CERTIFICATES_KEY, THEME_KEY, themeSetting } from "./logic";
+import { type CertificatesState, groupSettings, type OmpStatus, ompStatusLine, SKILLS_DIR_KEY, type SoloState, SYSTEM_CERTIFICATES_KEY, type TestNotificationState, testNotificationBlock, THEME_KEY, themeSetting } from "./logic";
+import { NOTIFICATIONS_SUBGROUP, NotificationsControls } from "./notifications";
+import { SoloModeSetting } from "./solo-mode";
 
 type SettingsMessage = Extract<ToWebview, { type: "settings" }>;
 type ModelSuggestionsMessage = Extract<ToWebview, { type: "modelSuggestions" }>;
@@ -44,6 +46,12 @@ export interface SettingsView extends View {
   receiveOmpLogoutState(message: Extract<ToWebview, { type: "ompLogoutState" }>): void;
   /** The state of the System Certificates bundle, from the host's `systemCertificates`: the line under the setting follows it. */
   receiveSystemCertificates(message: Extract<ToWebview, { type: "systemCertificates" }>): void;
+  /** Whether an ntfy access token is saved, from the host's `ntfyToken`: the Notifications subgroup follows it. */
+  receiveNtfyToken(message: Extract<ToWebview, { type: "ntfyToken" }>): void;
+  /** Solo mode of the project, from the host's `soloMode`: the kind, the tracked files of Trama and whether the folder is in a git repository. */
+  receiveSoloMode(message: Extract<ToWebview, { type: "soloMode" }>): void;
+  /** How the test notification is going, from the host's `testNotification`. */
+  receiveTestNotification(message: Extract<ToWebview, { type: "testNotification" }>): void;
 }
 
 export interface SettingsPageProps {
@@ -65,19 +73,27 @@ export interface SettingsPageProps {
   providers?: ProvidersView;
   /** Whether a Cursor API key is saved, and how many times the host has told so (`changes`); the key itself never reaches the panel. */
   cursorKey?: { saved: boolean; changes: number };
+  /** Whether an access token of the ntfy server is saved, and how many times the host has told so (`changes`); the token itself never reaches the panel. */
+  ntfyToken?: { saved: boolean; changes: number };
+  /** How the last test notification went, from the host's `testNotification`; null before the first one. The line stays until the next test or until the tab is closed. */
+  testNotification?: TestNotificationState | null;
   /** The providers whose logout the host is running. */
   loggingOut?: readonly string[];
   /** The state of the System Certificates bundle, from the host's `systemCertificates`; null until the first message. */
   certificates?: CertificatesState | null;
   /** The agent instruction files found in the project's folder, from the last `instructionFiles` answer; null while the search runs, and always null outside a project. */
   instructionFiles?: readonly InstructionFileView[] | null;
+  /** Solo mode of the project, from the host's `soloMode`; null until the first message and outside a project, where the `Solo Mode` row is not shown. */
+  solo?: SoloState | null;
+  /** How many times the host has told Solo mode: a value the developer chose gives way to the real one when a new message arrives. */
+  soloChanges?: number;
 }
 
 /**
  * The page: a title, with «Guided setup» in a project, and then every setting the manifest declares, in the groups and subgroups of the setup
  * wizard, in one column. Each setting is saved to the user settings when the developer confirms it.
  */
-export function SettingsPage({ schema, values, generation, models, listError, omp = null, providers = null, cursorKey = { saved: false, changes: 0 }, loggingOut = [], certificates = null, instructionFiles = null, post, openLink, onGuidedSetup, wizard }: SettingsPageProps) {
+export function SettingsPage({ schema, values, generation, models, listError, omp = null, providers = null, cursorKey = { saved: false, changes: 0 }, ntfyToken = { saved: false, changes: 0 }, testNotification = null, loggingOut = [], certificates = null, instructionFiles = null, solo = null, soloChanges = 0, post, openLink, onGuidedSetup, wizard }: SettingsPageProps) {
   const send = (key: string, value: SettingValue) => post({ type: "setSetting", key, value });
   if (wizard !== undefined) return <>{wizard}</>;
   const field = (setting: SettingSchema) => (
@@ -121,8 +137,27 @@ export function SettingsPage({ schema, values, generation, models, listError, om
               <p className="mt-0 mb-5 text-muted-foreground">{GROUP_SENTENCES[group.title]}</p>
               {group.title === "omp" ? <OmpStatusBox tone={status.tone} text={status.text} missing={status.missing} onInstall={() => post({ type: "installOmp" })} /> : null}
               {group.title === "omp" && providers !== null ? <Providers connected={providers.connected} onLogin={(provider) => post({ type: "ompLogin", provider })} onLogout={(provider) => post({ type: "ompLogout", provider })} loggingOut={loggingOut} apiKey={{ ...cursorKey, onSet: () => post({ type: "setCursorApiKey" }), onRemove: () => post({ type: "removeCursorApiKey" }) }} /> : null}
-              {group.settings.length > 0 ? <div className="grid gap-5">{group.settings.map(field)}</div> : null}
-              {group.subgroups.length > 0 ? <Subgroups groups={group.subgroups.map((subgroup) => ({ title: subgroup.title, items: subgroup.settings }))} render={field} /> : null}
+              {group.settings.length > 0 ? (
+                <div className="grid gap-5">
+                  {group.settings.flatMap((setting) => [field(setting), ...(setting.key === SKILLS_DIR_KEY && solo !== null ? [<SoloModeSetting key="solo-mode" state={solo} generation={soloChanges} post={post} openLink={openLink} />] : [])])}
+                </div>
+              ) : null}
+              {group.subgroups.length > 0 ? (
+                <Subgroups
+                  groups={group.subgroups.map((subgroup) => ({ title: subgroup.title, items: subgroup.settings }))}
+                  render={field}
+                  after={(title) =>
+                    title === NOTIFICATIONS_SUBGROUP ? (
+                      <NotificationsControls
+                        token={{ ...ntfyToken, onSet: () => post({ type: "setNtfyToken" }), onRemove: () => post({ type: "removeNtfyToken" }) }}
+                        block={testNotificationBlock(values)}
+                        test={testNotification}
+                        onSend={() => post({ type: "sendTestNotification" })}
+                      />
+                    ) : null
+                  }
+                />
+              ) : null}
               {group.title === "omp" ? (
                 <InstructionFiles
                   files={instructionFiles}
@@ -140,7 +175,7 @@ export function SettingsPage({ schema, values, generation, models, listError, om
 
 /** Mounts the Settings tab in `slot`; the panel's theme follows `trama.theme` as the host sends it, also while the tab is hidden. */
 export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeController): SettingsView => {
-  let page: SettingsPageProps = { schema: [], values: {}, generation: 0, models: [], listError: null, omp: null, providers: null, cursorKey: { saved: false, changes: 0 }, loggingOut: [], certificates: null, instructionFiles: null, post: context.post, openLink: context.openLink };
+  let page: SettingsPageProps = { schema: [], values: {}, generation: 0, models: [], listError: null, omp: null, providers: null, cursorKey: { saved: false, changes: 0 }, ntfyToken: { saved: false, changes: 0 }, testNotification: null, loggingOut: [], certificates: null, instructionFiles: null, solo: null, soloChanges: 0, post: context.post, openLink: context.openLink };
   let hasProject = false;
   let visible = false;
   const wizard = new WizardController({
@@ -204,6 +239,21 @@ export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeCont
       wizard.receiveCursorApiKey(message);
       render();
     },
+    receiveNtfyToken(message) {
+      page = { ...page, ntfyToken: { saved: message.saved, changes: (page.ntfyToken?.changes ?? 0) + 1 } };
+      render();
+    },
+    receiveSoloMode(message) {
+      const { type: _type, ...state } = message;
+      page = { ...page, solo: state, soloChanges: (page.soloChanges ?? 0) + 1 };
+      wizard.receiveSoloMode(message);
+      render();
+    },
+    receiveTestNotification(message) {
+      const { type: _type, ...state } = message;
+      page = { ...page, testNotification: state };
+      render();
+    },
     receiveOmpLogoutState(message) {
       const others = (page.loggingOut ?? []).filter((provider) => provider !== message.provider);
       page = { ...page, loggingOut: message.running ? [...others, message.provider] : others };
@@ -221,7 +271,7 @@ export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeCont
       hasProject = present;
       if (!present) {
         wizard.close();
-        page = { ...page, instructionFiles: null };
+        page = { ...page, instructionFiles: null, solo: null };
       }
       render();
       if (appeared && visible) askInstructionFiles();

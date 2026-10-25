@@ -131,6 +131,9 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
     settings.receiveCursorApiKey(message);
     getStarted.receiveCursorApiKey(message);
   }
+  else if (message.type === "ntfyToken") settings.receiveNtfyToken(message);
+  else if (message.type === "soloMode") settings.receiveSoloMode(message);
+  else if (message.type === "testNotification") settings.receiveTestNotification(message);
   else if (message.type === "systemCertificates") {
     settings.receiveSystemCertificates(message);
     getStarted.receiveSystemCertificates(message);

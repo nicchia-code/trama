@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MENU_VIEWS, type MenuSituation, type MenuState, type MenuViewName, type ToMenuHost, type ToMenuWebview } from "../../menu-protocol";
+import { MENU_VIEWS, type MenuSituation, type MenuState, type MergeMenuState, type MenuViewName, type ToMenuHost, type ToMenuWebview } from "../../menu-protocol";
 import type { ViewName } from "../../protocol";
 import type { ThemeSetting } from "../../webview/theme";
 
@@ -23,6 +23,16 @@ export interface MenuSurface {
   scan(): void;
   /** The editor's choice of a folder to open. */
   openFolder(): void;
+  /** Merge of Solo mode as the menu shows it, read now; undefined with Solo mode off. */
+  mergeState(): MergeMenuState | undefined;
+  /** The press of Merge. */
+  startMerge(): void;
+  /** Open Merge Editor of the merge Trama started. */
+  openMergeEditor(): void;
+  /** Reconcile with Agent on the merge Trama started. */
+  reconcileMerge(): void;
+  /** Abort Merge of the merge Trama started. */
+  abortMerge(): void;
 }
 
 const messages = z.discriminatedUnion("type", [
@@ -30,6 +40,10 @@ const messages = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("show"), view: z.enum(MENU_VIEWS) }),
   z.strictObject({ type: z.literal("scan") }),
   z.strictObject({ type: z.literal("openFolder") }),
+  z.strictObject({ type: z.literal("merge") }),
+  z.strictObject({ type: z.literal("openMergeEditor") }),
+  z.strictObject({ type: z.literal("reconcileMerge") }),
+  z.strictObject({ type: z.literal("abortMerge") }),
 ]);
 
 /** A message from the menu webview, or undefined when it does not fit the protocol: it is ignored. */
@@ -48,7 +62,7 @@ export function menuBadge(state: Pick<MenuState, "situation" | "decisions">): { 
 
 /**
  * The side menu of one window (`menu-laterale`): computes the state it shows from the files, the panel and the settings, sends it with the badge of the
- * icon, and carries out the three things the menu asks.
+ * icon, and carries out what the menu asks.
  */
 export class MenuModel {
   /** The numbers of the last Snapshot that could be read: they stay when the files cannot be read for a moment. */
@@ -61,7 +75,8 @@ export class MenuModel {
     const situation = this.surface.situation();
     if (situation === "project") this.last = this.surface.facts() ?? this.last;
     const facts = situation === "project" ? this.last : { decisions: 0, tasksSinceScan: 0 };
-    return { situation, ...facts, panelView: this.surface.panelView() ?? null };
+    const merge = situation === "project" ? this.surface.mergeState() : undefined;
+    return { situation, ...facts, panelView: this.surface.panelView() ?? null, ...(merge === undefined ? {} : { merge }) };
   }
 
   /** Computes the state and sends it to the menu and the badge to the icon: after a change of the files, the panel, the folders or the settings, and when the menu is shown. */
@@ -92,6 +107,18 @@ export class MenuModel {
         return;
       case "openFolder":
         this.surface.openFolder();
+        return;
+      case "merge":
+        this.surface.startMerge();
+        return;
+      case "openMergeEditor":
+        this.surface.openMergeEditor();
+        return;
+      case "reconcileMerge":
+        this.surface.reconcileMerge();
+        return;
+      case "abortMerge":
+        this.surface.abortMerge();
         return;
     }
   }

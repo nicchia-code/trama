@@ -471,7 +471,7 @@ Runs at once; writes in `.trama/`.
 
 #### `trama drift new`
 
-`happens` (what the code does, in terms of behaviour) and `should` (what the Model or Requirement says) are short Markdown; `where` is required and says where in the code the difference was seen (read that code before filing; files and code names go only there). `options` are from two to five fix options, the first being the one you recommend; without options the Drift is accepted only with an attached `proposal`. `task` names the Task you were implementing when you found the difference (the origin). `previous` is the resolved Drift this one follows. `announcement` is the ID printed by `trama announcement new`. `unifies` (Unify Drifts) names at least two open Drifts, by ID or short number, that this Drift merges: in the same step each becomes resolved as `unified` into the new Drift, loses its short number and prepared question, and its attached Proposal, in writing or open, is discarded; the new Drift has one `happens` and one `should` that tell all their differences, `refs` that cover all their elements and fix `options` that hold for all of them together, and takes their origins and precedents by itself, so `task` and `previous` are refused with it. It is refused, writing nothing and naming every problem, when a Drift is missing, repeated, not open or in a resolution being written or open, or when `proposal` is attached to one of them. With `dryRun: true` nothing is written: it prints the Tasks a Drift with these `refs` and this `task` (or these `unifies`, their origins included) would block, by number or identity and title; only `refs` and `task` (or `unifies`) are needed then.
+`happens` (what the code does, in terms of behaviour) and `should` (what the Model or Requirement says) are short Markdown; `where` is required and says where in the code the difference was seen (read that code before filing; files and code names go only there). `options` are from two to five fix options, the first being the one you recommend; without options the Drift is accepted only with an attached `proposal`. `task` names the Task you were implementing when you found the difference (the origin). `previous` is the resolved Drift this one follows. `merge: true` marks a Drift from a merge, found by the scan after a Merge in Solo mode in a file the merge brought: the code may be right. It is written only when true and never changes. `announcement` is the ID printed by `trama announcement new`. `unifies` (Unify Drifts) names at least two open Drifts, by ID or short number, that this Drift merges: in the same step each becomes resolved as `unified` into the new Drift, loses its short number and prepared question, and its attached Proposal, in writing or open, is discarded; the new Drift has one `happens` and one `should` that tell all their differences, `refs` that cover all their elements and fix `options` that hold for all of them together, and takes their origins and precedents by itself, so `task` and `previous` are refused with it; it is from a merge when at least one of the Drifts it unifies is. It is refused, writing nothing and naming every problem, when a Drift is missing, repeated, not open or in a resolution being written or open, or when `proposal` is attached to one of them. With `dryRun: true` nothing is written: it prints the Tasks a Drift with these `refs` and this `task` (or these `unifies`, their origins included) would block, by number or identity and title; only `refs` and `task` (or `unifies`) are needed then.
 
 Input (`--input`):
 
@@ -484,6 +484,7 @@ Input (`--input`):
 - `task`: `string not empty`, optional. The Task being implemented when the Drift was found: its ID or short number.
 - `proposal`: `string not empty`, optional. The Draft or open Proposal that goes with the Drift: its ID or short number.
 - `previous`: `string not empty`, optional. The resolved Drift this one follows: its ID or short number. Not with `unifies`.
+- `merge`: `boolean`, optional. True for a Drift from a merge: its Where in the code is in a file the merge brought. Default false; written only when true.
 - `announcement`: `string not empty`, optional. The announcement of this Drift.
 - `unifies`: `string not empty[]`, optional. Unify Drifts: the open Drifts, by ID or short number, this Drift merges and closes as `unified`. At least two, none repeated, none in a resolution being written or open. Not with `task` or `previous`: Trama works them out.
 - `dryRun`: `boolean`, optional. Write nothing: print the Tasks the Drift would block.
@@ -793,7 +794,7 @@ Runs at once; writes in `.trama/`, counts as the agent's activity.
 
 #### `trama comparison move <id> <state>`
 
-The input is what the comparison found: an optional `design` (the Proposal every Task is linked to), `tasks` (each `title`, `refs`, `body`, optional `technical`) and `drifts` (each `title`, `refs`, `happens`, `should`, `where`, `options` as a list of `{title, text}`, and optional `previous`, `proposal`); both lists may be empty. Every card follows the rules of `task new` and `drift new`. All cards are checked before any is written: if one is not valid nothing is written and every problem is listed per card. Otherwise the cards are created in order, the comparison is delivered and it is recorded as compared on this code.
+The input is what the comparison found: an optional `design` (the Proposal every Task is linked to), `tasks` (each `title`, `refs`, `body`, optional `technical`) and `drifts` (each `title`, `refs`, `happens`, `should`, `where`, `options` as a list of `{title, text}`, and optional `previous`, `proposal`, `merge`: `true` for a Drift from a merge, as in `drift new`); both lists may be empty. Every card follows the rules of `task new` and `drift new`. All cards are checked before any is written: if one is not valid nothing is written and every problem is listed per card. Otherwise the cards are created in order, the comparison is delivered and it is recorded as compared on this code.
 
 - `<id>`: The comparison: the ID printed by `comparison new`.
 - `<state>`: Where the comparison goes. One of `delivered`.
@@ -869,12 +870,13 @@ Runs at once; read-only.
 
 #### `trama project new`
 
-Creates `.trama/` in `--root` (or the current directory; it never walks up) with `model/system.md`, `model/actors/`, `requirements/` with the five starting Areas, `proposals/`, `tasks/` and `drifts/`, and installs the agent skills, embedded in the binary, and omp's sub-agent definitions. It refuses, creating nothing, when `.trama/` already exists or when a file to install exists with different content, unless `force` is true; identical files are not a conflict.
+Creates `.trama/` in `--root` (or the current directory; it never walks up) with `model/system.md`, `model/actors/`, `requirements/` with the five starting Areas, `proposals/`, `tasks/` and `drifts/`, and installs the agent skills, embedded in the binary, and omp's sub-agent definitions. It refuses, creating nothing, when `.trama/` already exists or when a file to install exists with different content, unless `force` is true; identical files are not a conflict. With `solo` (`folders` or `files`) it first writes Solo mode (`.trama/solo/mode.json` and the block in `.git/info/exclude`, so no file of Trama is ever visible to git) and creates nothing at all, failing with `Solo mode needs a git repository.`, when the folder is not in a git repository or the write fails.
 
 Input (`--input`):
 
 - `skillsDir`: `string not empty`, optional. The folder of the agent skills, relative to the project root. Default `.agents/skills`.
 - `force`: `boolean`, optional. Overwrite skill files, sub-agent definitions and advisor instructions that differ from Trama's. Default false.
+- `solo`: `"off" | "folders" | "files"`, optional. Solo mode of this working copy: `off`, `folders` (keeps `.trama/`, the skills folder and `.omp/` out of git) or `files` (keeps only the files Trama writes there). The block goes in `.git/info/exclude`, never committed. Needs a git repository.
 
 ```sh
 trama project new --input - <<'JSON'
@@ -889,16 +891,19 @@ Output (`--json`):
 - skills: string[], required. The skill files installed.
 - agents: string[], required. The omp definitions written.
 - areas: string[], required. The Requirement Areas created.
+- solo: "off" | "folders" | "files", required. Solo mode now.
+- tracked: string[], required. Trama's files git already tracks under the paths Solo mode keeps out of git, relative to the project root; their changes still enter commits. Empty when Solo mode is off.
 
 Runs at once; writes in `.trama/`.
 
 #### `trama project edit`
 
-Writes this version's agent skills into the project's skill folder, replacing older or edited copies, and lists the files it changed; deletes the retired `trama-fix` skill; adds the starting Requirement Areas when the project has none; moves single-file Areas into Area folders; regenerates the `trama-req-*` skills; and rewrites omp's sub-agent definition and the advisor instructions.
+Writes this version's agent skills into the project's skill folder, replacing older or edited copies, and lists the files it changed; deletes the retired `trama-fix` skill; adds the starting Requirement Areas when the project has none; moves single-file Areas into Area folders; regenerates the `trama-req-*` skills; and rewrites omp's sub-agent definition and the advisor instructions. With `solo` alone it changes only Solo mode and installs nothing: it records the choice in `.trama/solo/mode.json` and rewrites the block in `.git/info/exclude` (`off` removes both). With `solo` and `skillsDir` the block covers that skills folder; without `skillsDir` it covers `.agents/skills`. `solo` other than `off` needs a git repository, otherwise it fails with `Solo mode needs a git repository.` and writes nothing. The result carries `solo` and `tracked`, Trama's files git already tracks, whose changes still enter commits. With Solo mode on, the skills update also writes the block again when it is missing or different.
 
 Input (`--input`):
 
 - `skillsDir`: `string not empty`, optional. The folder of the agent skills, relative to the project root. Default `.agents/skills`.
+- `solo`: `"off" | "folders" | "files"`, optional. Solo mode of this working copy: `off`, `folders` (keeps `.trama/`, the skills folder and `.omp/` out of git) or `files` (keeps only the files Trama writes there). The block goes in `.git/info/exclude`, never committed. Needs a git repository.
 
 ```sh
 trama project edit --input - <<'JSON'
@@ -908,15 +913,17 @@ JSON
 
 Output (`--json`):
 
-- skillsDir: string, required
-- changed: string[], required. The skill files this run wrote.
-- removed: string[], required. The retired skill folders deleted.
-- removedAgents: string[], required
-- agents: string[], required
-- agentsChanged: string[], required. The omp definitions and advisor instructions this run actually wrote.
-- areas: string[], required. The starting Areas created.
-- conversion: object, required. The Areas moved to the folder format and those left as they were.
-- generated: object, required. The regeneration of the Requirement skills.
+- skillsDir: string, optional. The skills folder; absent when only `solo` was given.
+- changed: string[], optional. The skill files this run wrote.
+- removed: string[], optional. The retired skill folders deleted.
+- removedAgents: string[], optional
+- agents: string[], optional
+- agentsChanged: string[], optional. The omp definitions and advisor instructions this run actually wrote.
+- areas: string[], optional. The starting Areas created.
+- conversion: object, optional. The Areas moved to the folder format and those left as they were.
+- generated: object, optional. The regeneration of the Requirement skills.
+- solo: "off" | "folders" | "files", required. Solo mode now.
+- tracked: string[], required. Trama's files git already tracks under the paths Solo mode keeps out of git, relative to the project root; their changes still enter commits. Empty when Solo mode is off.
 
 Runs at once; writes in `.trama/`.
 
@@ -931,6 +938,7 @@ Output (`--json`):
 - todo: object[], required
 - doing: object[], required
 - done: object[], required
+- solo: "off" | "folders" | "files", required. Solo mode of this working copy: `off`, `folders` or `files`.
 
 Runs at once; read-only.
 
@@ -1096,6 +1104,8 @@ With the Async Drift Resolver (`trama.asyncDriftResolver`, on by default and tur
 ## Comparisons
 
 The input of `comparison move <id> delivered` is a JSON object with a `tasks` list and a `drifts` list, and an optional `design`, the ID of a Proposal every Task of the file is linked to (as `proposal` in `task new`). A Task has `title`, `refs` (a list of strings), and optional `body` and `technical`. A Drift has `title`, `refs`, `happens`, `should`, `where`, and `options` (a list of `{"title", "text"}`), and optional `previous` (the ID of a resolved Drift it recurs from) and `proposal` (the ID of its own Proposal). Every card is checked before anything is written: when one fails, the output lists the problems, nothing is written and the comparison stays waiting. Tasks are written before Drifts. An agent filing cards sees the editor learn who holds each of them, as with `task new` and `drift new`.
+
+A Drift of `comparison move <id> delivered` (and `drift new`) also takes `merge: true` for a Drift from a merge, found by the scan after a Merge in Solo mode in a file listed by `git diff --name-only <base>...<incoming>`: a boolean, `false` by default, written in the Drift as `merge: true` only when true. `drift show` prints `From a merge` after the title and `drift list` and `project show` mark the Drift `(merge)`.
 
 A successful `comparison move <id> delivered` records the comparison in the registry `.trama/compared/<fingerprint>.json`: for each reference of the comparison, and each element that contains it, it stores the text fingerprint of that element, under the code fingerprint of the moment. The folder has its own `.gitignore`, and the records of any other code fingerprint are deleted on that first write. The code fingerprint is the Git commit plus the content of the changed and untracked files, excluding `.trama`, the agents' skill folders (`.agents/skills`), `.omp/agents` and `.omp/WATCHDOG.yml`; `comparison new` announces it with the comparison, together with its references. Outside a Git repository, or for a comparison with no code fingerprint, a comparison that is withdrawn or rejected, nothing is recorded. `task list` with `runnable` and `scope` uses these records: a reference is already compared when a recorded element still has the same text fingerprint under the same code fingerprint.
 

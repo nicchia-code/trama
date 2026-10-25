@@ -123,6 +123,8 @@ export interface ResolvedRow {
   previous: { id: string; title: string }[];
   /** The Drifts this one unifies, when it is a unified Drift. */
   unifies: { id: string; title: string }[];
+  /** True for a Drift from a merge. */
+  merge: boolean;
   decision: string;
   /** The Tasks this Drift blocks, shown under its row. */
   blocked: TaskCard[];
@@ -138,6 +140,9 @@ export const unifiedLabel = (count: number): string => `Unifies ${count} Drifts`
 /** The text of a recurring Drift's badge, its tooltip and accessible name: the identity and title of the Drift it follows, or how many it follows. */
 export const recurringLabel = (previous: readonly { id: string; title: string }[]): string =>
   previous.length === 1 ? `Recurring: follows Drift ${previous[0]?.id} – ${previous[0]?.title}` : `Recurring: follows ${previous.length} Drifts`;
+
+/** The text of a merge Drift's tooltip and accessible name: its badge says `Merge`. */
+export const MERGE_LABEL = "From a merge: the code may be right, keeping it is recommended";
 
 export interface ProposalCard {
   kind: "proposal";
@@ -317,7 +322,7 @@ export const ESTIMATING_TEXT = "Estimating time left…";
 /** The text of the button during a Run all. */
 export const RUNNING_TEXT = "Running…";
 
-/** The text of the button when the Run all lasts longer than the high limit of its first estimate. */
+/** The text of the button when the Run all lasts longer than its reference. */
 export const OVER_TEXT = "Taking longer than expected";
 
 /** An hour count rounded to the half hour, at least half an hour, written with a dot: `1`, `2.5`. */
@@ -384,32 +389,62 @@ export const QUEUED_REASON = "Already queued for refining";
 export const WAITING_RUN_TIP = "Refined; Trama approves it when the run in progress ends";
 /** Why Reject waits on a Proposal whose refining stopped before its hand-over: Approve resumes it. */
 export const RESUME_REASON = "Approve to resume refining first";
+/** Why Approve, Reject and the arrow of Reject wait on a Draft left half-way that nothing writes, with Auto-update Stale Proposals off. */
+export const STILL_WRITTEN_REASON = "Still being written. Turn on Auto-update Stale Proposals to resume refining";
+/** The tooltip and accessible name of the `to refine` chip of that Draft. */
+export const PAUSED_TIP = "Refining stopped before the hand-over. Turn on Auto-update Stale Proposals to resume it.";
 /** The tooltip of the `to refine` badge, and of Approve when it refines the Proposal first. */
 export const TO_REFINE_TIP = "The Model changed under this Proposal. Approve refines it on the current Model, then approves it.";
 
 /**
- * Where a Proposal stands in the refinement, or null when the refinement does not touch it (off, or a Proposal the Model
- * did not change): `running` the one the agent refines now, `queued` one waiting for it, `stopped` a Draft whose refining
- * stopped before its hand-over, `to-refine` a stale open Proposal that Approve refines first.
+ * Where a Proposal stands in the refinement, or null when the refinement does not touch it (a Proposal the Model did not
+ * change): `running` the one a refinement of this window writes now, `elsewhere` a Draft some other agent writes (its `writer`
+ * is set: another window, an agent started before the editor was reopened, a refinement launched by hand), `queued` one waiting
+ * for a refinement, `stopped` a Draft whose refining stopped before its hand-over, `paused` the same Draft with Auto-update Stale
+ * Proposals off (nothing resumes it), `to-refine` a stale open Proposal that Approve refines first. A Draft written by an
+ * agent is never `queued`, `stopped` or `paused`, with the function on or off.
  */
-export function refineStatus(p: Pick<ProposalView, "id" | "stale" | "refining">, refinement: RefinementView): RefineStatus | null {
-  if (!refinement.enabled) return null;
+export function refineStatus(p: Pick<ProposalView, "id" | "stale" | "refining" | "writer">, refinement: RefinementView): RefineStatus | null {
   if (refinement.running.includes(p.id)) return "running";
+  if (p.writer !== null) return "elsewhere";
+  if (!refinement.enabled) return p.refining ? "paused" : null;
   if (refinement.queued.some((entry) => entry.proposal === p.id)) return "queued";
   if (p.refining) return "stopped";
   return p.stale.length > 0 ? "to-refine" : null;
 }
 
-export type RefineStatus = "running" | "queued" | "stopped" | "to-refine";
+export type RefineStatus = "running" | "elsewhere" | "queued" | "stopped" | "paused" | "to-refine";
+
+/** Whether an agent is writing the Proposal now: its card is drawn as in refining. */
+export const isRefining = (status: RefineStatus | null): boolean => status === "running" || status === "elsewhere";
 
 /**
- * Why Approve is disabled on a Proposal the refinement touches. Stale, unbased, invalid and unfixable do not block there:
- * the refinement settles them. Only the required Proposals and the finishing of the agent that filed it do.
+ * Why Approve is disabled on a Proposal the refinement touches. Stale, unbased, invalid and unfixable do not block a Proposal
+ * that is refined or to refine: the refinement settles them. Only the required Proposals and the finishing of the agent that
+ * filed it do. A Draft written by an agent, or left half-way with the function off, says so before the Run and every other reason.
  */
-export function refineApproveBlocker(status: RefineStatus, p: Pick<ProposalView, "requires">, numbers: CardNumbers, refinement: RefinementView): string | null {
-  if (status === "running") return joinReasons([refinement.runInProgress ? RUN_IN_PROGRESS : null, REFINING_REASON]);
+export function refineApproveBlocker(status: RefineStatus, p: Pick<ProposalView, "stale" | "unbased" | "errors" | "unfixable" | "requires">, numbers: CardNumbers, refinement: RefinementView): string | null {
+  if (isRefining(status)) return joinReasons([REFINING_REASON, refinement.runInProgress ? RUN_IN_PROGRESS : null]);
+  if (status === "paused") return joinReasons([STILL_WRITTEN_REASON, approveBlocker(p, numbers, refinement.runInProgress)]);
   if (status === "queued") return joinReasons([refinement.runInProgress ? RUN_IN_PROGRESS : null, QUEUED_REASON]);
   return approveBlocker({ requires: p.requires, stale: [], unbased: [], errors: [], unfixable: [] }, numbers, refinement.runInProgress);
+}
+
+/** Why Reject and the arrow of Reject are disabled on a Proposal, after the reason `finishing` of the agent that filed it (null when it is done). */
+export function refineRejectBlocker(status: RefineStatus | null, finishing: string | null): string | null {
+  return joinReasons([finishing, isRefining(status) ? REFINING_REASON : status === "paused" ? STILL_WRITTEN_REASON : status === "stopped" ? RESUME_REASON : null]);
+}
+
+/**
+ * The reasons Approve and Reject are disabled on a Proposal, computed once for the Board's card and the Diagram's details: the
+ * reason of the agent still finishing first, then those of a Draft written by an agent or left half-way (`refineApproveBlocker`),
+ * then the Run and every other reason.
+ */
+export function decisionBlockers(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "unfixable" | "requires">, status: RefineStatus | null, numbers: CardNumbers, refinement: RefinementView, finishing: string | null): { approve: string | null; reject: string | null } {
+  return {
+    approve: joinReasons([finishing, status === null ? approveBlocker(p, numbers, refinement.runInProgress) : refineApproveBlocker(status, p, numbers, refinement)]),
+    reject: refineRejectBlocker(status, finishing),
+  };
 }
 
 export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "unfixable" | "requires" | "kind">, numbers: CardNumbers = noNumbers): Badge[] {
@@ -426,7 +461,7 @@ export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "erro
 
 /** The rows of a resolution's `Resolves Drifts` block, in the order the snapshot carries them; none for any other Proposal. */
 export const resolvedRows = (p: Pick<ProposalView, "resolves">, numbers: CardNumbers = noNumbers, blocked: Map<string, TaskCard[]> = new Map()): ResolvedRow[] =>
-  p.resolves.map((r) => ({ drift: r.drift, name: cardNameOf(numbers, "drift", r.drift), title: r.title, previous: r.previous, unifies: r.unifies, decision: r.note === null ? r.decision : `${r.decision} · ${r.note}`, blocked: blocked.get(r.drift) ?? [] }));
+  p.resolves.map((r) => ({ drift: r.drift, name: cardNameOf(numbers, "drift", r.drift), title: r.title, previous: r.previous, unifies: r.unifies, merge: r.merge, decision: r.note === null ? r.decision : `${r.decision} · ${r.note}`, blocked: blocked.get(r.drift) ?? [] }));
 
 /** `Creates 1 Task` / `Creates N Tasks`, counting removals too; null for zero. */
 export function createsText(n: number): string | null {
@@ -443,18 +478,19 @@ export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, 
     queuedEntry === undefined || queuedEntry.waiting === "slot"
       ? "Waiting for a free refining slot"
       : `Waiting for ${queuedEntry.on === undefined ? "another Proposal" : namerOf(numbers)("proposal", queuedEntry.on)} to be ${queuedEntry.waiting === "approval" ? "approved" : "refined"} first`;
-  const approve = refine === null ? approveBlocker(p, numbers, refinement.runInProgress) : refineApproveBlocker(refine, p, numbers, refinement);
-  const rejectBlocker = joinReasons([wait, refine === "running" ? REFINING_REASON : refine === "stopped" ? RESUME_REASON : null]);
+  const blockers = decisionBlockers(p, refine, numbers, refinement, wait);
   const refineBadge: Badge | null =
     refine === null
       ? null
-      : refine === "running"
+      : isRefining(refine)
         ? { label: "refining", tone: "info", tooltip: "The agent is refining this Proposal on the current Model", accessibleName: "The agent is refining this Proposal on the current Model" }
         : refine === "queued"
           ? { label: "queued", tone: "info", tooltip: queuedTip, accessibleName: queuedTip }
           : refine === "stopped"
-            ? { label: "to refine", tone: "primary", tooltip: "Refining stopped before the hand-over. Approve resumes it." }
-            : { label: "to refine", tone: "primary", tooltip: TO_REFINE_TIP };
+            ? { label: "to refine", tone: "primary", tooltip: "Refining stopped before the hand-over. Approve resumes it.", accessibleName: "Refining stopped before the hand-over. Approve resumes it." }
+            : refine === "paused"
+              ? { label: "to refine", tone: "primary", tooltip: PAUSED_TIP, accessibleName: PAUSED_TIP }
+              : { label: "to refine", tone: "primary", tooltip: TO_REFINE_TIP };
   // Refined while a Run of this window was in progress: Trama approves it when that Run ends.
   const waitingRun: Badge | null = refinement.waiting.includes(p.id) ? { label: "waiting for the run", tone: "info", tooltip: WAITING_RUN_TIP, accessibleName: WAITING_RUN_TIP } : null;
   return {
@@ -468,13 +504,13 @@ export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, 
     resolution: p.kind === "resolution",
     badges: [...(refineBadge === null ? [] : [refineBadge]), ...(waitingRun === null ? [] : [waitingRun]), ...proposalBadges(refine === null ? p : { ...p, stale: [] }, numbers)],
     changes: summarizeChanges(p.changes),
-    blocker: joinReasons([wait, approve]),
+    blocker: blockers.approve,
     approveHint: refine === "to-refine" ? "Refine it on the current Model, then approve it" : null,
     refine,
-    refinePhase: refine === "running" ? (asking ? "Waiting for your answers" : "Refining") : null,
-    refineNote: refine === "running" ? refinement.notes[p.id] ?? null : null,
-    rejectBlocker,
-    reworkBlocker: joinReasons([rejectBlocker, p.kind === "resolution" ? resolveReason : null]),
+    refinePhase: isRefining(refine) ? (asking ? "Waiting for your answers" : "Refining") : null,
+    refineNote: isRefining(refine) ? refinement.notes[p.id] ?? p.writer?.note ?? null : null,
+    rejectBlocker: blockers.reject,
+    reworkBlocker: joinReasons([blockers.reject, p.kind === "resolution" ? resolveReason : null]),
     views,
     resolves: resolvedRows(p, numbers, blocked),
     creates: createsText(p.creates),

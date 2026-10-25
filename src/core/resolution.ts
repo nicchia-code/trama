@@ -204,6 +204,8 @@ export interface ResolvedDrift {
   previous: { id: string; title: string }[];
   /** The Drifts a unified Drift merged, in creation order; empty for any other Drift. */
   unifies: { id: string; title: string }[];
+  /** True for a Drift from a merge: the code may be right. */
+  merge: boolean;
   decision: string;
   note: string | null;
 }
@@ -215,6 +217,6 @@ export function resolvedDrifts(p: Project, proposal: Proposal): ResolvedDrift[] 
     if (!d) return [];
     const already = drift.data.status === "resolved" && drift.data.resolvedBy !== proposal.id;
     const option = d.option === undefined ? undefined : driftOptions(drift)[d.option - 1]?.title;
-    return [{ drift: drift.id, title: drift.title, previous: followedDrifts(p, drift), unifies: unifiedDrifts(p, drift), decision: already ? "(already resolved)" : decisionText(d.decision, option), note: already ? null : (d.note ?? null) }];
+    return [{ drift: drift.id, title: drift.title, previous: followedDrifts(p, drift), unifies: unifiedDrifts(p, drift), merge: drift.data.merge, decision: already ? "(already resolved)" : decisionText(d.decision, option), note: already ? null : (d.note ?? null) }];
   });
 }

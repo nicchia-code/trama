@@ -294,6 +294,18 @@
           "default": true,
           "scope": "application",
           "markdownDescription": "On: in omp Chat the agent writes why it calls each tool. Off saves tokens. Applies to conversations started afterwards."
+        },
+        "trama.ntfyServer": {
+          "type": "string",
+          "default": "https://ntfy.sh",
+          "scope": "application",
+          "markdownDescription": "Server that receives Trama's notifications. The default is the public ntfy.sh."
+        },
+        "trama.ntfyTopic": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Topic for a notification when omp Chat jobs finish or wait for you. Empty (the default) sends nothing; on ntfy.sh anyone who knows it can read them."
         }
       }
     }

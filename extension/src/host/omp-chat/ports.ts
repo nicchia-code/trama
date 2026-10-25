@@ -73,6 +73,8 @@ export interface OmpSessionPort {
    * `report` says what became of it (`queued`, `delivered`, or `failed` with the reason); an idle start reports nothing. Rejects with the error of a turn that failed to start.
    */
   send(prompt: OmpPrompt, mode: SendMode, report: (status: SendStatus) => void): Promise<void>;
+  /** A message of the developer entered `send` (whatever became of it), for the quiet of a finished notice. */
+  onSend(listener: () => void): Disposable;
   /** `session/cancel`. */
   cancel(): void;
   /**
@@ -101,6 +103,8 @@ export interface OmpSessionPort {
   answerPermission(requestId: string, optionId: string): void;
   /** A waiting permission request was answered `cancelled` (Stop, closing, the process ended). */
   onPermissionCancelled(listener: (requestId: string) => void): Disposable;
+  /** The developer chose an option of a waiting permission request (`answerPermission` took it); once per request. A cancellation is `onPermissionCancelled`, not this. */
+  onPermissionAnswered(listener: (requestId: string) => void): Disposable;
   /** The models the session can use and the one it uses now, from the model option omp declares for the session. */
   models(): Promise<{ available: { id: string; name: string }[]; current?: string }>;
   /** Changes the session's model from the next turn; rejects with omp's message when it refuses. */

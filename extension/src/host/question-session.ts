@@ -23,6 +23,12 @@ interface ActiveRound extends QuestionRoundView {
   resolve(result: Awaited<ReturnType<QuestionPresenter>>): void;
 }
 
+/** What hears the rounds the window presents: `opened` when a round becomes the one being answered, with the terminal or conversation that asked it; `closed` when it ends, answered or not. */
+export interface QuestionRoundObserver {
+  opened(round: number, terminal: string | undefined): void;
+  closed(round: number): void;
+}
+
 type Listener = (round: QuestionRoundView | null) => void;
 
 /**
@@ -36,8 +42,11 @@ export class QuestionSession {
   /** The identity of the window's project. A round admitted for another project stays out of sight until the window is back on it. */
   private project: string | undefined;
 
-  /** `reveal` opens the panel in front, on the Diagram, or brings it to the front keeping its tab (the round entered Asking). `tabName` names the terminal or conversation a round came from. */
-  constructor(private readonly reveal: () => void | Promise<void>, private readonly tabName: TabNameOf) {}
+  /**
+   * `reveal` opens the panel in front, on the Diagram, or brings it to the front keeping its tab (the round entered Asking). `tabName` names the terminal or conversation a round came from.
+   * `rounds` hears when a round becomes the one presented (`question-round.ROUND_OPENED`) and when it ends (`question-round.ROUND_CLOSED`), for the away notices.
+   */
+  constructor(private readonly reveal: () => void | Promise<void>, private readonly tabName: TabNameOf, private readonly rounds?: QuestionRoundObserver) {}
 
   /** A round that belongs to no project: shown while the window has none. */
   readonly present: QuestionPresenter = (request, context) => this.admit(request, context, undefined);
@@ -60,11 +69,13 @@ export class QuestionSession {
       if (this.active !== round) return;
       // The agent stopped waiting or the editor was lost: nothing is delivered and the overlay or the bar closes.
       this.active = undefined;
+      this.rounds?.closed(round.id);
       this.changed();
       reject(context.signal.reason ?? questionAborted());
     };
     context.signal.addEventListener("abort", close, { once: true });
     this.active = round;
+    this.rounds?.opened(round.id, context.terminal);
     if (this.shownRound() !== round) this.changed();
     else void Promise.resolve(this.reveal()).finally(() => this.changed());
     return promise;
@@ -112,6 +123,7 @@ export class QuestionSession {
     }
     if (step.kind === "delivered") {
       this.active = undefined;
+      this.rounds?.closed(round.id);
       this.changed();
       round.resolve(step.result);
       return;

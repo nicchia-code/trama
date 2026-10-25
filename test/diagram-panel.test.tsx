@@ -46,6 +46,17 @@ test("an open Drift shows its two sides and Dismiss Drift asks the host to dismi
   expect(posted).toEqual([{ type: "dismissDrift", id: drift?.id ?? "" }]);
 });
 
+test("a Drift from a merge shows the Merge badge in its details, and another Drift does not", () => {
+  const { store } = setup();
+  const drift = snapshot.drifts.find((d) => d.refs.includes("order/Shipped"));
+  expect(drift).toBeDefined();
+  act(() => store.navigateDrift(drift?.id ?? ""));
+  expect(screen.queryByLabelText(/From a merge/)).toBeNull();
+  act(() => store.update({ ...snapshot, drifts: snapshot.drifts.map((d) => (d.id === drift?.id ? { ...d, merge: true } : d)) }, null));
+  act(() => store.navigateDrift(drift?.id ?? ""));
+  expect(screen.getByLabelText("From a merge: the code may be right, keeping it is recommended").textContent).toBe("Merge");
+});
+
 test("a unified Drift shows its badge, a Unifies list and no buttons; a merged Drift shows Unified and where it went", () => {
   const base = snapshot.drifts.find((d) => d.refs.includes("order/Shipped"));
   expect(base).toBeDefined();

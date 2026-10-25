@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import type { MenuState, ToMenuHost } from "../extension/src/menu-protocol";
+import type { MenuState, MergeMenuState, ToMenuHost } from "../extension/src/menu-protocol";
 import { MenuApp } from "../extension/src/webview/menu/app";
 import { entryName } from "../extension/src/webview/menu/logic";
 
@@ -191,4 +191,114 @@ test("Open Folder keeps its accessible name in icon-only mode, where its text is
   const open = screen.getByRole("button", { name: "Open Folder" });
   expect(within(open).getByText("Open Folder").className).toContain("@max-[56px]:hidden");
   expect(open.getAttribute("aria-label")).toBe("Open Folder");
+});
+
+// Merge of Solo mode (`ui#solo-merge`).
+const withMerge = (merge: MergeMenuState, over: Partial<MenuState> = {}): MenuState => project({ merge, ...over });
+const TRACKED = "Some Trama files are tracked by git: their changes enter your commits.";
+
+test("without merge in the state (Solo mode off) there is no Merge button and no line", () => {
+  setup(project());
+  expect(screen.queryByRole("button", { name: /^Merge/ })).toBeNull();
+  expect(screen.queryByText(TRACKED)).toBeNull();
+});
+
+test("Merge comes first at the foot, before Scan System and Settings, as the only primary button, as wide as the view, icon and text to the left", () => {
+  const { posted } = setup(withMerge({ available: true, trackedTrama: false }));
+  expect(names()).toEqual(["Board", "Diagram", "Requirements", "Specs", "History", "Merge", "Scan System", "Settings"]);
+  const merge = screen.getByRole("button", { name: "Merge" });
+  expect(merge.className).toContain("bg-primary");
+  expect(merge.className).toContain("w-full");
+  expect(merge.className).toContain("justify-start");
+  expect((merge as HTMLButtonElement).disabled).toBe(false);
+  expect(merge.hasAttribute("aria-disabled")).toBe(false);
+  expect(merge.hasAttribute("title")).toBe(false);
+  expect(merge.querySelector("svg")?.getAttribute("class")).toContain("lucide-git-merge");
+  expect(merge.parentElement).toBe(screen.getByRole("button", { name: "Scan System" }).parentElement);
+  expect(merge.parentElement?.className).toContain("border-t");
+  // No other button of the menu is primary.
+  expect(screen.getAllByRole("button").filter((button) => button.className.includes("bg-primary"))).toEqual([merge]);
+  fireEvent.click(merge);
+  expect(posted).toEqual([{ type: "merge" }]);
+});
+
+test("an unavailable Merge is disabled, marked so for assistive technologies, with the reason in a line below in secondary text and in its name", () => {
+  const reasons = {
+    inProgress: "A merge is in progress.",
+    detached: "Check out a branch to merge.",
+    changes: "Commit or stash your changes to merge.",
+    agent: "Wait for the agent to finish.",
+  } as const;
+  for (const [reason, text] of Object.entries(reasons)) {
+    const { posted } = setup(withMerge({ available: false, reason: reason as keyof typeof reasons, trackedTrama: false }));
+    const merge = screen.getByRole("button", { name: `Merge. ${text}` });
+    expect((merge as HTMLButtonElement).disabled).toBe(true);
+    expect(merge.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByText(text).className).toContain("text-muted-foreground");
+    expect(merge.compareDocumentPosition(screen.getByText(text)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(merge);
+    expect(posted).toEqual([]);
+    cleanup();
+  }
+});
+
+test("Trama files tracked by git add a line in the warning colour after the reason, and Merge stays enabled without one", () => {
+  setup(withMerge({ available: true, trackedTrama: true }));
+  const merge = screen.getByRole("button", { name: `Merge. ${TRACKED}` });
+  expect((merge as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.getByText(TRACKED).className).toContain("text-amber-700");
+  cleanup();
+  setup(withMerge({ available: false, reason: "changes", trackedTrama: true }));
+  const lines = screen.getAllByText(/\./).map((line) => line.textContent);
+  expect(lines).toEqual(["Commit or stash your changes to merge.", TRACKED]);
+  expect(screen.getByRole("button", { name: `Merge. Commit or stash your changes to merge. ${TRACKED}` })).toBeTruthy();
+});
+
+test("during a merge Trama started: Merge disabled with the Merging line, and below the ghost buttons of the conflict and Abort Merge", () => {
+  const { posted } = setup(withMerge({ available: false, reason: "inProgress", trackedTrama: false, open: { branch: "origin/main", conflict: true } }));
+  const line = "Merging origin/main: resolve the conflicts, then commit.";
+  expect((screen.getByRole("button", { name: `Merge. ${line}` }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByText("A merge is in progress.")).toBeNull();
+  expect(names()).toEqual(["Board", "Diagram", "Requirements", "Specs", "History", `Merge. ${line}`, "Open Merge Editor", "Reconcile with Agent", "Abort Merge", "Scan System", "Settings"]);
+  for (const [name, icon] of [["Open Merge Editor", "lucide-git-compare"], ["Reconcile with Agent", "lucide-bot"], ["Abort Merge", "lucide-x"]] as const) {
+    const button = screen.getByRole("button", { name });
+    expect(button.className).toContain("w-full");
+    expect(button.className).toContain("justify-start");
+    expect(button.className).not.toContain("bg-primary");
+    expect(button.querySelector("svg")?.getAttribute("class")).toContain(icon);
+    expect(button.hasAttribute("title")).toBe(false);
+    fireEvent.click(button);
+  }
+  expect(posted).toEqual([{ type: "openMergeEditor" }, { type: "reconcileMerge" }, { type: "abortMerge" }]);
+});
+
+test("an open merge without conflicts left offers only Abort Merge", () => {
+  setup(withMerge({ available: false, reason: "inProgress", trackedTrama: false, open: { branch: "feature", conflict: false } }));
+  expect(screen.queryByRole("button", { name: "Open Merge Editor" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Reconcile with Agent" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Abort Merge" })).toBeTruthy();
+});
+
+test("icon-only mode: Merge and the buttons below it show only their icon, their lines are hidden and their names stay; no tooltip anywhere", async () => {
+  setup(withMerge({ available: false, reason: "inProgress", trackedTrama: true, open: { branch: "feature", conflict: true } }));
+  for (const name of ["Open Merge Editor", "Reconcile with Agent", "Abort Merge"]) {
+    const button = screen.getByRole("button", { name });
+    expect(button.className).toContain("@max-[56px]:justify-center");
+    expect(button.querySelector("span")?.className).toContain("@max-[56px]:hidden");
+  }
+  const merge = screen.getByRole("button", { name: /^Merge\. Merging feature/ });
+  expect(merge.className).toContain("@max-[56px]:justify-center");
+  expect(within(merge).getByText("Merge").className).toContain("@max-[56px]:hidden");
+  for (const text of ["Merging feature: resolve the conflicts, then commit.", TRACKED]) expect(screen.getByText(text).className).toContain("@max-[56px]:hidden");
+  await act(async () => {
+    merge.focus();
+    fireEvent.focus(merge);
+  });
+  expect(screen.queryByRole("tooltip")).toBeNull();
+  expect(document.querySelectorAll("[title]").length).toBe(0);
+});
+
+test("Merge is not drawn outside a project, whatever the state says", () => {
+  setup({ ...project({ merge: { available: true, trackedTrama: false } }), situation: "notProject" });
+  expect(screen.queryByRole("button", { name: /^Merge/ })).toBeNull();
 });

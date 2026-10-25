@@ -1,8 +1,8 @@
-import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomic } from "./atomic-write";
 import { extent } from "./blocking";
+import { git } from "./git";
 import type { ProjectModel } from "./requirements";
 import { normalizeLf } from "./line-endings";
 import { type Project, readTextLf, sha256, writeFileEnsuringDir } from "./store";
@@ -14,18 +14,6 @@ import { type Project, readTextLf, sha256, writeFileEnsuringDir } from "./store"
 
 /** Paths of the working tree the code fingerprint leaves out: Trama's own, the skill folders, the agent definitions and `.omp/WATCHDOG.yml`. */
 export const LEFT_OUT = [".trama", ".agents/skills", ".omp/agents", ".omp/WATCHDOG.yml"];
-
-const GIT_TIMEOUT_MS = 20_000;
-
-/**
- * Runs git in `cwd` and returns its output, or null when it fails or runs past `timeoutMs`. The timeout ends git with
- * SIGKILL, not SIGTERM: a git that ignores SIGTERM would otherwise block this synchronous wait, and the whole process, for good.
- * git reads no input and never prompts on the terminal.
- */
-export function git(cwd: string, args: string[], timeoutMs = GIT_TIMEOUT_MS): string | null {
-  const r = spawnSync("git", ["--no-optional-locks", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: 1 << 30, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
-  return r.error || r.status !== 0 ? null : r.stdout;
-}
 
 /** The hash of a file's current content, `deleted` when it is gone, `directory` for a folder; null when it cannot be read. */
 function contentHash(path: string): string | null {
@@ -49,8 +37,8 @@ export function codeFingerprint(root: string, extraDirs: string[] = []): string 
   const status = git(root, ["status", "--porcelain", "-z", "--untracked-files=all"]);
   if (head === null || top === null || prefix === null || status === null) return null;
   const repo = top.trim();
-  // The project root's place in the repository, with a trailing slash, or empty when the root is the repository.
-  const within = prefix.trim() === "" ? "" : `${prefix.trim()}/`;
+  // The project root's place in the repository, as git prints it (it already ends with a slash), or empty when the root is the repository.
+  const within = prefix.trim();
   const left = [...LEFT_OUT, ...extraDirs.map((d) => d.replace(/\/+$/, ""))];
   const leftOut = (path: string): boolean => {
     if (!path.startsWith(within)) return false;

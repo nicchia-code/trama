@@ -143,6 +143,15 @@ Il developer preme Set API key, o Change API key quando una chiave è già salva
 ### REMOVE_CURSOR_API_KEY
 Il developer preme Remove API key sulla riga Cursor della sezione Providers, nel gruppo omp della scheda Settings o nel passo omp del wizard di setup; il pulsante c'è solo quando Trama conserva una chiave API di Cursor. Trama la toglie dal portachiavi dell'editor senza chiedere conferma, e da allora omp parte senza la chiave di Trama.
 
+### SET_NTFY_TOKEN
+The developer presses Set access token, or Change access token when one is already saved, in the Notifications sub-group of the Settings tab, and confirms an access token of his ntfy server in the masked box the editor opens. The box does not accept an empty token or one made only of spaces and stays open asking for one; Esc closes it and nothing changes. Trama keeps the token in the editor's keychain, never in a file nor in the settings, and sends it with every notification from then on (see Away notifications).
+
+### REMOVE_NTFY_TOKEN
+The developer presses Remove access token in the Notifications sub-group of the Settings tab; the button is there only while Trama keeps an ntfy access token. Trama removes it from the editor's keychain without asking for confirmation, and from then on notifications go without a token.
+
+### SEND_TEST_NOTIFICATION
+The developer presses Send test notification in the Notifications sub-group of the Settings tab, to check that Trama's notifications reach his devices with the server, topic and access token of now.
+
 ### REFRESH_SYSTEM_CERTIFICATES
 The developer asks Trama to export the system's certificates again, with Refresh next to the System Certificates status, in the omp group of the Settings tab or in the omp step of the setup wizard, or with the Refresh System Certificates command of the editor. It is available only while System Certificates is on (see Agent launching).
 
@@ -169,6 +178,33 @@ Il developer conferma il riepilogo del wizard di setup aperto in un progetto, da
 
 ### CANCEL_SETUP
 Il developer annulla il wizard di setup aperto in un progetto, con Cancel. In Get Started il wizard non ha Cancel.
+
+### TURN_ON_SOLO_MODE
+The developer turns on Solo Mode in the Settings tab of a project, to use Trama alone in a repository where the others do not.
+
+### TURN_OFF_SOLO_MODE
+The developer turns off Solo Mode in the Settings tab of a project.
+
+### CHANGE_SOLO_EXCLUSIONS
+The developer chooses, in the Settings tab with Solo Mode on, whether Trama keeps out of git the whole folders where it writes or only the files it writes there.
+
+### START_MERGE
+The developer presses Merge in the side menu, with Solo mode on.
+
+### CHOOSE_MERGE_BRANCH
+The developer chooses, in the list Merge shows, the branch to merge into the current one, and confirms it when Trama asks.
+
+### CANCEL_MERGE
+The developer closes the list of branches of Merge without choosing one.
+
+### OPEN_MERGE_EDITOR
+The developer chooses to resolve by hand, in the editor's merge editor, the conflicts of a merge started by Trama.
+
+### RECONCILE_MERGE_WITH_AGENT
+The developer chooses to have the agent resolve the conflicts of a merge started by Trama.
+
+### ABORT_MERGE
+The developer chooses to abort a merge started by Trama that is still open.
 
 ### OPEN_SYSTEM_LEVEL
 Il developer riporta il Diagramma alla sua radice, il livello del Sistema da cui si sceglie cosa guardare: con il breadcrumb, o seguendo un link a un Actor i cui Eventi non arrivano a nessuna Machine, che la radice mostra selezionato.
@@ -250,3 +286,6 @@ Il developer pulisce la conversazione General di omp Chat: chiude la sua scheda 
 
 ### SEND_CHAT_MESSAGE
 Il developer manda un messaggio nella conversazione General di omp Chat, scritto nel suo campo del messaggio, oppure il primo messaggio di una conversazione di Ask more ancora vuota, che porta con sé l'istruzione di Ask more. Gli altri messaggi delle conversazioni li descrive la conversazione stessa, senza questo Event.
+
+### ANSWER_PERMISSION
+The developer chooses one of the options of a permission request of omp in a conversation of omp Chat, for example allowing once, allowing always or refusing (see omp Chat conversation).

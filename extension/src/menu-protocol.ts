@@ -21,6 +21,26 @@ export const SHOW_COMMANDS = {
 /** How the window stands for the menu: no folder open, a folder that is no Trama project (the one that counts for the panel), or a Trama project. */
 export type MenuSituation = "noFolder" | "notProject" | "project";
 
+/** Why Merge is unavailable, in the order the menu tells it. */
+export type MergeReason = "inProgress" | "detached" | "changes" | "agent";
+
+/** The line below the disabled `Merge` for each reason (`ui#solo-merge`); English, whatever `trama.language` says. */
+export const MERGE_REASONS: Record<MergeReason, string> = {
+  inProgress: "A merge is in progress.",
+  detached: "Check out a branch to merge.",
+  changes: "Commit or stash your changes to merge.",
+  agent: "Wait for the agent to finish.",
+};
+
+/** Merge of Solo mode as the menu shows it (`tech#solo-merge`): `open` while a merge Trama started is in progress (`conflict`: its files still have conflicts). */
+export interface MergeMenuState {
+  available: boolean;
+  reason?: MergeReason;
+  /** Some of Trama's files are tracked by git. */
+  trackedTrama: boolean;
+  open?: { branch: string; conflict: boolean };
+}
+
 /** The state of the side menu, which the host sends again at every change (`menu-laterale`). */
 export interface MenuState {
   situation: MenuSituation;
@@ -30,12 +50,14 @@ export interface MenuState {
   tasksSinceScan: number;
   /** The view the panel shows, or none when the panel is closed. */
   panelView: ViewName | null;
+  /** Merge of Solo mode: absent with Solo mode off. */
+  merge?: MergeMenuState;
 }
 
 /** Host -> menu webview. */
 export type ToMenuWebview = ({ type: "menuState" } & MenuState) | { type: "theme"; setting: ThemeSetting };
 
-/** Menu webview -> host: the only three things the menu asks. */
+/** Menu webview -> host: the only things the menu asks; the last four exist only with Solo mode on (`tech#solo-merge`). */
 export type ToMenuHost =
   | { type: "ready" }
   /** The entry of a view: the host treats it as the command with the same name (`trama.show<View>`; Get Started is the ordinary opening). */
@@ -43,4 +65,12 @@ export type ToMenuHost =
   /** Scan System: launches the scan of the whole System without opening the panel. */
   | { type: "scan" }
   /** Open Folder: the editor's own folder picker. */
-  | { type: "openFolder" };
+  | { type: "openFolder" }
+  /** Merge: fetch, the choice of the branch and the merge, in the flow of Merge. */
+  | { type: "merge" }
+  /** Open Merge Editor: the first file with conflicts of the merge Trama started, in the editor's merge editor. */
+  | { type: "openMergeEditor" }
+  /** Reconcile with Agent: the agent resolves the conflicts of the merge Trama started. */
+  | { type: "reconcileMerge" }
+  /** Abort Merge: `git merge --abort` after the developer's confirmation. */
+  | { type: "abortMerge" };

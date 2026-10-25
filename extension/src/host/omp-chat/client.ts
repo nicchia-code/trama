@@ -111,6 +111,8 @@ class OmpSession implements OmpSessionPort, Client {
   private readonly forms = new Map<string, { request: FormRequest; resolve: (answer: FormAnswer) => void }>();
   private readonly permissions = new Map<string, { request: PermissionRequest; resolve: (response: RequestPermissionResponse) => void }>();
   private readonly cancelledListeners: Listeners<string> = new Set();
+  private readonly answeredListeners: Listeners<string> = new Set();
+  private readonly sendListeners: Listeners<undefined> = new Set();
   private formCount = 0;
   private permissionCount = 0;
 
@@ -318,7 +320,12 @@ class OmpSession implements OmpSessionPort, Client {
     return this.turn === undefined ? this.begin(prompt) : this.queue(prompt);
   }
 
+  onSend(listener: () => void): Disposable {
+    return disposer(this.sendListeners, () => listener());
+  }
+
   send(prompt: OmpPrompt, mode: SendMode, report: Report): Promise<void> {
+    for (const listener of [...this.sendListeners]) listener(undefined);
     if (this.turn === undefined) return this.begin(prompt);
     // A permission request waits: omp is sent nothing until the developer answers it (`answerPermission`).
     if (this.permissions.size > 0) return this.hold(prompt, report);
@@ -553,11 +560,16 @@ class OmpSession implements OmpSessionPort, Client {
     if (pending === undefined || !pending.request.options.some((option) => option.optionId === optionId)) return;
     this.permissions.delete(requestId);
     pending.resolve({ outcome: { outcome: "selected", optionId } });
+    for (const listener of [...this.answeredListeners]) listener(requestId);
     if (this.permissions.size === 0) this.releaseHeld();
   }
 
   onPermissionCancelled(listener: (requestId: string) => void): Disposable {
     return disposer(this.cancelledListeners, listener);
+  }
+
+  onPermissionAnswered(listener: (requestId: string) => void): Disposable {
+    return disposer(this.answeredListeners, listener);
   }
 
   /** The requests still waiting are answered `cancelled`: Stop, the closing of the conversation or the end of the process. */

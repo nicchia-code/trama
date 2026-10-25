@@ -4,6 +4,7 @@ import * as vscode from "vscode";
 import { run } from "../../../src/cli/main";
 import { refreshProjectSkills } from "../../../src/cli/skill-refresh";
 import { TramaError, UsageError } from "../../../src/core/errors";
+import type { SoloKind } from "../../../src/core/solo-mode";
 import { TRAMA_DIR, type Project, projectAt } from "../../../src/core/store";
 import { configuredSkillsDir } from "./agent";
 
@@ -25,16 +26,17 @@ export function findProject(uri?: vscode.Uri): Project | undefined {
 
 /**
  * Runs `trama project new` in the workspace folder `root`, the one the developer chose in the setup wizard, with the same code and skills folder as
- * the command line (`trama.skillsDir`, as the wizard has just saved it). When it refuses to overwrite customised skill files, shows why and retries
+ * the command line (`trama.skillsDir`, as the wizard has just saved it) and, when the wizard chose it, `solo`: Solo mode is then written before any other file, and a failure
+ * (no git repository, a failed write) fails the initialization with nothing created. When it refuses to overwrite customised skill files, shows why and retries
  * with `force: true` only after an explicit modal confirmation. Returns the new Project, or undefined
  * when nothing was created because the developer declined the overwrite. A folder that is already a project keeps its Model, Requirements and skills.
  */
-export async function initializeProject(root: string): Promise<Project | undefined> {
+export async function initializeProject(root: string, solo?: SoloKind): Promise<Project | undefined> {
   if (existsSync(join(root, TRAMA_DIR))) return projectAt(root);
   const skillsDir = configuredSkillsDir();
   for (let force = false; ; force = true) {
     try {
-      run(["--root", root, "project", "new", "--input", JSON.stringify({ skillsDir, ...(force ? { force: true } : {}) })], root);
+      run(["--root", root, "project", "new", "--input", JSON.stringify({ skillsDir, ...(solo === undefined ? {} : { solo }), ...(force ? { force: true } : {}) })], root);
       return projectAt(root);
     } catch (err) {
       if (!(err instanceof TramaError || err instanceof UsageError)) throw err;

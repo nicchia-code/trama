@@ -81,6 +81,7 @@ export interface ComparisonDrift {
   options: DriftOption[];
   previous?: string;
   proposal?: string;
+  merge?: boolean;
 }
 
 export interface ComparisonFile {
@@ -110,7 +111,7 @@ function taskShape(c: Record<string, unknown>): string[] {
   return out;
 }
 
-const DRIFT_FIELDS = new Set(["title", "refs", "happens", "should", "where", "options", "previous", "proposal"]);
+const DRIFT_FIELDS = new Set(["title", "refs", "happens", "should", "where", "options", "previous", "proposal", "merge"]);
 
 function driftShape(c: Record<string, unknown>): string[] {
   const out: string[] = [];
@@ -119,6 +120,7 @@ function driftShape(c: Record<string, unknown>): string[] {
   if (!Array.isArray(c["options"]) || !c["options"].every((o) => isObject(o) && typeof o["title"] === "string" && typeof o["text"] === "string")) out.push("options must be a list of {title, text} strings");
   for (const field of Object.keys(c)) if (!DRIFT_FIELDS.has(field)) out.push(`unknown field ${field}`);
   for (const field of ["previous", "proposal"]) if (!optional(c[field], (x) => typeof x === "string")) out.push(`${field} must be a string`);
+  if (!optional(c["merge"], (x) => typeof x === "boolean")) out.push("merge must be true or false");
   return out;
 }
 
@@ -183,6 +185,7 @@ export function archiveComparison(p: Project, comparisonId: string, raw: string,
         should: c["should"] as string,
         options: c["options"] as DriftOption[],
         where: c["where"] as string,
+        merge: c["merge"] === true,
         job,
       }));
     } catch (err) {

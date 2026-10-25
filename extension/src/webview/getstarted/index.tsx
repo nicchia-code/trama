@@ -26,13 +26,16 @@ export interface GetStartedView extends View {
 
 const NOTICE = "Trama will create a `.trama` folder that describes this project. It holds no secrets and is meant to be committed. It also writes the agent skills and the Trama sub-agent definition into this project, which are meant to be committed too.";
 
-/** The notice that tops every step of the first setup. */
-export function GetStartedNotice({ openLink }: { openLink(url: string): void }) {
+/** The notice with Solo mode chosen in the Project step: the files are kept out of git, in this working copy only. */
+const SOLO_NOTICE = "Trama will create a `.trama` folder that describes this project, and write the agent skills and the Trama sub-agent definition into this project. Solo mode keeps them out of git in this working copy only: they are never committed and are versioned nowhere else.";
+
+/** The notice that tops the Path and Summary steps of the first setup; `solo` when Solo mode is chosen in the Project step. */
+export function GetStartedNotice({ openLink, solo = false }: { openLink(url: string): void; solo?: boolean }) {
   return (
     <div className="mb-4 flex items-start gap-2.5 rounded-md border border-amber-500/50 bg-amber-500/15 px-3 py-2.5">
       <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
       <p className="m-0">
-        <InlineMarkdown source={NOTICE} openLink={openLink} />
+        <InlineMarkdown source={solo ? SOLO_NOTICE : NOTICE} openLink={openLink} />
       </p>
     </div>
   );
@@ -41,7 +44,7 @@ export function GetStartedNotice({ openLink }: { openLink(url: string): void }) 
 /** The Get Started tab: the setup wizard in the first-setup mode, shown only while the folder has no Trama project. */
 export const mountGetStarted = (slot: Slot, context: ViewContext): GetStartedView => {
   const wizard = new WizardController({ post: context.post });
-  slot(<Wizard controller={wizard} openLink={context.openLink} notice={<GetStartedNotice openLink={context.openLink} />} />);
+  slot(<Wizard controller={wizard} openLink={context.openLink} notice={(solo) => <GetStartedNotice openLink={context.openLink} solo={solo} />} />);
 
   return {
     update() {},

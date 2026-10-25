@@ -4,6 +4,12 @@
  * assigns each key to a group and turns a manifest entry into a control. Pure: the webview and the host both import it.
  */
 
+import { ntfyServerError, ntfyTopicError } from "../../../src/core/ntfy";
+
+/** The keys of the Notifications subgroup: the only text settings with a validity of their own. */
+export const NTFY_SERVER_KEY = "trama.ntfyServer";
+export const NTFY_TOPIC_KEY = "trama.ntfyTopic";
+
 /** The shape of one `contributes.configuration.properties` entry that the Settings tab reads. */
 export interface ManifestProperty {
   type?: string;
@@ -65,7 +71,7 @@ export interface SettingGroup {
 
 /**
  * The four groups, in order, the single list the Settings tab and the setup wizard both read: `omp`, `Models`, `Project` and
- * `Advanced`, which is cut into the subgroups `Appearance`, `Drifts`, `Agents` and `omp Chat`. Every key in the manifest must appear once.
+ * `Advanced`, which is cut into the subgroups `Appearance`, `Drifts`, `Agents`, `omp Chat` and `Notifications`. Every key in the manifest must appear once.
  */
 export const SETTING_GROUPS: readonly SettingGroup[] = [
   { title: "omp", keys: ["trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles", "trama.autoExit", "trama.language", "trama.systemCertificates"] },
@@ -79,6 +85,7 @@ export const SETTING_GROUPS: readonly SettingGroup[] = [
       { title: "Drifts", keys: ["trama.advisorScanner", "trama.asyncDriftResolver"] },
       { title: "Agents", keys: ["trama.parallelExecution", "trama.subagentsContextSharing", "trama.autoUpdateStaleProposals"] },
       { title: "omp Chat", keys: ["trama.ompChat", "trama.ompChatApproval", "trama.ompChatIntentTracing"] },
+      { title: "Notifications", keys: ["trama.ntfyServer", "trama.ntfyTopic"] },
     ],
   },
 ];
@@ -93,6 +100,8 @@ const EXPLICIT_TITLES: Readonly<Record<string, string>> = {
   "trama.ompChat": "omp Chat",
   "trama.ompChatApproval": "omp Chat Approval",
   "trama.ompChatIntentTracing": "omp Chat Intent Tracing",
+  "trama.ntfyServer": "ntfy Server",
+  "trama.ntfyTopic": "ntfy Topic",
 };
 
 /** The three model roles: the Settings tab suggests omp's model names for them. */
@@ -153,7 +162,11 @@ export function settingValueError(setting: SettingSchema, value: unknown): strin
       if (typeof value !== "number" || !Number.isInteger(value)) return setting.minimum === undefined ? "Enter a whole number." : `Enter a whole number of at least ${setting.minimum}.`;
       return setting.minimum === undefined || value >= setting.minimum ? null : `Enter a whole number of at least ${setting.minimum}.`;
     case "text":
-      return typeof value === "string" ? null : "Enter text.";
+      if (typeof value !== "string") return "Enter text.";
+      // The ntfy server and topic must be usable: an invalid one is not saved (`tech#away-notifications`).
+      if (setting.key === NTFY_SERVER_KEY) return ntfyServerError(value);
+      if (setting.key === NTFY_TOPIC_KEY) return ntfyTopicError(value);
+      return null;
   }
 }
 

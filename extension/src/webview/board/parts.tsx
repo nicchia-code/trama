@@ -124,7 +124,7 @@ export function BoardButton({
   onClick: () => void;
 }) {
   const button = (
-    <Button variant={variant} size="sm" disabled={disabled} aria-label={aria} aria-description={description || undefined} className={cn(full && "w-full", bar !== undefined && "relative isolate overflow-hidden", className)} onClick={onClick} {...data}>
+    <Button variant={variant} size="sm" disabled={disabled} aria-disabled={disabled || undefined} aria-label={aria} aria-description={description || undefined} className={cn(full && "w-full", bar !== undefined && "relative isolate overflow-hidden", className)} onClick={onClick} {...data}>
       {bar === undefined ? null : <ButtonBar bar={bar} />}
       {Icon ? <Icon aria-hidden="true" focusable="false" /> : null}
       {label}

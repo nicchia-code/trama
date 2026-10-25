@@ -292,6 +292,14 @@ export function refinable(facts: { kind: string; attached: boolean; open: boolea
   return facts.draftRefining && !facts.writing;
 }
 
+/**
+ * Whether an agent writes the Draft `id` now: a refinement of this window is at work on it (`running`), or a live announcement is bound to it, whatever
+ * terminal, window or launch produced it. This is the `writer` of the Board's picture (`src/core/snapshot.ts`), as the host reads it for `refinable`.
+ */
+export function writtenNow(id: string, running: ReadonlyMap<string, unknown>, announcements: readonly Pick<Announcement, "proposal">[]): boolean {
+  return running.has(id) || announcements.some((announcement) => announcement.proposal === id);
+}
+
 /** The latest note the agent declared for each Proposal in `running`, from the announcements bound to them (the notes are oldest first); a Proposal whose agent declared none has no entry. */
 export function refinementNotes(announcements: readonly Pick<Announcement, "kind" | "proposal" | "notes">[], running: readonly string[]): Record<string, string> {
   const notes: Record<string, string> = {};
