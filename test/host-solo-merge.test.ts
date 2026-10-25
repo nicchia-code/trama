@@ -286,10 +286,12 @@ test("Open Merge Editor runs git.openMergeEditor on the first file with conflict
   await conflicted();
   commands = ["git.openMergeEditor"];
   await flow.openMergeEditor();
-  expect(executed).toEqual([["git.openMergeEditor", { fsPath: join(work, "c.txt"), scheme: "file", toString: expect.any(Function) }]]);
+  // The file is under the folder git names: on Windows it has the long names a temporary folder's 8.3 path may lack.
+  const file = join(git(work, "rev-parse", "--show-toplevel"), "c.txt");
+  expect(executed).toEqual([["git.openMergeEditor", { fsPath: file, scheme: "file", toString: expect.any(Function) }]]);
   commands = [];
   await flow.openMergeEditor();
-  expect(shown).toEqual([join(work, "c.txt")]);
+  expect(shown).toEqual([file]);
 }, GIT_TEST_MS);
 
 test("Reconcile with Agent launches the agent on the merge in progress", async () => {

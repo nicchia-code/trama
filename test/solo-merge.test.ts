@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TramaError } from "../src/core/errors";
@@ -285,7 +285,8 @@ describe("merging", () => {
     const incoming = git(root, "rev-parse", "other");
     const before = Date.now();
     const outcome = startMerge(p, "other");
-    const top = realpathSync(root);
+    // The files are under the folder git names: on Windows it has the long names a temporary folder's 8.3 path may lack.
+    const top = git(root, "rev-parse", "--show-toplevel");
     expect(outcome).toEqual({ kind: "conflicts", base: base0, incoming, files: [join(top, "a.txt"), join(top, "b.txt")] });
     const remembered = readOpenMerge(p);
     expect(remembered).toMatchObject({ branch: "other", base: base0, incoming });

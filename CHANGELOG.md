@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-rc.3
+
+- Fix for the two Solo mode merge tests that stopped the 0.1.0-rc.2 Windows package: they expect the files with conflicts under the folder `git rev-parse --show-toplevel` names, as Trama lists them, instead of the temporary folder's path, which on the Windows runner is an 8.3 short path (`RUNNER~1`) that git gives with its long names.
+
 ## 0.1.0-rc.2
 
 - Fixes for the tests that stopped the 0.1.0-rc.1 packages on the release runners: the Solo mode merge tests give their temporary repositories a git identity (the runners have none), `test/yolo-notice.test.ts` loads its module after the `vscode` mock, and on Windows the tests that run a `#!/bin/sh` fake omp are skipped, the login command expects Windows PowerShell's `&`, the execution check tests that read a process's start through PowerShell have 30 s, and the Language section check reads CRLF files.
