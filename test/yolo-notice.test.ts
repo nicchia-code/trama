@@ -12,7 +12,8 @@ mock.module("vscode", () => ({
   commands: { executeCommand: async (id: string) => void commands.push(id) },
 }));
 
-import { setYoloNoticeStore, showYoloNoticeOnce, YOLO_NOTICE, YOLO_NOTICE_KEY } from "../extension/src/host/yolo-notice";
+// Dynamic import: it must come after `mock.module`, which has to be in place before the module loads.
+const { setYoloNoticeStore, showYoloNoticeOnce, YOLO_NOTICE, YOLO_NOTICE_KEY } = await import("../extension/src/host/yolo-notice");
 
 const storeOf = (initial?: boolean) => {
   const memory = new Map<string, unknown>(initial === undefined ? [] : [[YOLO_NOTICE_KEY, initial]]);

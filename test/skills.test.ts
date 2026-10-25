@@ -373,7 +373,8 @@ test("every Language section carries the same list of what goes in the language 
   for (const name of ["trama-design", "trama-setup", "trama-scan", "trama-compare", "trama-implement", "trama-import", "trama-resolve-drifts", "trama-merge"]) texts[name] = SKILLS[`${name}/SKILL.md`] as string;
   for (const name of ["ask-more", "general", "unify-drifts"]) texts[name] = readFileSync(join(root, "extension", "media", `${name}.md`), "utf8");
   const bullet = (text: string, start: string): string => {
-    const line = text.split("\n").find((l) => l.startsWith(start));
+    // A Windows checkout (core.autocrlf) gives the media files CRLF line ends.
+    const line = text.split(/\r?\n/).find((l) => l.startsWith(start));
     expect(line).toBeDefined();
     return line as string;
   };

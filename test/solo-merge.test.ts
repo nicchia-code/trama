@@ -46,6 +46,13 @@ function git(cwd: string, ...args: string[]): string {
   return r.stdout.trim();
 }
 
+/** Trama's own git commands (the merge commit) need an identity: CI runners have none, and git cannot always guess one. */
+function identify(repo: string): void {
+  git(repo, "config", "user.name", "Test");
+  git(repo, "config", "user.email", "test@example.com");
+  git(repo, "config", "commit.gpgsign", "false");
+}
+
 const write = (path: string, text: string): void => {
   mkdirSync(join(path, ".."), { recursive: true });
   writeFileSync(path, text);
@@ -62,6 +69,7 @@ function commit(repo: string, message: string, files: Record<string, string>): s
 /** A repository on `main` with one commit (`a.txt`), and Solo mode on in `folders` (its files untracked and kept out by the block). */
 function repo(sub = ""): { root: string; p: Project } {
   git(base, "init", "-q", "-b", "main");
+  identify(base);
   const root = sub === "" ? base : join(base, sub);
   mkdirSync(root, { recursive: true });
   commit(base, "first", { [sub === "" ? "a.txt" : `${sub}/a.txt`]: "one\n" });
@@ -169,6 +177,7 @@ describe("branches", () => {
     git(base, "clone", "-q", "--bare", seed, remote);
     const root = join(base, "work");
     git(base, "clone", "-q", remote, root);
+    identify(root);
     const p = projectAt(root);
     mkdirSync(p.dir, { recursive: true });
     setSoloMode(p, "folders");

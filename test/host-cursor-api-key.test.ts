@@ -197,7 +197,8 @@ const received = (args: string): string[] => calls().filter((line) => line.start
 const checked = () => waitFor(() => ofType("agentCheck").some((m) => m["state"] === "done") && doneChecks().length > 0);
 const doneChecks = () => ofType("ompStatus").filter((m) => m["state"] === "done");
 
-test("without a saved key the environment is empty, and a saved key gives CURSOR_ACCESS_TOKEN, which wins over the one the editor inherited", async () => {
+// Windows has no `#!/bin/sh` programs: the tests that run the fake omp are skipped there.
+test.skipIf(process.platform === "win32")("without a saved key the environment is empty, and a saved key gives CURSOR_ACCESS_TOKEN, which wins over the one the editor inherited", async () => {
   expect(cursorKeyEnv()).toEqual({});
   secrets.values.set(CURSOR_API_KEY_SECRET, "  stored  ");
   subscription.dispose();
@@ -214,7 +215,7 @@ test("without a saved key the environment is empty, and a saved key gives CURSOR
   expect(received("models --json")).toEqual(["stored", "editor-token"]);
 });
 
-test("omp models, omp --version, the update check and omp usage all receive the key and never a key in their arguments", async () => {
+test.skipIf(process.platform === "win32")("omp models, omp --version, the update check and omp usage all receive the key and never a key in their arguments", async () => {
   secrets.values.set(CURSOR_API_KEY_SECRET, "secret-value");
   subscription.dispose();
   subscription = await startCursorApiKey(secrets as never, (message) => void errors.push(message));
@@ -229,7 +230,7 @@ test("omp models, omp --version, the update check and omp usage all receive the 
   expect(seen.some((line) => line.split("|")[0]?.includes("secret-value"))).toBe(false);
 });
 
-test("Set API key opens a masked box, saves the key without the spaces around it, tells the panel and checks omp once with the path of the message", async () => {
+test.skipIf(process.platform === "win32")("Set API key opens a masked box, saves the key without the spaces around it, tells the panel and checks omp once with the path of the message", async () => {
   typed = "  sk-test-key  ";
   await send({ type: "setCursorApiKey", ompPath: program });
   await checked();
@@ -277,7 +278,7 @@ test("Esc, or a text that is only spaces, changes nothing and checks nothing, an
   expect(errors).toEqual([]);
 });
 
-test("a new key replaces the old one, which the next processes no longer see", async () => {
+test.skipIf(process.platform === "win32")("a new key replaces the old one, which the next processes no longer see", async () => {
   typed = "first";
   await send({ type: "setCursorApiKey", ompPath: program });
   await checked();
@@ -292,7 +293,7 @@ test("a new key replaces the old one, which the next processes no longer see", a
   expect(ofType("cursorApiKey")).toEqual([{ type: "cursorApiKey", saved: true }]);
 });
 
-test("Remove API key removes the key without asking, tells the panel, checks omp once again, and the editor's own CURSOR_ACCESS_TOKEN reaches omp again", async () => {
+test.skipIf(process.platform === "win32")("Remove API key removes the key without asking, tells the panel, checks omp once again, and the editor's own CURSOR_ACCESS_TOKEN reaches omp again", async () => {
   process.env["CURSOR_ACCESS_TOKEN"] = "editor-token";
   typed = "saved-key";
   await send({ type: "setCursorApiKey", ompPath: program });
@@ -354,7 +355,7 @@ test("a key that cannot be read at activation is reported once, omp starts witho
   expect(messages).toEqual([]);
 });
 
-test("a key saved, changed or removed by another window is read again, the panel is told and omp is read again, with the check left to the wizard's webview", async () => {
+test.skipIf(process.platform === "win32")("a key saved, changed or removed by another window is read again, the panel is told and omp is read again, with the check left to the wizard's webview", async () => {
   await send({ type: "ompStatusWanted" });
   messages.length = 0;
   secrets.elsewhere("from-elsewhere");

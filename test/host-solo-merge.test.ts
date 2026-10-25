@@ -125,6 +125,10 @@ beforeEach(() => {
   other = join(base, "other");
   git(base, "init", "-q", "--bare", "-b", "main", origin);
   git(base, "clone", "-q", origin, work);
+  // Trama's own merge commit needs an identity: CI runners have none, and git cannot always guess one.
+  git(work, "config", "user.name", "Test");
+  git(work, "config", "user.email", "test@example.com");
+  git(work, "config", "commit.gpgsign", "false");
   git(work, "checkout", "-q", "-b", "main");
   commit(work, "first", { "a.txt": "one\n", "c.txt": "line\n" });
   git(work, "push", "-q", "-u", "origin", "main");

@@ -258,7 +258,7 @@ function fakeOmp(): { program: string; calls: () => number } {
   return { program, calls: () => (existsSync(counter) ? readFileSync(counter, "utf8").split("\n").filter((l) => l !== "").length : 0) };
 }
 
-test("a change of the omp path sends the status again; the status of omp that answers carries its version and the number of its models", async () => {
+test.skipIf(process.platform === "win32")("a change of the omp path sends the status again; the status of omp that answers carries its version and the number of its models", async () => {
   const { program } = fakeOmp();
   userSettings.set("ompPath", program);
   await send({ type: "ompStatusWanted" });
@@ -279,7 +279,7 @@ function fakeOmpOfVersion(version: string): string {
   return program;
 }
 
-test("an omp older than the minimum is flagged tooOld in the Settings status and in the wizard's check, with its version, and a recent one is not", async () => {
+test.skipIf(process.platform === "win32")("an omp older than the minimum is flagged tooOld in the Settings status and in the wizard's check, with its version, and a recent one is not", async () => {
   const { forgetUpdateCheck } = await import("../extension/src/host/omp-update");
   forgetUpdateCheck();
   const program = fakeOmpOfVersion("18.12.5");
@@ -300,7 +300,7 @@ test("an omp older than the minimum is flagged tooOld in the Settings status and
   expect(messages.filter((m) => m["type"] === "agentCheck").at(-1)).toEqual({ type: "agentCheck", ompPath: program, state: "done", ok: true, missing: false, version: "18.12.6", models: 1, providers: ["anthropic"] });
 });
 
-test("ompLogin from the wizard opens the login terminal with the omp of the step, saved or not, and checks omp at that path again when the command ends", async () => {
+test.skipIf(process.platform === "win32")("ompLogin from the wizard opens the login terminal with the omp of the step, saved or not, and checks omp at that path again when the command ends", async () => {
   const program = fakeOmpOfVersion("18.12.6");
   userSettings.set("ompPath", join(root, "saved-omp"));
   await send({ type: "ompLogin", provider: "anthropic", ompPath: program });
@@ -497,7 +497,7 @@ test.skipIf(process.platform === "win32")("a failed logout shows the editor erro
   expect(logoutStates().at(-1)).toBe("anthropic false");
 });
 
-test("the Settings tab asking for the model names and for the status together runs `omp models` once", async () => {
+test.skipIf(process.platform === "win32")("the Settings tab asking for the model names and for the status together runs `omp models` once", async () => {
   const { program, calls } = fakeOmp();
   userSettings.set("ompPath", program);
   await controller.open();
@@ -510,7 +510,7 @@ test("the Settings tab asking for the model names and for the status together ru
   expect(messages.filter((m) => m["type"] === "modelSuggestions")).toHaveLength(1);
 });
 
-test("omp that answers its version but gives no list says why, with no number of models", async () => {
+test.skipIf(process.platform === "win32")("omp that answers its version but gives no list says why, with no number of models", async () => {
   const program = join(root, "omp");
   writeFileSync(program, "#!/bin/sh\ncase \"$1\" in\n  models) echo 'not json' ;;\n  *) echo 'omp/18.12.6' ;;\nesac\n", { mode: 0o755 });
   userSettings.set("ompPath", program);

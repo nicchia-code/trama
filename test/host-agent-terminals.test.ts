@@ -643,13 +643,15 @@ describe("Log in to a provider", () => {
       await spied.dispatch({ type: "ompLogin", provider: "github-copilot" });
       const saved = terminals.at(-1) as FakeTerminal;
       expect(created.at(-1)).toMatchObject({ name: "Log in to GitHub Copilot", cwd: os.homedir() });
-      expect(saved.line).toBe("'/saved/omp' login github-copilot");
+      // On Windows the editor's shell of these tests (Git Bash) is replaced by Windows PowerShell, whose command starts with `&`.
+      const call = process.platform === "win32" ? "& " : "";
+      expect(saved.line).toBe(`${call}'/saved/omp' login github-copilot`);
       expect(calls).toEqual([]);
 
       await spied.dispatch({ type: "ompLogin", provider: "cursor", ompPath: "/typed/omp" });
       const typedPath = terminals.at(-1) as FakeTerminal;
       expect(typedPath).not.toBe(saved);
-      expect(typedPath.line).toBe("'/typed/omp' login cursor");
+      expect(typedPath.line).toBe(`${call}'/typed/omp' login cursor`);
 
       listeners.end.forEach((fn) => fn(shell(typedPath)));
       listeners.close.forEach((fn) => fn(typedPath));
@@ -2347,6 +2349,9 @@ describe("the agent command waits for the shell", () => {
   });
 });
 
+/** The tests that register an agent's process wait for the system to tell its start: PowerShell on Windows may take seconds. */
+const PROCESS_START_TEST_MS = 30_000;
+
 /** The registry entry of `id`, waited for: the registration reads the start of the process first, which may take a program on macOS and Windows. */
 const registered = async (p: Project, id: string) => {
   const { readAgentProcess } = await import("../src/core/agent-processes");
@@ -2399,7 +2404,7 @@ describe("the execution check of agent terminals (time.CHECK_DUE)", () => {
       noticing.dispose();
       watching.dispose();
     }
-  });
+  }, PROCESS_START_TEST_MS);
 
   test("a live agent that does nothing stays in progress, however many checks pass", async () => {
     const { watchAgentTerminal, checkAgentTerminals } = await import("../extension/src/host/agent");
@@ -2482,7 +2487,7 @@ describe("the execution check of agent terminals (time.CHECK_DUE)", () => {
       watching.dispose();
       withdrawAll(projectAt(dir));
     }
-  });
+  }, PROCESS_START_TEST_MS);
 });
 
 /** A fake `.trama` watcher whose events the test fires. */
@@ -2533,7 +2538,7 @@ describe("the minute timer of the execution check", () => {
       vi.useRealTimers();
       watching.dispose();
     }
-  });
+  }, PROCESS_START_TEST_MS);
 
   test("at rest nothing is armed, a Task taken by the agent arms the check, and the check releases it when no window follows its terminal", async () => {
     const { watchAgentTerminal } = await import("../extension/src/host/agent");
@@ -2622,7 +2627,7 @@ describe("the minute timer of the execution check", () => {
       for (const earlier of terminals) listeners.close.forEach((listener) => listener(earlier));
       watching.dispose();
     }
-  });
+  }, PROCESS_START_TEST_MS);
 });
 
 describe("Unify Drifts", () => {

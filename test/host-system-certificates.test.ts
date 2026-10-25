@@ -199,7 +199,8 @@ test("the state of the bundle goes to the webview at ready, and at every change 
   expect(states()).toEqual([last]);
 });
 
-test("Refresh of the Settings tab exports only while the saved setting is on; off, the webview is only told the state", async () => {
+// Windows has no `#!/bin/sh` programs: the tests that run the fake omp are skipped there.
+test.skipIf(process.platform === "win32")("Refresh of the Settings tab exports only while the saved setting is on; off, the webview is only told the state", async () => {
   await send({ type: "refreshSystemCertificates" });
   expect(source.reads).toBe(0);
   expect(states()).toEqual([{ exporting: false }]);
@@ -212,7 +213,7 @@ test("Refresh of the Settings tab exports only while the saved setting is on; of
   expect(configuredSystemCertificates()).toBe(true);
 });
 
-test("after an export the Settings tab and the wizard's check run again in silence, and omp started afterwards receives the bundle", async () => {
+test.skipIf(process.platform === "win32")("after an export the Settings tab and the wizard's check run again in silence, and omp started afterwards receives the bundle", async () => {
   userSettings.set("systemCertificates", true);
   await send({ type: "refreshSystemCertificates" });
   expect(ofType("ompStatus").map((m) => m["state"])).toEqual(["checking", "done"]);
@@ -252,7 +253,7 @@ test("a second request while an export of this window runs does nothing", async 
   expect(systemCertificatesState().exporting).toBe(false);
 });
 
-test("a failed export keeps the earlier bundle and its count and time, and tells the webview why", async () => {
+test.skipIf(process.platform === "win32")("a failed export keeps the earlier bundle and its count and time, and tells the webview why", async () => {
   userSettings.set("systemCertificates", true);
   await send({ type: "refreshSystemCertificates" });
   const before = readFileSync(bundlePath(), "utf8");
@@ -303,7 +304,7 @@ test("an automatic export that fails warns once with Open Settings, and Open Set
   expect(warnings[1]?.text.startsWith("Trama: could not export the system certificates: no certificate authority found. Using the ones exported ")).toBe(true);
 });
 
-test("turning the mode on exports the bundle; turning it off exports nothing, leaves the bundle on disk and checks omp again", async () => {
+test.skipIf(process.platform === "win32")("turning the mode on exports the bundle; turning it off exports nothing, leaves the bundle on disk and checks omp again", async () => {
   await controller.open();
   userSettings.set("systemCertificates", true);
   await controller.systemCertificatesChanged();
@@ -322,7 +323,7 @@ test("turning the mode on exports the bundle; turning it off exports nothing, le
   expect(ofType("ompStatus").map((m) => m["state"])).toEqual(["checking", "done"]);
 });
 
-test("the wizard's step value counts for its own check: on gives omp the bundle although the saved setting is off, and off takes it away although the saved setting is on", async () => {
+test.skipIf(process.platform === "win32")("the wizard's step value counts for its own check: on gives omp the bundle although the saved setting is off, and off takes it away although the saved setting is on", async () => {
   userSettings.set("systemCertificates", true);
   await send({ type: "refreshSystemCertificates" });
   const path = bundlePath();
@@ -341,7 +342,7 @@ test("the wizard's step value counts for its own check: on gives omp the bundle 
   expect(omp("models --json").at(-1)).toBe(path);
 });
 
-test("a certificate error in the models list of a check reads in plain words in the wizard's check, with the step's mode", async () => {
+test.skipIf(process.platform === "win32")("a certificate error in the models list of a check reads in plain words in the wizard's check, with the step's mode", async () => {
   const failing = join(root, "omp-failing");
   writeFileSync(failing, "#!/bin/sh\ncase \"$1\" in\n  models) echo 'Error: SELF_SIGNED_CERT_IN_CHAIN' >&2; exit 1 ;;\n  update) echo 'Current version: 18.12.6'; echo 'Already up to date' ;;\n  *) echo 'omp/18.12.6' ;;\nesac\n");
   chmodSync(failing, 0o755);
