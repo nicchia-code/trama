@@ -139,3 +139,17 @@ test("#123 and @handle are links only with the project's GitHub repository, and 
   );
   expect(inline.container.querySelector("a")?.title).toBe("https://github.com/acme/shop/issues/5");
 });
+
+test("an Enterprise Managed Users handle is a link to the profile; a name with two underscores stays text", () => {
+  const opened: string[] = [];
+  const { container } = render(
+    <GithubRepoContext.Provider value="acme/shop">
+      <Markdown source="**Reviewer:** @32984238_EYGS and @two_under_scores" openLink={(url) => opened.push(url)} />
+    </GithubRepoContext.Provider>,
+  );
+  const links = Array.from(container.querySelectorAll("a"));
+  expect(links.map((a) => [a.textContent, a.title])).toEqual([["@32984238_EYGS", "https://github.com/32984238_EYGS"]]);
+  fireEvent.click(links[0] as HTMLAnchorElement);
+  expect(opened).toEqual(["https://github.com/32984238_EYGS"]);
+  expect(container.textContent).toBe("Reviewer: @32984238_EYGS and @two_under_scores");
+});

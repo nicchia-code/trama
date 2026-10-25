@@ -348,8 +348,9 @@ function githubReference(s: string, at: number): { node: Inline; end: number } |
     const end = at + 1 + number.length;
     return isWord(s[end]) || s[end] === "_" ? null : { node: { t: "issue", n: Number.parseInt(number, 10) }, end };
   }
-  // A user name: 1 to 39 letters, digits or single hyphens, never starting or ending with a hyphen.
-  const name = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*/.exec(s.slice(at + 1, at + 42))?.[0];
+  // A user name, as the `GitHub handle` of a person: 1 to 39 letters, digits or single hyphens, never starting or ending with a hyphen,
+  // then an optional `_shortcode` of letters and digits (GitHub Enterprise Managed Users, `32984238_EYGS`).
+  const name = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*(?:_[A-Za-z0-9]+)?/.exec(s.slice(at + 1, at + 42))?.[0];
   if (name === undefined || name.length > 39) return null;
   const end = at + 1 + name.length;
   const next = s[end];

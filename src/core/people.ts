@@ -26,7 +26,7 @@ export const ABSENCE_KEEP_DAYS = 90;
 export const PERSON_MESSAGES = {
   name: "Enter a name of 1 to 80 characters.",
   handleSpace: "A GitHub handle can't contain spaces.",
-  handle: "Use 1 to 39 letters, digits or single hyphens.",
+  handle: "Use 1 to 39 letters, digits, single hyphens and an optional _shortcode.",
   capacity: "Enter 0.5 to 5 days, in steps of 0.5.",
   skills: "At most 20 skills.",
   skill: "Each skill takes 1 to 30 characters.",
@@ -70,7 +70,7 @@ export interface PersonInput {
 }
 
 export const PERSON_ID = /^[a-z0-9]{8}$/;
-const HANDLE = /^[A-Za-z0-9](?:-?[A-Za-z0-9])*$/;
+const HANDLE = /^[A-Za-z0-9](?:-?[A-Za-z0-9])*(?:_[A-Za-z0-9]+)?$/;
 const REPOSITORY = /^[a-z0-9._-]+\/[a-z0-9._-]+$/;
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 

@@ -229,11 +229,22 @@ test("GitHub references: #123 and @handle at the start of a word; never inside a
   expect(parseInline("(#7) and [@a]")).toEqual([text("("), issue(7), text(") and ["), user("a"), text("]")]);
   expect(parseInline("#1 @a")).toEqual([issue(1), text(" "), user("a")]);
   expect(parseInline("write to me@example.com or a#12 or issue#3 or #12abc or #0 or #")).toEqual([text("write to me@example.com or a#12 or issue#3 or #12abc or #0 or #")]);
-  expect(parseInline("@-bad @bad- @a--b @under_score @" + "x".repeat(40))).toEqual([
+  expect(parseInline("@-bad @bad- @a--b @two_under_scores @a_ @_x @" + "x".repeat(40))).toEqual([
     text("@-bad "),
     user("bad"),
-    text("- @a--b @under_score @" + "x".repeat(40)),
+    text("- @a--b @two_under_scores @a_ @_x @" + "x".repeat(40)),
   ]);
+  // An Enterprise Managed Users handle: a name, `_`, a shortcode of letters and digits, 39 characters in all.
+  expect(parseInline("**Reviewer:** @32984238_EYGS, @octo-cat_Corp.")).toEqual([
+    { t: "strong", c: [text("Reviewer:")] },
+    text(" "),
+    user("32984238_EYGS"),
+    text(", "),
+    user("octo-cat_Corp"),
+    text("."),
+  ]);
+  expect(parseInline("@" + "x".repeat(30) + "_" + "y".repeat(8))).toEqual([user("x".repeat(30) + "_" + "y".repeat(8))]);
+  expect(parseInline("@" + "x".repeat(30) + "_" + "y".repeat(9))).toEqual([text("@" + "x".repeat(30) + "_" + "y".repeat(9))]);
   expect(parseInline("@" + "x".repeat(39))).toEqual([user("x".repeat(39))]);
   expect(parseInline("`#12 @a` and \\#12")).toEqual([{ t: "code", text: "#12 @a" }, text(" and #12")]);
   // A reference inside a link label stays the label's text.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1-beta.3
+
+- GitHub Enterprise Managed Users handles (`rules#person`, `ui#panel`): the `GitHub handle` of a person accepts, after letters, digits and single hyphens, an optional `_` and a shortcode of letters and digits (`32984238_EYGS`), 39 characters in all; any other underscore is refused with `Use 1 to 39 letters, digits, single hyphens and an optional _shortcode.` (`HANDLE` and `PERSON_MESSAGES.handle` in `src/core/people.ts`). The panel's Markdown links `@<handle>` with such a suffix to the user's GitHub page like any other handle (`extension/src/webview/markdown.tsx`), so the `**Reviewer:**` line of an issue preview shows the reviewer as a link.
+
 ## 0.1.1-beta.2
 
 - Fixes for the tests that stopped the 0.1.1-beta.1 Windows package: `ghSearchFolders` (`src/core/github.ts`) splits the PATH by the separator of the platform it is given (`;` on Windows, `:` elsewhere) instead of the one of the machine it runs on, the test of `findGh` builds its PATH and the file name (`gh.exe` on Windows) for the machine it runs on, and the tests of what changed under a published issue edit the example's Model as LF text, as a CRLF checkout reads it.

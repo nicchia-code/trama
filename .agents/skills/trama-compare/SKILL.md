@@ -11,7 +11,7 @@ Read nothing else about the project. Do not run `trama task list`, `trama drift 
 
 ## Briefing
 
-1. Run `trama comparison new <machine> --input -` with a JSON object on standard input, for example `trama comparison new <machine> --input - <<'JSON'` and `{"refs":["<ref>"]}` and `JSON`. `refs` are the references your instruction gives (none: the whole Machine); each must belong to the Machine. The command announces the comparison and prints its ID first, then the references, the State tree, the Events with their receivers, the Transitions, the Requirement sections that apply, the `analyze` warnings, and the open and resolved cards on those references.
+1. Run `trama comparison new <machine> --input -` with a JSON object on standard input, for example `trama comparison new <machine> --input - <<'JSON'` and `{"refs":["<ref>"]}` and `JSON`. `refs` are the references your instruction gives (none: the whole Machine); each must belong to the Machine. The command announces the comparison and prints its ID first, then the references, the State tree, the Events with their receivers, the Transitions, the Requirement sections that apply, the `analyze` warnings, the open and resolved cards on those references and, when published issues have references there, the section `## Published issues`.
 2. Keep the comparison ID: you pass it to `comparison move`.
 3. If the command refuses (unknown Machine or reference), report it and stop.
 
@@ -51,6 +51,7 @@ Your comparison has a ghost on the Board, named by the ID `comparison new` print
 
 - Re-read the code at the place you will cite in `where` before filing. File only if that code really does what `happens` says.
 - A difference that a resolved Drift in the briefing closed stays closed while the Model or Requirement says the same. If it is back after a fix, set `previous` to that resolved Drift's ID. A Drift resolved as `unified` was merged into another Drift without any decision: it is not a resolved Drift in this sense, never a `previous`, and the unified Drift that took its place is the one that counts.
+- **Published issues.** When the briefing has a section `## Published issues`, each line is an issue the team received from Trama about references of this comparison, with its number, title and where it is on GitHub. A Drift you file on one of those references names the issue (`#<n>`) in its title or in `happens`, and its first Fix option is to fix the code to what the Model says: the issue was published from that text, so the code is what is wrong. An issue that is `Closed` or `In review` is a reason to check those references with more care, not a reason to skip them.
 - `happens` and `should` say what the System does and what it should do, in domain words. Name no variable, function, class, field or file unless unavoidable (then as `inline code`). Code locations go only in `where`.
 - Give two to five `options`, the recommended first, each a different way to reach what should happen without changing the Model or any Requirement. Each option has a short `title` and about 60 words of `text` (what it changes and costs), in short Markdown without headings or tables.
 - Drift titles: at most five words, about 40 characters, in English.

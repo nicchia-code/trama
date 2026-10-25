@@ -91,10 +91,20 @@ test("a person is checked field by field with the messages of rules#person, and 
 test("a missing date of an absence is told as such, and a handle of another shape gets the generic message", () => {
   const missing = checkPerson(input({ absences: [{ from: "2026-05-01", to: "" }] }), [], "2026-10-25");
   expect(missing.ok ? null : missing.errors.absences?.message).toBe("Enter both dates.");
-  for (const handle of ["-ada", "ada-", "a--b", "a_b", "x".repeat(40), "@", ""]) {
+  expect(PERSON_MESSAGES.handle).toBe("Use 1 to 39 letters, digits, single hyphens and an optional _shortcode.");
+  for (const handle of ["-ada", "ada-", "a--b", "_acme", "octocat_", "octo_cat_acme", "octo-_acme", "octocat-_acme", "octocat_a-b", "a__b", "octocat_acme_", "x".repeat(40), `${"x".repeat(30)}_${"y".repeat(9)}`, "@", "@_acme", ""]) {
     const result = checkPerson(input({ handle }), [], "2026-10-25");
     expect(result.ok ? null : result.errors.handle).toBe(PERSON_MESSAGES.handle);
   }
+});
+
+test("a handle of GitHub Enterprise Managed Users, <name>_<shortcode>, is valid, with the leading @ dropped", () => {
+  for (const [written, kept] of [["32984238_EYGS", "32984238_EYGS"], ["octocat", "octocat"], ["octo-cat_acme", "octo-cat_acme"], [" @32984238_EYGS ", "32984238_EYGS"], ["a_b", "a_b"], ["x".repeat(39), "x".repeat(39)], [`${"x".repeat(30)}_${"y".repeat(8)}`, `${"x".repeat(30)}_${"y".repeat(8)}`]] as const) {
+    const result = checkPerson(input({ handle: written }), [], "2026-10-25");
+    expect(result.ok ? result.person.handle : result.errors).toBe(kept);
+  }
+  const spaced = checkPerson(input({ handle: "octo cat_acme" }), [], "2026-10-25");
+  expect(spaced.ok ? null : spaced.errors.handle).toBe(PERSON_MESSAGES.handleSpace);
 });
 
 test("the capacity goes from 0.5 to 5 in steps of 0.5", () => {
@@ -137,6 +147,14 @@ test("two people never share a handle, compared without case, but a person keeps
   expect(checkPerson(input({ id: "ab12cd34", handle: "ada" }), others, "2026-10-25").ok).toBe(true);
 });
 
+test("the suffix counts when two handles are compared, without case", () => {
+  const others = [{ id: "ab12cd34", handle: "32984238_EYGS" }];
+  const taken = checkPerson(input({ handle: "@32984238_eygs" }), others, "2026-10-25");
+  expect(taken.ok ? null : taken.errors.handle).toBe(handleTaken("32984238_eygs"));
+  expect(checkPerson(input({ handle: "32984238" }), others, "2026-10-25").ok).toBe(true);
+  expect(checkPerson(input({ handle: "32984238_OTHER" }), others, "2026-10-25").ok).toBe(true);
+});
+
 test("a level outside junior, mid and senior is refused", () => {
   const result = checkPerson({ ...input(), level: "lead" as never }, [], "2026-10-25");
   expect(result.ok ? null : result.errors.level).toBe(PERSON_MESSAGES.level);
@@ -158,6 +176,9 @@ test("a stored person must match the shape and the rules exactly", () => {
   expect(personSchema.safeParse(person()).success).toBe(true);
   expect(personSchema.safeParse(person({ id: "AB12CD34" })).success).toBe(false);
   expect(personSchema.safeParse(person({ handle: "@ada" })).success).toBe(false);
+  expect(personSchema.safeParse(person({ handle: "32984238_EYGS" })).success).toBe(true);
+  expect(personSchema.safeParse(person({ handle: "octo_cat_acme" })).success).toBe(false);
+  expect(personSchema.safeParse(person({ handle: "octocat_" })).success).toBe(false);
   expect(personSchema.safeParse(person({ name: " Ada" })).success).toBe(false);
   expect(personSchema.safeParse(person({ capacity: 5.5 })).success).toBe(false);
   expect(personSchema.safeParse(person({ skills: ["Go", "go"] })).success).toBe(false);
