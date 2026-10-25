@@ -6,7 +6,7 @@ const none = { model: "", scan: "" };
 const all = { model: "opus", scan: "it's" };
 
 test("each instruction's terminal name gives its model role", () => {
-  expect(["Design", "Setup", "Import", "Drifts", "Scan", "T3", "All tasks", "abc12345"].map(roleOf)).toEqual(["analysis", "analysis", "analysis", "analysis", "scan", "execution", "execution", "execution"]);
+  expect(["Design", "Setup", "Import", "Drifts", "Scan", "T3", "All tasks", "abc12345", "Handoff", "Split P3", "Publish P3", "Scan #126", "Update #126"].map(roleOf)).toEqual(["analysis", "analysis", "analysis", "analysis", "scan", "execution", "execution", "execution", "analysis", "analysis", "execution", "scan", "execution"]);
 });
 
 test("omp uses the scan role for Machine comparison and takes the run's model", () => {

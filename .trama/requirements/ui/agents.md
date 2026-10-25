@@ -10,6 +10,7 @@ description: "Usa quando mostri richieste di design, terminale dell'agente, agen
 - Testo fantasma, solo visivo e mai nel file, all'inizio della prima riga, grigio (il colore del testo disattivato del tema dell'editor), su una sola riga:
   - richiesta di design (+ Add Work Item): «Describe the change to design: behaviour, edge cases, requirements. Paste or drop images for context. Close this tab or press Send to agent when you are done.»
   - richiesta di setup: «Describe the application to build: what it does and who it is for. Paste or drop images for context. Close this tab or press Send to agent when you are done.»
+  - handoff request (`New handoff` of the Team view, `ui#proposal/Open`): «Describe the work to give your team: what should change, for whom, any deadline or constraint. Close this tab or press Send to agent when you are done.»
 - Il testo fantasma si vede solo sulle schede delle richieste mai inviate e solo finché il documento non ha nessun carattere (nemmeno uno spazio o un a capo). Sparisce alla prima battuta e torna se il developer cancella tutto; non si vede mai su una richiesta inviata. È in inglese e non segue `trama.language`.
 - Dopo l'invio non compare nessun messaggio di conferma oltre a quelli della consegna; la scheda è chiusa. Chiudere una richiesta vuota non mostra nessun messaggio.
 

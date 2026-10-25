@@ -1,8 +1,10 @@
+import { PERSON_ID, type PersonInput } from "../../../src/core/people";
 import type { Raw } from "../../../src/core/schema";
 import type { AgentAction, ToHost } from "../protocol";
 import type { QuestionAction } from "./question-state";
 import { type SettingSchema, type SettingValue, settingValueError } from "./settings-schema";
 import { safeLink } from "../../../src/core/links";
+import { isFieldKey } from "../../../src/core/issues";
 import { isSafeRelativePath } from "./folder-tree";
 import { STEP_KEYS } from "../webview/wizard/logic";
 import { ompLoginProvider } from "../omp-login";
@@ -88,6 +90,8 @@ function parseConfirmSetup(raw: Raw, settings: readonly SettingSchema[]): Parsed
     solo = SOLO_KINDS.find((kind) => kind === raw["solo"]);
     if (solo === undefined || mode === "settings") return bad("confirmSetup has a Solo mode that is not off, folders or files, or the mode has none");
   }
+  if (raw["manager"] !== undefined && typeof raw["manager"] !== "boolean") return bad("confirmSetup has a Manager mode that is not true or false");
+  const manager = raw["manager"] as boolean | undefined;
   const excluded = raw["excluded"];
   if (!Array.isArray(excluded) || excluded.length > MAX_EXCLUDED || !excluded.every((path) => typeof path === "string" && isSafeRelativePath(path))) return bad("confirmSetup needs the excluded paths, each inside the folder");
   return {
@@ -99,9 +103,36 @@ function parseConfirmSetup(raw: Raw, settings: readonly SettingSchema[]): Parsed
       ...(mode === "first" ? { root: raw["root"] as string } : {}),
       values,
       ...(solo === undefined ? {} : { solo }),
+      ...(manager === undefined ? {} : { manager }),
       excluded: excluded as string[],
     },
   };
+}
+
+const MAX_PERSON_LIST = 1000;
+const MAX_PERSON_TEXT = 1000;
+
+/**
+ * `savePerson`'s person: only its shape is checked here (strings, a number, lists of a sane size); the values are checked against `rules#person` by the host, which
+ * answers with the message of each invalid field.
+ */
+function parsePersonInput(value: unknown): PersonInput | string {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return "savePerson needs a person";
+  const raw = value as Raw;
+  const text = (field: unknown): field is string => typeof field === "string" && field.length <= MAX_PERSON_TEXT;
+  const { id, name, handle, level, skills, capacity, absences } = raw;
+  if (id !== undefined && !(typeof id === "string" && PERSON_ID.test(id))) return "savePerson needs the ID of a person, or none for a new one";
+  if (!text(name) || !text(handle) || !text(level)) return "savePerson needs the name, the handle and the level of the person as texts";
+  if (typeof capacity !== "number") return "savePerson needs the capacity of the person as a number";
+  if (!Array.isArray(skills) || skills.length > MAX_PERSON_LIST || !skills.every(text)) return "savePerson needs the skills of the person as a list of texts";
+  if (!Array.isArray(absences) || absences.length > MAX_PERSON_LIST) return "savePerson needs the absences of the person as a list";
+  const parsed: PersonInput["absences"] = [];
+  for (const absence of absences) {
+    const entry = absence as Raw | null;
+    if (typeof entry !== "object" || entry === null || !text(entry["from"]) || !text(entry["to"])) return "savePerson needs each absence as a from and a to text";
+    parsed.push({ from: entry["from"], to: entry["to"] });
+  }
+  return { ...(id === undefined ? {} : { id }), name, handle, level: level as PersonInput["level"], skills, capacity, absences: parsed };
 }
 
 /** The wizard step's `systemCertificates` of `agentCheckWanted`, `installOmp` and `ompLogin`: absent, or a boolean; anything else is a reason the message is refused. */
@@ -124,6 +155,7 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
   switch (type) {
     case "ready":
     case "writeDesignRequest":
+    case "writeHandoffRequest":
     case "refineAll":
     case "cancelRefineAll":
       return { ok: true, message: { type } };
@@ -212,6 +244,29 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
       const proposal = typeof raw["proposal"] === "string" && ID.test(raw["proposal"]) ? raw["proposal"] : undefined;
       return proposal === undefined ? bad("reworkProposal needs a valid Proposal ID") : { ok: true, message: { type, proposal } };
     }
+    case "publishAgain": {
+      const handoff = typeof raw["handoff"] === "string" && ID.test(raw["handoff"]) ? raw["handoff"] : undefined;
+      return handoff === undefined ? bad("publishAgain needs a valid handoff ID") : { ok: true, message: { type, handoff } };
+    }
+    case "splitIssue": {
+      const handoff = typeof raw["handoff"] === "string" && ID.test(raw["handoff"]) ? raw["handoff"] : undefined;
+      const issue = typeof raw["issue"] === "string" && ID.test(raw["issue"]) ? raw["issue"] : undefined;
+      return handoff === undefined || issue === undefined ? bad("splitIssue needs a valid handoff ID and a valid issue ID") : { ok: true, message: { type, handoff, issue } };
+    }
+    case "askIssueUpdate":
+    case "scanIssue": {
+      const issue = typeof raw["issue"] === "string" && ID.test(raw["issue"]) ? raw["issue"] : undefined;
+      return issue === undefined ? bad(`${type} needs a valid issue ID`) : { ok: true, message: { type, issue } };
+    }
+    case "setIssueField": {
+      const handoff = typeof raw["handoff"] === "string" && ID.test(raw["handoff"]) ? raw["handoff"] : undefined;
+      const issue = typeof raw["issue"] === "string" && ID.test(raw["issue"]) ? raw["issue"] : undefined;
+      const key = typeof raw["key"] === "string" && isFieldKey(raw["key"]) && raw["key"].length <= 200 ? raw["key"] : undefined;
+      const value = raw["value"];
+      const fits = value === null || (typeof value === "string" && value.length <= 5_000) || (typeof value === "number" && Number.isFinite(value));
+      if (handoff === undefined || issue === undefined || key === undefined || !fits) return bad("setIssueField needs a valid handoff ID, a valid issue ID, a field of an issue and a text, a number or null");
+      return { ok: true, message: { type, handoff, issue, key, value: value as string | number | null } };
+    }
     case "reworkDrift": {
       const drift = typeof raw["drift"] === "string" && ID.test(raw["drift"]) ? raw["drift"] : undefined;
       return drift === undefined ? bad("reworkDrift needs a valid Drift ID") : { ok: true, message: { type, drift } };
@@ -262,6 +317,29 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
       const solo = SOLO_KINDS.find((kind) => kind === raw["solo"]);
       return solo === undefined ? bad("setSoloMode needs a Solo mode: off, folders or files") : { ok: true, message: { type, solo } };
     }
+    case "setManagerMode":
+      return typeof raw["on"] === "boolean" ? { ok: true, message: { type, on: raw["on"] } } : bad("setManagerMode needs on: true or false");
+    case "savePerson": {
+      const person = parsePersonInput(raw["person"]);
+      return typeof person === "string" ? bad(person) : { ok: true, message: { type, person } };
+    }
+    case "addToTeam":
+    case "removeFromTeam":
+    case "undoRemoveFromTeam":
+    case "deletePerson": {
+      const person = typeof raw["id"] === "string" && PERSON_ID.test(raw["id"]) ? raw["id"] : undefined;
+      return person === undefined ? bad(`${type} needs the ID of a person`) : { ok: true, message: { type, id: person } };
+    }
+    case "linkGitHubProject": {
+      const { owner, number } = raw as { owner?: unknown; number?: unknown };
+      if (typeof owner !== "string" || owner === "" || typeof number !== "number" || !Number.isInteger(number) || number < 1) return bad("linkGitHubProject needs the owner of a Project and its number, a positive integer");
+      return { ok: true, message: { type, owner, number } };
+    }
+    case "unlinkGitHubProject":
+    case "refreshTeam":
+    case "logInGitHub":
+    case "showGitHubDetails":
+      return { ok: true, message: { type } };
     default:
       return bad(`unknown message type "${type}"`);
   }

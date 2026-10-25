@@ -6,6 +6,7 @@
 !dist/webview.js
 !dist/omp-chat.js
 !dist/menu.js
+!dist/mermaid.js
 !dist/omp-hook.js
 !bin/**
 !media/**

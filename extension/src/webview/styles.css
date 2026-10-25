@@ -140,3 +140,11 @@
 .md table { border-collapse: collapse; }
 .md th, .md td { max-width: 20rem; overflow-wrap: break-word; padding: .25em .5em; border-bottom: 1px solid var(--border); vertical-align: top; }
 .md th { font-weight: 700; background: color-mix(in oklab, var(--background), black 6%); }
+/* Task lists: the item's checkbox sits where the marker would. */
+.md li.md-task { display: flex; align-items: baseline; gap: .4em; list-style: none; margin-left: -1.5em; }
+.md li.md-task > input { flex: none; margin: 0; }
+.md li.md-task > div { min-width: 0; flex: 1; }
+/* Diagrams: at most as wide as the text and never larger than their natural size; a wider one scrolls inside its own box, like a table. */
+.md .md-diagram { max-width: 100%; overflow-x: auto; margin: 0 0 .6em; }
+.md .md-diagram > svg { display: block; max-width: none; height: auto; }
+.md .md-diagram-drawing { margin: 0 0 .6em; color: var(--muted-foreground); }

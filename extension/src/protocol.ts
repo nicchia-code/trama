@@ -1,3 +1,8 @@
+import type { GhProblemKind, LinkedProject, ProjectChoice, ProjectFields } from "../../src/core/github";
+import type { IssueActions, IssueOnGitHub, IssueSignals } from "../../src/core/timeline";
+import type { OpenLoad } from "../../src/core/sprints";
+import type { PersonErrors, PersonInput, PersonView } from "../../src/core/people";
+import type { Origin } from "../../src/core/manager-mode";
 import type { SoloKind } from "../../src/core/solo-mode";
 import type { AnnouncementView, Snapshot } from "../../src/core/snapshot";
 import type { BoardModels } from "./host/proposal-models";
@@ -68,12 +73,13 @@ export type SetupChoice = "import" | "scratch";
 /** The three modes of the setup wizard: the first setup of a folder without a project, the settings of a project, a project with an empty Model. */
 export type SetupMode = "first" | "settings" | "empty-model";
 
-/** One workspace folder as the wizard lists it: `hasFiles` when its first level holds a file or a folder whose name does not start with a dot; `inGit` when it is inside a git working tree (Solo mode needs one). */
+/** One workspace folder as the wizard lists it: `hasFiles` when its first level holds a file or a folder whose name does not start with a dot; `inGit` when it is inside a git working tree (Solo mode needs one); `origin` what its `origin` remote says (Manager mode needs a repository on GitHub). */
 export interface WorkspaceFolderView {
   name: string;
   root: string;
   hasFiles: boolean;
   inGit: boolean;
+  origin: Origin;
 }
 
 /** An agent instruction file the wizard's omp step warns about: the label is shown, the absolute path is what opening it asks for. */
@@ -96,6 +102,8 @@ export type ToHost =
   | { type: "launch"; action: Exclude<AgentAction, { kind: "scan" | "mergeScan" | "reconcileMerge" }> }
   /** + Add Work Item: the host opens the Markdown document of a written design request. */
   | { type: "writeDesignRequest" }
+  /** `New handoff` of the Team view: the host opens the Markdown document of a handoff request, only while Team is available; otherwise a warning says why. */
+  | { type: "writeHandoffRequest" }
   /** Ask more on a card of the Board's details windows: the host reads the card from its files at the click and opens a new chat about it. Never refused for other work. */
   | { type: "askMore"; kind: "task" | "proposal" | "drift"; id: string }
   /** What the developer did on the overlay of question round `round`; the host answers with the new state. */
@@ -115,6 +123,20 @@ export type ToHost =
   | { type: "rejectProposal"; id: string }
   /** «Rework with feedback…» of Reject's arrow: the host asks the developer what to change, rejects the Proposal and has the agent redo it. */
   | { type: "reworkProposal"; proposal: string }
+  /** «Publish again» of the Issues tab: the host asks the agent to publish the issues of the approved handoff `handoff` that are not published, only while Team is available and a GitHub Project is linked; when the instruction does not leave, nothing changes and a `notice` says why. */
+  | { type: "publishAgain"; handoff: string }
+  /** «Split» on an issue estimated more than three days of an open handoff: the host rechecks the reasons Split is unavailable, in order, and asks the agent to split the issue into issues that each fit a sprint, on the same handoff; when the instruction does not leave, nothing changes and a `notice` says why. */
+  | { type: "splitIssue"; handoff: string; issue: string }
+  /** «Comment update» of the Issues tab, on a published open issue the Model changed under (`developer.ASK_ISSUE_UPDATE`): `issue` is the issue's identity. The host rechecks that the issue is published, open and stale and that Team is available and no job of its own or Run of this window is in progress, and asks the agent to comment on it what changed; when the instruction does not leave, nothing changes and a `notice` says why. */
+  | { type: "askIssueUpdate"; issue: string }
+  /** «Scan» of the Issues tab, on a published issue that is `Closed` (`developer.SCAN_ISSUE`): `issue` is the issue's identity. The host rechecks Team and the Run and asks the agent to compare only the references of the issue with the code; when the instruction does not leave, nothing changes and a `notice` says why. */
+  | { type: "scanIssue"; issue: string }
+  /**
+   * The Manager changed a field of an issue of an open handoff in the issue preview (`developer.CHANGE_ISSUE_FIELD`): `key` is `assignee`, `reviewer`, `estimate`, `sprint` or `fields.<name>`; `value` is the handle,
+   * the sprint's title, the option or text chosen, a number of days for `estimate`, or null for nobody, no sprint or no value. The host checks the value against the team and the linked Project it read, writes
+   * it in `manager` of the issue's file only, and answers with a fresh picture; a value it refuses changes nothing and is answered with `issueFieldRejected`. Undo sends the agent's own value.
+   */
+  | { type: "setIssueField"; handoff: string; issue: string; key: string; value: string | number | null }
   /** «Rework with feedback…» of Dismiss Drift's arrow: the host asks the developer for feedback and has the agent resolve the Drift following it. */
   | { type: "reworkDrift"; drift: string }
   /** The developer confirmed the model field of a Proposal's model window: the host saves `model` for that Proposal (an empty text forgets it). */
@@ -133,6 +155,28 @@ export type ToHost =
   | { type: "setSetting"; key: string; value: SettingValue }
   /** The developer changed the `Solo Mode` row of the Settings tab: the host writes it into the project (`.trama/solo/` and git's local `info/exclude`) and answers with `soloMode`, also when the write failed. Not a setting of the editor. */
   | { type: "setSoloMode"; solo: SoloKind }
+  /** The developer changed the `Manager Mode` row of the Settings tab: the host writes it into the project (`.trama/manager/mode.json` only) and answers with `managerMode`, also when the write failed. Not a setting of the editor. */
+  | { type: "setManagerMode"; on: boolean }
+  /** `Save` of the person's dialog (`developer.EDIT_PERSON`; a new person has no `id`): the host checks every field again, refuses an invalid person with `personRejected` and writes nothing, otherwise saves it (a new person in the team of this project) and answers with `team`. Only while Team is available. */
+  | { type: "savePerson"; person: PersonInput }
+  /** `Add from other projects` (`developer.ADD_TO_TEAM`): the host puts the person in the team of this project. */
+  | { type: "addToTeam"; id: string }
+  /** `Remove from team` (`developer.REMOVE_FROM_TEAM`): the host takes the person out of the team of this project at once, with no confirmation. */
+  | { type: "removeFromTeam"; id: string }
+  /** `Undo` of the notice of `Remove from team`: the host puts the person back in the team of this project. */
+  | { type: "undoRemoveFromTeam"; id: string }
+  /** `Delete person` (`developer.DELETE_PERSON`): the host asks for confirmation in a modal dialog and only then deletes the person from the Manager's list and from every team. */
+  | { type: "deletePerson"; id: string }
+  /** `Link` of the GitHub Project picker (`developer.LINK_GITHUB_PROJECT`): the host links the Project `owner`/`number` only if it is one of the Projects it read and has an iteration field; the title and the iteration field are the host's, never the webview's. A failed write changes nothing and a `notice` says why. Only while Team is available. */
+  | { type: "linkGitHubProject"; owner: string; number: number }
+  /** `Unlink` of the Project's popover (`developer.UNLINK_GITHUB_PROJECT`): the host deletes the local record of the linked Project; nothing changes on GitHub. */
+  | { type: "unlinkGitHubProject" }
+  /** `Refresh` and `Retry` of the Team view (`developer.REFRESH_TEAM`): the host reads GitHub again, unless a read is running. */
+  | { type: "refreshTeam" }
+  /** `Log in to GitHub` and `Give access` (`developer.LOG_IN_GITHUB`): the host opens a visible terminal that logs `gh` in, or gives it access to Projects when it is logged in without it; at the end of the command it reads GitHub again. */
+  | { type: "logInGitHub" }
+  /** `Show details` of the box `Couldn't read the GitHub Project`: the host opens Trama's output channel on everything `gh` said. */
+  | { type: "showGitHubDetails" }
   /** The developer followed an http or https link in a rendered text: the host opens it in the system browser. */
   | { type: "openLink"; url: string }
   /** The developer chose a preview of an image of a Task: the host opens that file whole in an editor tab, only if it is an image the Task has. */
@@ -173,12 +217,12 @@ export type ToHost =
    * The developer confirmed the summary of the wizard. `values` holds only the keys that changed, in the order of the steps; `excluded` the
    * paths left out of the import. The host saves the keys, then (first setup) initializes `root`, then carries on with `choice`.
    */
-  | { type: "confirmSetup"; mode: SetupMode; choice?: SetupChoice; root?: string; values: { key: string; value: SettingValue }[]; excluded: string[]; solo?: SoloKind }
+  | { type: "confirmSetup"; mode: SetupMode; choice?: SetupChoice; root?: string; values: { key: string; value: SettingValue }[]; excluded: string[]; solo?: SoloKind; manager?: boolean }
   /** The panel now shows `view`: the host tells the side menu, which highlights that entry. */
   | { type: "viewChanged"; view: ViewName };
 
 /** The views of the panel, which has no tab bar: the side menu, the commands `Trama: Show <view>` and the internal links choose among them. Without a project only `getstarted` and `settings` exist. */
-export type ViewName = "getstarted" | "diagram" | "board" | "requirements" | "specs" | "history" | "settings";
+export type ViewName = "getstarted" | "diagram" | "board" | "requirements" | "specs" | "history" | "team" | "settings";
 
 /** What a View button or a reference chip asks a tab to focus: a Proposal in Backlog, a Task in Active, or one reference (the focus of a Task that had only that reference). */
 export type FocusRequest = { kind: "proposal"; id: string } | { kind: "task"; id: string } | { kind: "ref"; ref: string };
@@ -199,7 +243,7 @@ export interface NavigateOptions {
 /** Host -> webview. */
 export type ToWebview =
   /** `asking`: a question round is open; `resolve` reports the blocker, why every Run is disabled, per open Drift the reason its Resolve is disabled (null when it works), and the open Drifts the running resolution is working on (`resolving`). `unify.blockers` are all the reasons Unify Drifts is unavailable, in order (empty when it works), and `unify.unifying` the open Drifts the running Unify Drifts agent works on. `models` carries the models chosen for the Proposals that carry Tasks. `refinement` is the state of the Proposal refinement (absent: off); see `RefinementView`. `runEstimate` is the time left of the Run all of this window; see `RunEstimateView`. */
-  | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; running?: boolean; drifts: Record<string, string | null>; resolving: string[] }; unify: { blockers: string[]; unifying: string[] }; models: BoardModels; refinement?: RefinementView; runEstimate: RunEstimateView }
+  | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; running?: boolean; drifts: Record<string, string | null>; resolving: string[] }; unify: { blockers: string[]; unifying: string[] }; models: BoardModels; refinement?: RefinementView; runEstimate: RunEstimateView; githubRepo?: string }
   /** Announcements withdrawn because the agent finished without delivering their cards: the Board tells the developer. */
   | { type: "withdrawn"; announcements: AnnouncementView[] }
   /** The run control stopped following a job or released a Task: the Board shows `Trama stopped following <subject>: <reason>.` (`ui#agents`). `details` are the last lines of omp's error output, shown behind `Show details`. */
@@ -241,6 +285,16 @@ export type ToWebview =
   | { type: "folderChildren"; root: string; path: string; entries: FolderEntry[] }
   /** Solo mode of the project for the `Solo Mode` row: whether the folder is in a git repository, the kind now, and the files of Trama git still tracks (relative to the project root). Sent at `ready`, when the Settings view becomes visible and after every write; never without a project. */
   | { type: "soloMode"; available: boolean; solo: SoloKind; tracked: string[] }
+  /** Manager mode of the project for the `Manager Mode` row and the Team view: `available` (recorded and origin on GitHub), `recorded`, the GitHub repository of origin (`<owner>/<repo>`) and, without one, `reason` (`No origin remote` or `Origin is not on GitHub`). Sent at `ready`, when the Settings or the Team view becomes visible and after every write; never without a project. */
+  | { type: "managerMode"; available: boolean; recorded: boolean; repository: string | null; reason: string | null }
+  /** The Team view's people (`tech#team`): the team of this project (`members`), the people outside it that `Add from other projects` offers (`others`), how many saved people cannot be read and are not listed (`unreadable`), and `error`, a sentence for the notice at the top of the People tab (a write that failed, or a stored value that cannot be read), null when there is none. Sent at `ready`, when the Team view becomes visible and after every write, only while Team is available. */
+  | { type: "team"; members: PersonView[]; others: PersonView[]; unreadable: number; error: string | null }
+  /** What the Team view shows of GitHub (`ui#github-project`): the state (`loading` before the first read ends; `ready`; or the state of `gh` that stopped the last read), whether a read runs, the repository (`<owner>/<repo>`), the linked Project, when the data on show was read (ISO time, null before the first read that worked), the linked Project's fields, iterations and address, where each issue Trama published is at the last read (`issues`: its state and the sprint, estimate and assignee GitHub has now, from `src/core/timeline.ts`), what every open item of the Project adds to its assignee's load in its sprint (`loads`, the Timeline's load; the items themselves never leave the host), the signals of the open issues by number (`signals`, from `src/core/timeline.ts`, recomputed at every picture) and why Comment update and Scan are not available for each published issue (`actions`), the Projects of the owner the picker offers, and the reason of the last failure. Sent at `ready`, when the Team view becomes visible and whenever a read starts or ends or the link changes, only while Team is available. */
+  | { type: "teamGitHub"; state: "loading" | "ready" | GhProblemKind; reading: boolean; repository: string | null; linked: LinkedProject | null; readAt: string | null; project: ProjectFields | null; issues: IssueOnGitHub[]; loads: OpenLoad[]; signals: IssueSignals; actions: Record<number, IssueActions>; projects: ProjectChoice[]; error: string | null }
+  /** A `savePerson` was refused without writing: the message of each invalid field, under the field of the person's dialog, which stays open. */
+  | { type: "personRejected"; errors: PersonErrors }
+  /** A `setIssueField` was refused without writing: the message of `rules#developer.CHANGE_ISSUE_FIELD` for the field of that issue, which the preview shows under the input. */
+  | { type: "issueFieldRejected"; handoff: string; issue: string; key: string; message: string }
   | ({ type: "navigate"; view: ViewName } & NavigateOptions)
   /** The question round being answered, drawn over the tabs; null when none is. */
   | { type: "questions"; round: QuestionRoundView | null }

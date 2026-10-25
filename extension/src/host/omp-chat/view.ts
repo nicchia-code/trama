@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import * as vscode from "vscode";
 import { safeLink } from "../../../../src/core/links";
+import { readOrigin } from "../../../../src/core/manager-mode";
 import { useOmpChat } from "../../../../src/core/omp-chat-conversation";
 import type { ToChatWebview } from "../../omp-chat-protocol";
 import type { ThemeSetting } from "../../webview/theme";
@@ -58,6 +59,7 @@ export class OmpChatView implements vscode.WebviewViewProvider, vscode.Disposabl
       cspSource: view.webview.cspSource,
       nonce: randomBytes(16).toString("base64"),
       scriptUri: view.webview.asWebviewUri(vscode.Uri.joinPath(dist, "omp-chat.js")).toString(),
+      mermaidUri: view.webview.asWebviewUri(vscode.Uri.joinPath(dist, "mermaid.js")).toString(),
     });
     const received = view.webview.onDidReceiveMessage((raw: unknown) => this.model.receive(raw));
     view.onDidDispose(() => {
@@ -80,6 +82,10 @@ export class OmpChatView implements vscode.WebviewViewProvider, vscode.Disposabl
       // Shows the view and nothing else: the one command Trama runs to open it.
       reveal: (preserveFocus) => void vscode.commands.executeCommand(`${OMP_CHAT_SIDEBAR_VIEW}.focus`, { preserveFocus }),
       theme: configuredTheme,
+      githubRepo: () => {
+        const root = this.root();
+        return root === undefined ? null : readOrigin(root).repository;
+      },
       readText: (path) => {
         try {
           return statSync(path).size <= MAX_ATTACHMENT_BYTES ? readFileSync(path, "utf8") : undefined;

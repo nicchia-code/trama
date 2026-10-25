@@ -28,7 +28,8 @@ beforeAll(() => {
 
 afterEach(cleanup);
 
-const FOLDER = { name: "app", root: "/work/app", hasFiles: true, inGit: false };
+const NO_ORIGIN = { repository: null, reason: "No origin remote" };
+const FOLDER = { name: "app", root: "/work/app", hasFiles: true, inGit: false, origin: NO_ORIGIN };
 
 function setup(options: { mode?: "first" | "settings" | "empty-model"; choice?: "import" | "scratch"; values?: Record<string, SettingsValues>; folders?: (typeof FOLDER)[]; now?: () => number } = {}) {
   const posted: ToHost[] = [];
@@ -225,7 +226,7 @@ test("Start from Scratch on a folder with files shows the warning in the step; I
 });
 
 test("with several folders Path offers a select with the name of each, the first chosen", () => {
-  setup({ folders: [FOLDER, { name: "lib", root: "/work/lib", hasFiles: false, inGit: false }] });
+  setup({ folders: [FOLDER, { name: "lib", root: "/work/lib", hasFiles: false, inGit: false, origin: NO_ORIGIN }] });
   const select = screen.getByRole("combobox", { name: "Folder to initialize as a Trama project" });
   expect(select.textContent).toBe("app");
 });
@@ -683,7 +684,7 @@ test("the first setup confirms with the folder, the path and the excluded folder
   expect(foldersCard.textContent).toContain("src");
   expect(foldersCard.querySelector(".font-mono")?.textContent).toBe("src");
   press("Set up Trama");
-  expect(posted.at(-1)).toEqual({ type: "confirmSetup", mode: "first", choice: "import", root: "/work/app", values: [], excluded: ["src"], solo: "off" });
+  expect(posted.at(-1)).toEqual({ type: "confirmSetup", mode: "first", choice: "import", root: "/work/app", values: [], excluded: ["src"], solo: "off", manager: false });
   act(() => controller.receiveSetup({ type: "setup", busy: false, error: null }));
   expect(screen.queryByRole("alert")).toBeNull();
   expect(heading()).toBe("Summary");
@@ -698,7 +699,7 @@ test("a value changed from outside while the wizard is open does not change what
 });
 
 test("a new folder to initialize forgets the folders chosen to leave out", () => {
-  const { controller } = setup({ folders: [FOLDER, { name: "lib", root: "/work/lib", hasFiles: false, inGit: false }] });
+  const { controller } = setup({ folders: [FOLDER, { name: "lib", root: "/work/lib", hasFiles: false, inGit: false, origin: NO_ORIGIN }] });
   act(() => controller.chooseWay("import"));
   act(() => controller.chooseFolder("/work/app"));
   act(() => controller.openStep("Path"));
@@ -1073,7 +1074,7 @@ test("cancelling the wizard leaves the saved value as it was and sends no confir
 
 // ---- Solo mode ----
 
-const GIT_FOLDER = { ...FOLDER, inGit: true };
+const GIT_FOLDER = { ...FOLDER, inGit: true, origin: NO_ORIGIN };
 const soloTold = (controller: WizardController, state: { available?: boolean; solo?: "off" | "folders" | "files"; tracked?: string[] }) => act(() => controller.receiveSoloMode({ type: "soloMode", available: true, solo: "off", tracked: [], ...state }));
 const soloBox = () => screen.getByRole("checkbox", { name: "Solo Mode" });
 const exclude = () => screen.getByRole("combobox", { name: "Exclude" });
@@ -1100,7 +1101,7 @@ test("the Project step of the first setup shows Solo Mode after Skills Directory
 });
 
 test("outside a git repository the first setup's control is off and disabled with the reason; a folder in git enables it", () => {
-  const { controller } = setup({ choice: "scratch", folders: [FOLDER, { name: "lib", root: "/work/lib", hasFiles: false, inGit: true }] });
+  const { controller } = setup({ choice: "scratch", folders: [FOLDER, { name: "lib", root: "/work/lib", hasFiles: false, inGit: true, origin: NO_ORIGIN }] });
   advanceTo(controller, "Project");
   expect((soloBox() as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByText("Solo mode needs a git repository.")).not.toBeNull();
@@ -1193,7 +1194,7 @@ test("the confirmation carries solo: the chosen value, and in the Empty Model mo
 });
 
 test("a first setup folder outside git sends solo off whatever was chosen before", () => {
-  const { controller, posted } = setup({ choice: "scratch", folders: [GIT_FOLDER, { name: "lib", root: "/work/lib", hasFiles: false, inGit: false }] });
+  const { controller, posted } = setup({ choice: "scratch", folders: [GIT_FOLDER, { name: "lib", root: "/work/lib", hasFiles: false, inGit: false, origin: NO_ORIGIN }] });
   advanceTo(controller, "Project");
   fireEvent.click(soloBox());
   act(() => controller.chooseFolder("/work/lib"));

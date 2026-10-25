@@ -173,7 +173,8 @@ export function StatusDot({ task }: { task: { column: Column; agent: boolean } }
   );
 }
 
-const TAG: Record<TagColour, string> = {
+/** The border and background of a tag chip, by colour. */
+export const TAG: Record<TagColour, string> = {
   blue: "border-blue-600 bg-blue-600/15 dark:border-blue-400 dark:bg-blue-400/15",
   green: "border-green-600 bg-green-600/15 dark:border-green-400 dark:bg-green-400/15",
   amber: "border-amber-600 bg-amber-600/15 dark:border-amber-400 dark:bg-amber-400/15",

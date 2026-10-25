@@ -9,6 +9,88 @@ tasks:
   - 1is9ng78
   - rbz0kw4y
   - zg5kh2zf
+cleared:
+  zg5kh2zf:
+    title: Merge nel menu laterale
+    proposal: lx7xcuct
+    tag: Solo merge
+    finished: 2026-10-25T09:44:39.025Z
+    refs:
+      - menu-laterale
+      - requirements/ui#menu-laterale
+      - requirements/ui#solo-merge
+      - requirements/tech#menu-laterale
+  1is9ng78:
+    title: "Merge: flusso e scan"
+    proposal: lx7xcuct
+    tag: Solo merge
+    finished: 2026-10-25T09:44:38.521Z
+    refs:
+      - solo-merge
+      - solo-mode
+      - agent-launching
+      - developer.START_MERGE
+      - developer.CHOOSE_MERGE_BRANCH
+      - developer.CANCEL_MERGE
+      - developer.OPEN_MERGE_EDITOR
+      - developer.RECONCILE_MERGE_WITH_AGENT
+      - developer.ABORT_MERGE
+      - workspace.MERGE_COMMITTED
+      - workspace.MERGE_ABANDONED
+      - requirements/rules#solo-merge
+      - requirements/data#solo-merge
+      - requirements/tech#solo-merge
+      - requirements/rules#agent-terminal
+      - requirements/rules#work
+      - requirements/data#task
+  2coek7kv:
+    title: Solo mode nel wizard
+    proposal: 1g19zogu
+    tag: Solo mode
+    finished: 2026-10-25T09:32:46.943Z
+    refs:
+      - setup-wizard
+      - requirements/rules#setup-wizard
+  bme0ekk4:
+    title: Riga Solo Mode in Settings
+    proposal: 1g19zogu
+    tag: Solo mode
+    finished: 2026-10-25T09:32:44.777Z
+    refs:
+      - panel
+      - requirements/ui#solo-switch
+      - requirements/ui#panel/Get Started
+      - requirements/quality#panel/Settings
+  6tyqi07l:
+    title: "Solo mode: core e CLI"
+    proposal: 1g19zogu
+    tag: Solo mode
+    finished: 2026-10-25T09:17:39.200Z
+    refs:
+      - solo-mode
+      - solo-switch
+      - developer.TURN_ON_SOLO_MODE
+      - developer.TURN_OFF_SOLO_MODE
+      - developer.CHANGE_SOLO_EXCLUSIONS
+      - requirements/data#solo-switch
+      - requirements/rules#solo-switch
+      - requirements/tech#solo-switch
+      - requirements/tech#General
+      - requirements/cli#General
+      - requirements/data#announcement
+  rbz0kw4y:
+    title: Drift da merge
+    proposal: lx7xcuct
+    tag: Solo merge
+    finished: 2026-10-25T09:11:48.064Z
+    refs:
+      - drift
+      - requirements/data#drift
+      - requirements/rules#drift
+      - requirements/tech#drift
+      - requirements/ui#drift
+      - requirements/rules#drift-resolution
+      - requirements/rules#question-round
 ---
 # Solo mode e Merge
 

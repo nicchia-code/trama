@@ -2,7 +2,7 @@ import { z } from "zod";
 import { announce, keepUnownedComparison } from "../../core/announcements";
 import { archiveComparison, briefing } from "../../core/compare";
 import { codeFingerprint } from "../../core/compared";
-import { filingOrigin, sendCoordinatorMessageSoon } from "../../core/question-channel";
+import { askIssueStates, filingOrigin, sendCoordinatorMessageSoon } from "../../core/question-channel";
 import { recordTiming } from "../../core/timings";
 import { archiveView, briefedTexts, briefingView } from "../compare";
 import { defineCommand } from "../registry";
@@ -15,7 +15,7 @@ const create = defineCommand({
   mode: "immediate",
   summary: "Announce a comparison of a Machine and print its briefing.",
   description:
-    "Announces the comparison and prints its ID first, then the references to compare (`refs` limits them to those of the Machine; without it, the whole Machine), their States, Events and Transitions, the Requirements that apply, the analysis, the open Tasks and Drifts on the same thing, and the resolved or dismissed Drifts on the same references. Keep the ID: `comparison move` takes it. Without `TRAMA_TERMINAL` the briefing is the same but no announcement, and so no ghost, is made: the comparison data stay in a file of their own that `comparison move <id> delivered` deletes.",
+    "Announces the comparison and prints its ID first, then the references to compare (`refs` limits them to those of the Machine; without it, the whole Machine), their States, Events and Transitions, the Requirements that apply, the analysis, the open Tasks and Drifts on the same thing, the resolved or dismissed Drifts on the same references and, when published issues have references there, the section `## Published issues` with the instruction for the Drifts on those references. Keep the ID: `comparison move` takes it. Without `TRAMA_TERMINAL` the briefing is the same but no announcement, and so no ghost, is made: the comparison data stay in a file of their own that `comparison move <id> delivered` deletes.",
   positionals: [{ name: "machine", description: "The Machine to compare." }],
   input: z.strictObject({
     refs: z.array(z.string().min(1)).optional().describe("Only these references, which must be of the Machine."),
@@ -28,13 +28,18 @@ const create = defineCommand({
     openTasks: z.array(cardLine.extend({ column: z.string() })),
     openDrifts: z.array(cardLine.extend({ refs: z.array(z.string()) })),
     closedDrifts: z.array(cardLine.extend({ resolution: z.string().nullable(), note: z.string().nullable() })),
+    publishedIssues: z.array(z.object({ number: z.number(), title: z.string(), status: z.string(), refs: z.array(z.string()) })).describe("The published issues, not `Not planned`, whose references fall in the comparison, with where each was at the last read of GitHub (`Open` as published without one)."),
   }),
   example: { refs: ["order/Paid"] },
   exampleArgs: ["order"],
   effects: { writes: true, activity: true },
+  async beforeRun(ctx, _input, _args, runtime) {
+    // The state of each published issue at the last read of GitHub lives in the editor; without it the briefing says the state of publication.
+    ctx.issueStates = (await askIssueStates(ctx.project(false), { env: runtime.env, ...(runtime.runtimeDir === undefined ? {} : { runtimeDir: runtime.runtimeDir }) })) ?? undefined;
+  },
   run(ctx, input, [machine]) {
     const project = ctx.project();
-    const b = briefing(project, machine as string, input.refs ?? []);
+    const b = briefing(project, machine as string, input.refs ?? [], ctx.issueStates ?? []);
     const code = codeFingerprint(project.root);
     const texts = code === null ? {} : briefedTexts(b);
     // Without a terminal no ghost is made: a ghost with no terminal would be withdrawn as an orphan, and nothing could say whose it is.

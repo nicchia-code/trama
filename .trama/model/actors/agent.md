@@ -71,3 +71,12 @@ L'agente scrive una nuova voce di History alla fine di una corsa che ha realizza
 
 ### VOCE_HISTORY_AGGIORNATA
 L'agente aggiorna una voce di History esistente, perché i Task realizzati da una corsa fanno parte della stessa macro-funzionalità che la voce racconta.
+
+### RECORD_ISSUE_PUBLISHED
+The agent records that it created on GitHub an issue of an approved handoff, with its number, its address and the fields of the Project it could not set, right after creating it.
+
+### RECORD_ISSUE_FAILED
+The agent records that GitHub refused to create an issue of an approved handoff, with the reason.
+
+### RECORD_ISSUE_UPDATED
+The agent records that it wrote on a published issue the comment that tells what changed in the Model since it was published.

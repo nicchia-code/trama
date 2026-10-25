@@ -5,6 +5,22 @@ summary: Every question round belongs to the terminal or conversation Trama laun
 tasks:
   - 2hldvhon
   - amsymnao
+cleared:
+  amsymnao:
+    title: Overlay names the asking terminal
+    proposal: kv1x3wmx
+    tag: omp ACP IPC
+    finished: 2026-10-24T15:35:05.727Z
+    refs:
+      - requirements/ui#question-round
+  2hldvhon:
+    title: Rounds owned by their terminal
+    proposal: kv1x3wmx
+    tag: omp ACP IPC
+    finished: 2026-10-24T15:35:04.958Z
+    refs:
+      - question-round
+      - requirements/tech#question-round
 ---
 # Question rounds owned by terminals
 

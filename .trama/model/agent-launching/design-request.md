@@ -14,6 +14,8 @@ Chiudere la scheda di una richiesta mai inviata è il gesto con cui la si invia;
 
 L'agente riceve sempre un'istruzione di una riga che nomina il file della richiesta, così il testo può essere lungo quanto serve, con qualunque launcher. La skill di design legge tutta la richiesta e intervista comunque il developer su ogni decisione: la richiesta è il punto di partenza, non una risposta alle domande. Per la richiesta di setup l'istruzione nomina invece la skill di setup, che intervista il developer sull'applicativo e su come costruirlo e ne fa la Proposal di setup (vedi la Proposal); il terminale si chiama Setup invece di Design. Trama ricorda quali richieste sono di setup anche dopo un riavvio dell'editor.
 
+A written request is also born from New handoff in the Decisions tab of the Team view, only while Team is available (see Manager mode): the handoff request, in which the Manager describes the work he wants to give to the people of his team. It is created, opened, saved, sent and consumed like the other requests, with its own ghost text. Its instruction names the handoff skill, which reads the request, the Model, the Requirements, the code and the team, interviews the Manager on every decision as the design does, and writes a handoff (see the Proposal); the terminal is named Handoff. Its images are only context for the agent: issues never carry images, so the agent never asks whether to send them on. While the agent writes the handoff, its ghost has no column on the Board: it shows in the editor's status bar. Trama remembers which requests are handoff ones also after the editor restarts.
+
 ## States
 
 ### Writing (initial)

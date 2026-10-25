@@ -11,6 +11,8 @@ import { mountQuestions } from "./questions";
 import { mountRequirements } from "./requirements";
 import { mountSettings } from "./settings";
 import { mountSpecs } from "./specs";
+import { mountTeam } from "./team";
+import { GithubRepoContext } from "./markdown";
 import { createShellStore, Shell } from "./shell";
 import { startTheme } from "./theme";
 import type { View, ViewContext } from "./types";
@@ -31,14 +33,15 @@ const theme = startTheme();
 const app = document.getElementById("app") as HTMLElement;
 app.className = "flex flex-col";
 
-const store = createShellStore({ view: "board", hasProject: null, error: null, diagnostics: [], views: {}, questions: null });
+const store = createShellStore({ view: "board", hasProject: null, error: null, diagnostics: [], views: {}, questions: null, githubRepo: null, teamAvailable: false });
 /** Where a view draws itself: the one React root renders what the views hand to the shell store. */
 const slotOf = (view: ViewName) => (node: ReactNode) => store.set({ views: { ...store.get().views, [view]: node } });
 let snapshot: Snapshot | null = null;
 
-/** Without a project only Get Started and Settings exist; with one, every view but Get Started. Before the host says, any view goes (the panel starts on the Board). */
+/** Without a project only Get Started and Settings exist; with one, every view but Get Started, and Team only while it is available (Manager mode on, origin on GitHub). Before the host says, any view but Team goes (the panel starts on the Board). */
 const exists = (view: ViewName): boolean => {
-  const { hasProject } = store.get();
+  const { hasProject, teamAvailable } = store.get();
+  if (view === "team") return teamAvailable && hasProject !== false;
   return hasProject === null || (hasProject ? view !== "getstarted" : view === "getstarted" || view === "settings");
 };
 
@@ -68,7 +71,8 @@ const diagram = mountDiagram(slotOf("diagram"), context);
 const requirements = mountRequirements(slotOf("requirements"), context);
 const specs = mountSpecs(slotOf("specs"), context);
 const history = mountHistory(slotOf("history"), context);
-const mounted: Record<ViewName, Pick<View, "show" | "hide">> = { getstarted: getStarted, diagram, board, requirements, specs, history, settings };
+const team = mountTeam(slotOf("team"), context);
+const mounted: Record<ViewName, Pick<View, "show" | "hide">> = { getstarted: getStarted, diagram, board, requirements, specs, history, team, settings };
 
 const questions = mountQuestions((node) => store.set({ questions: node }), post, context.openLink);
 
@@ -76,12 +80,12 @@ const questions = mountQuestions((node) => store.set({ questions: node }), post,
 function App() {
   const state = useSyncExternalStore(store.subscribe, store.get);
   return (
-    <>
+    <GithubRepoContext.Provider value={state.githubRepo}>
       {state.questions}
       <div className="min-h-0 flex-1">
         <Shell store={store} openModelFile={(path) => post({ type: "openModelFile", path })} />
       </div>
-    </>
+    </GithubRepoContext.Provider>
   );
 }
 
@@ -98,13 +102,16 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
     requirements.update(snapshot);
     specs.update(snapshot);
     history.update(snapshot);
-    store.set({ error: null, diagnostics: snapshot.diagnostics });
+    team.update(snapshot);
+    store.set({ error: null, diagnostics: snapshot.diagnostics, githubRepo: message.githubRepo ?? null });
   } else if (message.type === "withdrawn") {
     board.withdrawn?.(message.announcements);
   } else if (message.type === "stoppedFollowing") {
     board.stoppedFollowing?.(message.subject, message.reason, message.details);
   } else if (message.type === "notice") {
-    board.notice?.(message.text);
+    // The Team view hears its own notices (a refused link, publication or split); the Board hears the others.
+    if (store.get().view === "team") team.notice(message.text);
+    else board.notice?.(message.text);
   } else if (message.type === "clearDoneEnded") {
     board.clearDoneEnded();
   } else if (message.type === "error") {
@@ -133,6 +140,13 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
   }
   else if (message.type === "ntfyToken") settings.receiveNtfyToken(message);
   else if (message.type === "soloMode") settings.receiveSoloMode(message);
+  else if (message.type === "managerMode") {
+    store.set({ teamAvailable: message.available });
+    settings.receiveManagerMode(message);
+  } else if (message.type === "team") team.receive(message);
+  else if (message.type === "personRejected") team.receiveRejected(message.errors);
+  else if (message.type === "teamGitHub") team.receiveGitHub(message);
+  else if (message.type === "issueFieldRejected") team.receiveFieldRejected(message.handoff, message.issue, message.key, message.message);
   else if (message.type === "testNotification") settings.receiveTestNotification(message);
   else if (message.type === "systemCertificates") {
     settings.receiveSystemCertificates(message);

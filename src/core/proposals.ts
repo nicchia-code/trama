@@ -7,7 +7,7 @@ import { diffFile, type FileChange } from "./diff";
 import { TramaError } from "./errors";
 import { resolveRef } from "./refs";
 import { formatDiagnostic } from "./model";
-import { buildProject, largeFragmentMessage, largeFragments, lineageRefs, parseRequirementRef, type ProjectModel, REQUIREMENT_SKILLS_BUDGET, resolveProjectRef } from "./requirements";
+import { buildProject, largeFragmentMessage, largeFragments, lineageRefs, parseRequirementRef, type ProjectModel, REQUIREMENT_SKILLS_BUDGET, resolves } from "./requirements";
 import { requirementSkillMode, syncRequirementSkills } from "./requirement-skills";
 import { boolField, canonicalCardId, compareByCreation, createdField, enumField, idField, positiveIntOrNull, type Raw, stringList, stringMap, textOrNull } from "./schema";
 import {
@@ -36,6 +36,9 @@ import { attachedDrift, type DriftOutcome, fixCodeRefusal, listDrifts, listTasks
 import { IMAGE_EXTENSIONS, isImagePath, pruneTaskImages, removeTaskImage } from "./task-image-cleanup";
 import { copyTaskImages, readTaskImages } from "./task-images";
 import { removedElements, type RemovedKind, SCAN_REASONS, scanScope, type ScanScopeEntry } from "./scan-scope";
+import { linkedGithubProject } from "./github";
+import { fieldChange, type FieldRules, handoffIssueWarnings, handoffProblems, issuesDir, LINK_PROJECT_FIRST, listIssues, loadProposalIssues, type ManagerValue, planApprovalIssues, type ProposalIssue, type TeamRoster, writeApprovalIssues } from "./issues";
+import { requireTeam, teamUnavailableReason } from "./manager-mode";
 
 /**
  * `draft`: the agent is still writing it; only the agent hands it over and only the developer can discard it.
@@ -47,8 +50,9 @@ export type ProposalStatus = "draft" | "open" | "approved" | "rejected" | "disca
  * `import`: written by the trama-import skill to describe existing code; approving it starts no Scan.
  * `resolution`: written by the agent run by Resolve Drifts; lists the open Drifts it resolves, each with the developer's decision. Like an import it starts no Scan.
  * `setup`: the first Proposal of a project whose Model is empty, written from a design request by the `trama-setup` skill; it is approved on hand-over when it is valid, not blocked and the Model is still empty.
+ * `handoff`: the lighter Proposal through which the Manager gives work to the people of the team (only while Team is available): it may change the Model and the Requirements, holds issues instead of Tasks, and on approval creates the issue cards the agent publishes on GitHub.
  */
-export type ProposalKind = "change" | "import" | "resolution" | "setup";
+export type ProposalKind = "change" | "import" | "resolution" | "setup" | "handoff";
 
 export type DriftDecisionKind = "proposal" | "dismissed" | "fix-code";
 
@@ -118,6 +122,8 @@ export interface Proposal {
   title: string;
   /** The Tasks this ordinary Proposal holds, one file each under `tasks/`; they are not tracked files, so they never make it stale. */
   tasks: ProposalTask[];
+  /** The issues this handoff holds, one file each under `issues/`; never in a Proposal of another kind. They are not tracked files, so they never make it stale. */
+  issues: ProposalIssue[];
 }
 
 /**
@@ -137,7 +143,7 @@ export interface ProposalTask {
 const proposalsDir = (p: Project) => join(p.dir, "proposals");
 
 const STATUSES: readonly ProposalStatus[] = ["draft", "open", "approved", "rejected", "discarded"];
-const KINDS: readonly ProposalKind[] = ["change", "import", "resolution", "setup"];
+const KINDS: readonly ProposalKind[] = ["change", "import", "resolution", "setup", "handoff"];
 
 function parseData(raw: Raw, where: string): ProposalData {
   const data: ProposalData = {
@@ -240,7 +246,7 @@ function load(p: Project, entry: { id: string; name: string }): Proposal {
   const file = join(dir, "proposal.md");
   const doc = readDocument(file);
   const title = /^#\s+(.+)$/m.exec(doc.body)?.[1]?.trim() ?? entry.name;
-  return { id: entry.id, name: entry.name, dir, body: doc.body, title, data: parseData(doc.data, file), tasks: loadTasks(dir) };
+  return { id: entry.id, name: entry.name, dir, body: doc.body, title, data: parseData(doc.data, file), tasks: loadTasks(dir), issues: loadProposalIssues(dir) };
 }
 
 /** Writes `proposal.md` from the Proposal's data, leaving defaults out of the file. */
@@ -313,6 +319,8 @@ export function createProposal(
     throw new TramaError("Refused: a Proposal that reworks another cannot be bound to a design request; give reworks or request, not both");
   if (options.prepared && (options.kind ?? "change") !== "resolution")
     throw new TramaError("prepared needs a resolution");
+  // A handoff is refused, creating nothing, when Team is not available (`rules#proposal/Draft`).
+  if (options.kind === "handoff") requireTeam(p);
   const label = options.label === undefined ? null : checkedLabel(options.label);
   const requires = (options.requires ?? []).map((r) => {
     const required = getProposal(p, r);
@@ -358,6 +366,7 @@ export function createProposal(
       },
       body: `# ${title}\n\n${body.trim()}\n`.replace(/\n\n\n$/, "\n"),
       tasks: [],
+      issues: [],
     };
     save(proposal);
     const changed = rework === null ? [] : rewriteRequires(p, rework.id, proposal.id);
@@ -542,6 +551,7 @@ export function withProposalLock<T>(p: Project, citing: string, fn: (id: string)
 export function editInProposal(p: Project, id: string, modelPath: string): string {
   return withProposalLock(p, id, () => {
     if (modelPath.startsWith("tasks/")) return editTaskInProposal(p, id, modelPath);
+    if (modelPath.startsWith("issues/")) return editIssueInProposal(p, id, modelPath);
     const proposal = getProposal(p, id);
     requireEditable(p, proposal);
     const rel = normalizeModelPath(modelPath);
@@ -587,6 +597,7 @@ export function rebaseInProposal(p: Project, id: string): Proposal {
 export function deleteInProposal(p: Project, id: string, modelPath: string) {
   return withProposalLock(p, id, () => {
     if (modelPath.startsWith("tasks/")) return deleteTaskInProposal(p, id, modelPath);
+    if (modelPath.startsWith("issues/")) return deleteIssueInProposal(p, id, modelPath);
     const proposal = getProposal(p, id);
     requireEditable(p, proposal);
     const rel = normalizeModelPath(modelPath);
@@ -637,7 +648,7 @@ export function copyProposalFiles(p: Project, id: string, sourceId: string): Pro
 export const coversScope = (kind: ProposalKind): boolean => kind === "change" || kind === "setup";
 
 /** The reason a Proposal that cannot hold Tasks gives, both when a Task file is refused and when validation reports it. */
-const NO_TASKS_REASON = "only a change or setup Proposal, not attached to a Drift, can hold Tasks";
+const noTasksReason = (proposal: Proposal): string => (proposal.data.kind === "handoff" ? "a handoff holds issues in issues/, not Tasks" : "only a change or setup Proposal, not attached to a Drift, can hold Tasks");
 
 /** Only a change or setup Proposal, not attached to a Drift, holds Tasks. */
 function holdsTasks(p: Project, proposal: Proposal): boolean {
@@ -659,13 +670,12 @@ function taskFileName(path: string): string {
 function editTaskInProposal(p: Project, id: string, path: string): string {
   const proposal = getProposal(p, id);
   requireEditable(p, proposal);
-  if (!holdsTasks(p, proposal)) throw new TramaError(NO_TASKS_REASON);
+  if (!holdsTasks(p, proposal)) throw new TramaError(noTasksReason(proposal));
   const name = taskFileName(path);
   const folder = join(proposal.dir, "tasks");
   let target = join(folder, name);
   if (!existsSync(target)) {
-    const taskDirs = listCards(proposalsDir(p), "folder").map((e) => join(proposalsDir(p), e.name, "tasks"));
-    const taskId = newCardId([join(p.dir, "tasks"), ...taskDirs], "file", "Task");
+    const taskId = newCardId(cardIdFolders(p), "file", "Task");
     target = join(folder, `${taskId}-${slugify(name.slice(0, -".md".length))}.md`);
     writeDocument(target, { refs: [], technical: false }, "");
   }
@@ -684,6 +694,58 @@ function deleteTaskInProposal(p: Project, id: string, path: string) {
   rmSync(target);
   save(proposal);
   pruneImages(p);
+}
+
+/** Every folder whose files are cards with an identity of the Tasks' and issues' shared space: `.trama/tasks`, `.trama/issues` and the `tasks/` and `issues/` of every Proposal (`data#issue`). */
+function cardIdFolders(p: Project): string[] {
+  const folders = listCards(proposalsDir(p), "folder").flatMap((e) => [join(proposalsDir(p), e.name, "tasks"), join(proposalsDir(p), e.name, "issues")]);
+  return [join(p.dir, "tasks"), issuesDir(p), ...folders];
+}
+
+/** The file name an `issues/<name>.md` path gives; anything deeper or not Markdown is refused. */
+function issueFileName(path: string): string {
+  const name = path.slice("issues/".length);
+  if (!/^[^/]+\.md$/.test(name)) throw new TramaError(`"${path}": an issue of a handoff is issues/<name>.md, one file in its issues folder`);
+  return name;
+}
+
+/** Only a handoff holds issues. */
+function requireHandoff(p: Project, proposal: Proposal): void {
+  if (proposal.data.kind !== "handoff") throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} is not a handoff: only a handoff holds issues in issues/`);
+}
+
+/**
+ * Writes an issue of the handoff and returns its file. A name that is already an issue file of the handoff (the full name printed before, `<identity>-<slug>.md`) rewrites
+ * that issue; any other name creates a new issue file, empty for the agent to fill, under an identity no Task, issue or Proposal file has. An edit: an open handoff
+ * returns to Draft. The Manager's values (`manager`) are never written here.
+ */
+function editIssueInProposal(p: Project, id: string, path: string): string {
+  const proposal = getProposal(p, id);
+  requireEditable(p, proposal);
+  requireHandoff(p, proposal);
+  const name = issueFileName(path);
+  const folder = join(proposal.dir, "issues");
+  let target = join(folder, name);
+  if (!existsSync(target)) {
+    const issueId = newCardId(cardIdFolders(p), "file", "issue");
+    target = join(folder, `${issueId}-${slugify(name.slice(0, -".md".length))}.md`);
+    writeDocument(target, { refs: [] }, "");
+  }
+  touch(proposal);
+  save(proposal);
+  return target;
+}
+
+/** Takes an issue file out of the handoff. */
+function deleteIssueInProposal(p: Project, id: string, path: string): void {
+  const proposal = getProposal(p, id);
+  requireEditable(p, proposal);
+  requireHandoff(p, proposal);
+  const target = join(proposal.dir, "issues", issueFileName(path));
+  if (!existsSync(target)) throw new TramaError(`${path} is not an issue file of Proposal ${cardName(p, "proposal", proposal.id)}`);
+  touch(proposal);
+  rmSync(target);
+  save(proposal);
 }
 
 /** Deletes the image folders of the Tasks that must no longer keep them (`task-image-cleanup`), from the cards as they are now. */
@@ -769,10 +831,14 @@ export function applied(p: Project, proposal: Proposal): FileMap {
   return files;
 }
 
-export function validateProposal(p: Project, proposal: Proposal): Diagnostic[] {
+/**
+ * The errors of a Proposal with it applied. `team` (the lower-case GitHub handles of the team) is given only by the hand-over of a handoff, which also checks that the
+ * assignee and the reviewer of each issue are members.
+ */
+export function validateProposal(p: Project, proposal: Proposal, team?: ReadonlySet<string>): Diagnostic[] {
   const taskErrors = proposal.tasks.flatMap((t) => t.problems.map((message) => ({ file: `tasks/${t.name}`, line: 0, message })));
   const project = buildProject(applied(p, proposal));
-  return [...taskErrors, ...project.diagnostics, ...taskRules(p, proposal, project), ...labelRule(p, proposal), ...preparedRule(proposal)];
+  return [...taskErrors, ...project.diagnostics, ...taskRules(p, proposal, project, team), ...labelRule(p, proposal), ...preparedRule(proposal)];
 }
 
 /**
@@ -786,21 +852,15 @@ function preparedRule(proposal: Proposal): Diagnostic[] {
 }
 
 function labelRule(p: Project, proposal: Proposal): Diagnostic[] {
+  if (proposal.data.kind === "handoff") {
+    const { label } = proposal.data;
+    const problem = label === null ? "it has none" : labelProblem(label);
+    return problem === null ? [] : [{ file: "proposal.md", line: 0, message: `Proposal ${cardName(p, "proposal", proposal.id)} needs a label of at most ${LABEL_LIMIT} characters, on one line, for its epic: ${problem}` }];
+  }
   if (proposal.tasks.length === 0 || !coversScope(proposal.data.kind)) return [];
   const { label, status } = proposal.data;
   if (label === null ? status !== "draft" : labelProblem(label) === null) return [];
   return [{ file: "proposal.md", line: 0, message: `Proposal ${cardName(p, "proposal", proposal.id)} needs a label of at most ${LABEL_LIMIT} characters for its Tasks` }];
-}
-
-/** Whether a Model or Requirement reference resolves in the project. */
-function resolves(project: ProjectModel, ref: string): boolean {
-  try {
-    resolveProjectRef(project, ref);
-    return true;
-  } catch (error) {
-    if (error instanceof TramaError) return false;
-    throw error;
-  }
 }
 
 /** The references of the `- \`<ref>\` — <where>` rows under a body section; other lines are prose. */
@@ -838,7 +898,8 @@ function coverKeys(project: ProjectModel, ref: string): string[] {
  * not attached to a Drift holds Tasks, and each entry of its scope must be covered. A removed Model element is covered by
  * the removal Task that approval creates for it, so its removal entries need no Task here.
  */
-function taskRules(p: Project, proposal: Proposal, project: ProjectModel): Diagnostic[] {
+function taskRules(p: Project, proposal: Proposal, project: ProjectModel, team?: ReadonlySet<string>): Diagnostic[] {
+  if (proposal.data.kind === "handoff") return handoffRules(p, proposal, project, team);
   const out: Diagnostic[] = [];
   const at = (file: string, message: string) => {
     out.push({ file, line: 0, message });
@@ -846,7 +907,7 @@ function taskRules(p: Project, proposal: Proposal, project: ProjectModel): Diagn
   const present = bodyRows(proposal.body, "Already present");
   for (const ref of present) if (!resolves(project, ref)) at("proposal.md", `"Already present" names ${ref}, which does not exist with the Proposal applied`);
   if (!holdsTasks(p, proposal)) {
-    if (proposal.tasks.length > 0) at("proposal.md", NO_TASKS_REASON);
+    if (proposal.tasks.length > 0) at("proposal.md", noTasksReason(proposal));
     return out;
   }
   for (const task of proposal.tasks) {
@@ -861,6 +922,44 @@ function taskRules(p: Project, proposal: Proposal, project: ProjectModel): Diagn
   return out;
 }
 
+/** The identities of the issues of the handoffs `proposal` requires, directly or through others: its issues may depend on them. Approved ones are the cards in `.trama/issues/`. */
+function requiredIssueIds(p: Project, proposal: Proposal): Set<string> {
+  const ids = new Set<string>();
+  const seen = new Set<string>([proposal.id]);
+  const queue = [...proposal.data.requires];
+  for (let id = queue.pop(); id !== undefined; id = queue.pop()) {
+    let required: Proposal;
+    try {
+      required = getProposal(p, id);
+    } catch {
+      continue;
+    }
+    if (seen.has(required.id)) continue;
+    seen.add(required.id);
+    queue.push(...required.data.requires);
+    if (required.data.kind === "handoff") for (const issue of required.issues) ids.add(issue.id);
+  }
+  for (const card of listIssues(p)) if (seen.has(card.data.handoff)) ids.add(card.id);
+  return ids;
+}
+
+/** The rules of a handoff with it applied (`rules#proposal/Draft`): what is wrong with its issues, and that it holds no Task file. */
+function handoffRules(p: Project, proposal: Proposal, project: ProjectModel, team?: ReadonlySet<string>): Diagnostic[] {
+  const out = handoffProblems({ issues: proposal.issues, resolves: (ref) => resolves(project, ref), required: requiredIssueIds(p, proposal), ...(team === undefined ? {} : { team }) });
+  if (proposal.tasks.length > 0) out.push({ file: "proposal.md", line: 0, message: noTasksReason(proposal) });
+  return out;
+}
+
+/** What covers each scope entry of a handoff: the identities of the issues that name it or an element that contains it, none when no issue does. Computed, never stored. */
+export function handoffCoverage(p: Project, proposal: Proposal): { ref: string; reason: ScanScopeEntry["reason"]; coveredBy: string[] }[] {
+  const after = buildProject(applied(p, proposal));
+  return scanScope(buildProject(baseFiles(p, proposal)), after).map((entry) => {
+    const keys = new Set(coverKeys(after, entry.ref));
+    const coveredBy = proposal.issues.filter((issue) => issue.data.refs.some((ref) => resolves(after, ref) && keys.has(ref.toLowerCase()))).map((issue) => issue.id);
+    return { ...entry, coveredBy };
+  });
+}
+
 /**
  * Warnings that block neither validation nor hand-over, with the Proposal applied: fragments larger than 12 KB,
  * and the switch between fragment skills and index skills the Proposal would cause.
@@ -873,6 +972,11 @@ export function proposalWarnings(p: Project, proposal: Proposal): Diagnostic[] {
   if (was.mode !== is.mode) {
     const how = is.mode === "index" ? "from one skill per fragment to one index skill per Area" : "from index skills back to one skill per fragment";
     warnings.push({ file: "requirements/", line: 0, message: `once applied, the Requirement skills switch ${how} (budget ${was.budget} → ${is.budget} of ${REQUIREMENT_SKILLS_BUDGET} characters)` });
+  }
+  // A handoff's warnings never refuse the hand-over: a scope entry no issue covers and an issue estimated over three days.
+  if (proposal.data.kind === "handoff") {
+    for (const entry of handoffCoverage(p, proposal)) if (entry.coveredBy.length === 0) warnings.push({ file: "proposal.md", line: 0, message: `Not covered: ${entry.ref}` });
+    warnings.push(...handoffIssueWarnings(proposal.issues));
   }
   return warnings;
 }
@@ -889,7 +993,7 @@ export function changes(p: Project, proposal: Proposal): FileChange[] {
   return paths.map((path) => diffFile(path, before.get(path), after.get(path)));
 }
 
-export type ApprovalBlockKind = "missing" | "draft" | "rejected" | "discarded" | "approved" | "waiting" | "stale" | "unregistered" | "invalid" | "unfixable";
+export type ApprovalBlockKind = "missing" | "draft" | "rejected" | "discarded" | "approved" | "waiting" | "stale" | "unregistered" | "invalid" | "unfixable" | "team" | "project";
 
 export interface ApprovalBlock {
   kind: ApprovalBlockKind;
@@ -924,6 +1028,12 @@ export function approvalBlock(p: Project, id: string): ApprovalBlock | null {
   if (h.unbased.length > 0) return { kind: "unregistered", reason: `${name} holds files it never registered.` };
   if (validateProposal(p, proposal).length > 0) return { kind: "invalid", reason: `${name} would leave the Model or its Requirements invalid.` };
   if (unfixableDrifts(p, proposal).length > 0) return { kind: "unfixable", reason: `${name} cannot fix the code of a Drift whose Model elements no longer exist.` };
+  // A handoff is also blocked, for approving only, while Team is not available or no GitHub Project is linked.
+  if (proposal.data.kind === "handoff") {
+    const team = teamUnavailableReason(p);
+    if (team !== null) return { kind: "team", reason: team };
+    if (linkedGithubProject(p) === null) return { kind: "project", reason: LINK_PROJECT_FIRST };
+  }
   return null;
 }
 
@@ -968,7 +1078,7 @@ export function writeProposalFiles(p: Project, id: string, tramaDir: string): Pr
  * `skillsDirs` are the configured skills folders (besides the usual ones) where the generated `trama-req-*` skills are refreshed.
  * Approving a resolution resolves its still-open listed Drifts in the same step; `resolved` says what happened to each.
  */
-export function approveProposal(p: Project, id: string, skillsDirs: string[] = []): Proposal & { resolved: DriftOutcome[] } {
+export function approveProposal(p: Project, id: string, skillsDirs: string[] = []): Omit<Proposal, "issues"> & { resolved: DriftOutcome[]; issues: string[] } {
   const proposal = getProposal(p, id);
   requireStatus(p, proposal, "open", "approved");
   const h = health(p, proposal);
@@ -984,19 +1094,26 @@ export function approveProposal(p: Project, id: string, skillsDirs: string[] = [
   const unfixable = unfixableDrifts(p, proposal);
   if (unfixable.length > 0)
     throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} cannot be approved, nothing changed:\n${unfixable.map((r) => `- ${r}`).join("\n")}\nHave Resolve Drifts rewrite the resolution.`);
+  // A handoff is approved only while Team is available and a GitHub Project is linked (`rules#proposal/Draft`).
+  if (proposal.data.kind === "handoff") {
+    requireTeam(p);
+    if (linkedGithubProject(p) === null) throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} cannot be approved, nothing changed: ${LINK_PROJECT_FIRST}`);
+  }
 
-  // An ordinary Proposal not attached to a Drift brings its Tasks: planned, and refused, before any file changes.
+  // An ordinary Proposal not attached to a Drift brings its Tasks: planned, and refused, before any file changes. A handoff brings no Task: its issue cards are planned the same way.
   const bringsTasks = holdsTasks(p, proposal);
   const tasks = bringsTasks
     ? planApprovalTasks(p, proposal, removedElements(buildProject(baseFiles(p, proposal)).model, buildProject(applied(p, proposal)).model), createdNow())
     : [];
+  const cards = proposal.data.kind === "handoff" ? planApprovalIssues(p, { id: proposal.id, label: proposal.data.label ?? "" }, proposal.issues) : [];
   const written = writeProposalFiles(p, id, p.dir);
   written.data.status = "approved";
   save(written);
   writeApprovalTasks(p, tasks);
+  writeApprovalIssues(cards);
   const resolved = written.data.kind === "resolution" ? resolveListedDrifts(p, written) : [];
   syncRequirementSkills(p, skillsDirs);
-  return { ...written, resolved };
+  return { ...written, resolved, issues: cards.map((card) => card.id) };
 }
 
 /**
@@ -1011,6 +1128,7 @@ export function rejectProposal(p: Project, id: string, feedback = "", options: {
   const text = feedback.trim();
   if (text) proposal.body = `${proposal.body.trimEnd()}\n\n## Feedback\n\n${text}\n`;
   save(proposal);
+  removeBoundTo(p, proposal.id);
   pruneImages(p);
   return proposal;
 }
@@ -1024,15 +1142,27 @@ export function rejectProposal(p: Project, id: string, feedback = "", options: {
  * A setup Proposal handed over to an empty Model is approved at once, as the developer's approval would; when that refuses it,
  * it stays Open and `openReason` says why.
  */
-export function submitProposal(p: Project, id: string, skillsDirs: string[] = []): Proposal & { requestConsumed: boolean; warnings: Diagnostic[]; approvedAtHandOver: boolean; openReason: string | null } {
+export function submitProposal(
+  p: Project,
+  id: string,
+  skillsDirs: string[] = [],
+  options: { team?: TeamRoster } = {},
+): Proposal & { requestConsumed: boolean; warnings: Diagnostic[]; approvedAtHandOver: boolean; openReason: string | null } {
   const proposal = getProposal(p, id);
   requireStatus(p, proposal, "draft", "handed over");
   const problems: string[] = [];
   const { unbased } = health(p, proposal);
   if (unbased.length > 0) problems.push(`it contains files it never registered: ${unbased.join(", ")}. Use "trama proposal edit" first`);
   problems.push(...driftListProblems(p, proposal));
-  const errors = validateProposal(p, proposal);
-  if (errors.length > 0) problems.push(`it would leave the Model invalid:\n${errors.map((d) => `  - ${formatDiagnostic(d)}`).join("\n")}`);
+  // The hand-over of a handoff needs Team and the members of the team, which the editor answers (`cli#team`): without them it is refused with the reason.
+  const handoff = proposal.data.kind === "handoff";
+  const unavailable = handoff ? teamUnavailableReason(p) : null;
+  if (unavailable !== null) problems.push(unavailable);
+  else if (handoff && options.team === undefined) problems.push("the members of the team were not read from the editor");
+  else if (handoff && options.team !== undefined && "reason" in options.team) problems.push(options.team.reason);
+  const roster = options.team !== undefined && "handles" in options.team ? options.team.handles : undefined;
+  const errors = validateProposal(p, proposal, roster);
+  if (errors.length > 0) problems.push(`${handoff ? "it has problems" : "it would leave the Model invalid"}:\n${errors.map((d) => `  - ${formatDiagnostic(d)}`).join("\n")}`);
   const warnings = proposalWarnings(p, proposal);
   if (problems.length > 0)
     throw new TramaError(`Proposal ${cardName(p, "proposal", proposal.id)} cannot be handed over yet:\n${problems.map((x) => `- ${x}`).join("\n")}${warningsText(warnings)}`);
@@ -1052,6 +1182,29 @@ export function submitProposal(p: Project, id: string, skillsDirs: string[] = []
     return { ...handedOver, openReason: err.message };
   }
   return { ...getProposal(p, proposal.id), requestConsumed, warnings, approvedAtHandOver: true, openReason: null };
+}
+
+/**
+ * `developer.CHANGE_ISSUE_FIELD`: records the Manager's value for the field `key` of the issue `issueId` of the open handoff `handoffId`, in `manager` of the issue's file and nowhere
+ * else: the agent's value stays in its own field, a value equal to it removes the key (the undo), and the handoff stays Open, neither stale nor a Draft, its `base` untouched.
+ * Refused, changing nothing, on a handoff that is not open (never on a Draft: an agent is writing it) and for a value the field does not accept (`fieldChange`).
+ */
+export function setIssueField(p: Project, handoffId: string, issueId: string, key: string, value: ManagerValue, rules: FieldRules): ProposalIssue {
+  return withProposalLock(p, handoffId, () => {
+    const proposal = getProposal(p, handoffId);
+    const name = cardName(p, "proposal", proposal.id);
+    requireHandoff(p, proposal);
+    if (proposal.data.status === "draft") throw new TramaError(`Proposal ${name} is still being written: the agent has not handed it over, so the fields of its issues cannot be changed yet`);
+    if (proposal.data.status !== "open") throw new TramaError(`Proposal ${name} is ${proposal.data.status}; only the issues of an open handoff can be changed`);
+    const issue = proposal.issues.find((i) => i.id === issueId);
+    if (issue === undefined) throw new TramaError(`Proposal ${name} has no issue ${issueId}`);
+    const manager = fieldChange(issue.data, key, value, rules);
+    const doc = readDocument(issue.path);
+    if (Object.keys(manager).length === 0) delete doc.data["manager"];
+    else doc.data["manager"] = manager;
+    writeDocument(issue.path, doc.data, doc.body);
+    return { ...issue, data: { ...issue.data, manager } };
+  });
 }
 
 /** The developer gives up a Draft the agent never finished. Nothing is asked of the agent and nothing is appended. */

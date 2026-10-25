@@ -7,6 +7,7 @@ export const VIEW_LABELS: Record<ViewName, string> = {
   requirements: "Requirements",
   specs: "Specs",
   history: "History",
+  team: "Team",
   settings: "Settings",
   getstarted: "Get Started",
 };

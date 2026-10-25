@@ -8,6 +8,53 @@ tasks:
   - sz5n5wag
   - 1q7djv44
   - tfqpi8lq
+cleared:
+  tfqpi8lq:
+    title: Riferimento di Run all
+    proposal: d08p2hsw
+    tag: Stima Run all
+    finished: 2026-10-25T09:09:47.168Z
+    refs:
+      - panel/Board
+      - requirements/rules#drift-resolution/Running tasks
+      - requirements/tech#drift-resolution/Running tasks
+      - requirements/ui#drift-resolution/Running tasks
+  1q7djv44:
+    title: Barra di Run all
+    proposal: 2fwrajhi
+    tag: Run all bar
+    finished: 2026-10-24T19:23:34.661Z
+    refs:
+      - drift-resolution/Running tasks
+      - requirements/rules#drift-resolution/Running tasks
+      - requirements/ui#drift-resolution/Running tasks
+      - requirements/tech#drift-resolution/Running tasks
+  jz9q6bjr:
+    title: Pulsante Run all con la stima
+    proposal: l0hv1zbz
+    tag: Run all ETA
+    finished: 2026-10-24T16:42:22.864Z
+    refs:
+      - panel/Board
+      - requirements/ui#drift-resolution/Running tasks
+  nqwjne3p:
+    title: Stima di Run all nel core
+    proposal: l0hv1zbz
+    tag: Run all ETA
+    finished: 2026-10-24T16:39:59.806Z
+    refs:
+      - drift-resolution/Running tasks
+      - requirements/rules#drift-resolution/Running tasks
+      - requirements/rules#work
+      - requirements/tech#drift-resolution/Running tasks
+  sz5n5wag:
+    title: Unioni come ordini
+    proposal: l0hv1zbz
+    tag: Run all ETA
+    finished: 2026-10-24T16:34:43.551Z
+    refs:
+      - work
+      - requirements/tech#work
 ---
 # Stima del tempo di Run all
 

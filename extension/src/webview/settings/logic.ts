@@ -186,3 +186,18 @@ export type SoloState = Omit<Extract<ToWebview, { type: "soloMode" }>, "type">;
 
 /** The setting the `Solo Mode` row follows in the `Project` group of the Settings tab and of the wizard's step. */
 export const SKILLS_DIR_KEY = "trama.skillsDir";
+
+/** The title of the `Manager Mode` row and the accessible name of its `Checkbox`. */
+export const MANAGER_TITLE = "Manager Mode";
+
+/** The description under the title of the `Manager Mode` row. */
+export const MANAGER_EXPLANATION = "Plan work for your team and publish it as GitHub issues. Only for this working copy.";
+
+/** Shown, with an `Info` icon, when origin is not on GitHub: the control is off and disabled. */
+export const MANAGER_NEEDS_GITHUB_TEXT = "Needs a repository on GitHub (the origin remote).";
+
+/** What follows the repository when origin is on GitHub. */
+export const ORIGIN_ON_GITHUB_TEXT = "origin on GitHub";
+
+/** What the host's `managerMode` says, without its type; null until the first message (and always outside a project): the row is not shown then. */
+export type ManagerState = Omit<Extract<ToWebview, { type: "managerMode" }>, "type">;

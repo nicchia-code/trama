@@ -2,6 +2,7 @@ import { deliverComparison, getAnnouncement, readUnownedComparison } from "./ann
 import { concernSameThing, extent } from "./blocking";
 import { recordComparison } from "./compared";
 import { TramaError } from "./errors";
+import { listIssues } from "./issues";
 import { flattenStates } from "./model";
 import { getProposal } from "./proposals";
 import { loadProject, type ProjectModel, resolveProjectRef } from "./requirements";
@@ -22,6 +23,16 @@ import {
   writeTask,
 } from "./work";
 
+/** A published issue whose references fall in the Machine being compared, as the briefing gives it (`rules#issue/Published`). */
+export interface BriefedIssue {
+  number: number;
+  title: string;
+  /** Where the issue was at the last read of GitHub, or `Open` as published when the editor has no read to tell. */
+  status: string;
+  /** The references of the issue that fall in the comparison. */
+  refs: string[];
+}
+
 /** What `trama comparison new` gathers for one Machine: the references and what concerns them. */
 export interface Briefing {
   project: ProjectModel;
@@ -30,6 +41,8 @@ export interface Briefing {
   openTasks: Task[];
   openDrifts: Drift[];
   closedDrifts: Drift[];
+  /** The published issues, not `Not planned`, whose references fall in the comparison. */
+  issues: BriefedIssue[];
 }
 
 /** The references of a Machine when none is named: the Machine, its States and its Events. */
@@ -37,7 +50,11 @@ function wholeMachine(machine: Machine): string[] {
   return [machine.id, ...flattenStates(machine.states).map((s) => `${machine.id}/${s.name}`), ...machine.events.map((e) => `${machine.id}.${e.name}`)];
 }
 
-export function briefing(p: Project, machineId: string, refs: string[]): Briefing {
+/**
+ * The briefing of a Machine. `states` is where the editor says the published issues were at its last read of GitHub (by GitHub number); an issue it does not name is as published,
+ * `Open`. The issues listed are the published ones whose references fall in the scope and that are not `Not planned`.
+ */
+export function briefing(p: Project, machineId: string, refs: string[], states: readonly { number: number; status: string }[] = []): Briefing {
   const project = loadProject(p);
   const machine = project.model.machines.get(machineId);
   if (!machine) throw new TramaError(`Unknown Machine "${machineId}"`);
@@ -60,6 +77,12 @@ export function briefing(p: Project, machineId: string, refs: string[]): Briefin
     openTasks: tasks,
     openDrifts: drifts.filter((d) => d.data.status === "open"),
     closedDrifts: drifts.filter((d) => d.data.status === "resolved" && d.data.resolution !== "unified"),
+    issues: listIssues(p).flatMap((issue): BriefedIssue[] => {
+      if (issue.data.state !== "published" || issue.data.number === null || !concerns(issue)) return [];
+      const status = states.find((s) => s.number === issue.data.number)?.status ?? "Open";
+      if (status === "Not planned") return [];
+      return [{ number: issue.data.number, title: issue.title, status, refs: issue.data.refs.filter((ref) => concernSameThing(project, [ref], scope)) }];
+    }),
   };
 }
 

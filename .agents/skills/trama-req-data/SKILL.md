@@ -28,6 +28,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Away notifications data** (`away-notifications.md`): Use when touching what Trama keeps for the ntfy notifications: settings, access token and notices in memory. Sections: `notice`, `away-notifications`.
 - **Dati generali** (`general.md`): Usa sempre quando lavori sui dati: regole che valgono per tutte le informazioni del Sistema. Sections: `General`.
 - **Note dei ghost** (`ghost-notes.md`): Usa quando tocchi il campo delle note negli annunci e nel quadro della Board. Sections: `agent.DECLARE_ANNOUNCEMENT_NOTE`.
+- **Handoffs and issues** (`handoff.md`): Use when reading or writing the issues of a handoff, the issue cards after approval, or the linked GitHub Project of the working copy. Sections: `issue`, `github-project`.
 - **Dati della History e di Clear** (`history.md`): Usa quando tocchi i dati delle voci di History e ciò che Clear della colonna Done scrive. Sections: `voce-history`, `developer.CLEAR_DONE`, `developer.DELETE_TASK`.
 - **omp Chat** (`omp-chat.md`): Usa quando salvi o leggi le conversazioni di omp Chat, General compresa, da riprendere dopo una ricarica, o l'uso dell'abbonamento. Sections: `omp-chat`, `omp-chat-conversation`, `omp-chat-general`.
 - **Dati delle prenotazioni dei file** (`prenotazioni.md`): Usa quando leggi o scrivi le prenotazioni dei file in `.trama/claims/`. Sections: `prenotazione-file`.
@@ -35,5 +36,6 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Dati del raffinamento** (`raffinamento.md`): Usa quando tocchi i dati del raffinamento delle Proposal obsolete: il campo refining e la coda in memoria. Sections: `raffinamento`.
 - **Solo merge** (`solo-merge.md`): Use when reading or writing the remembered merge of Solo mode. Sections: `solo-merge`.
 - **Solo mode** (`solo-mode.md`): Use when reading or writing the project's Solo mode file. Sections: `solo-switch`.
+- **Team** (`team.md`): Use when reading or writing the Manager mode file or the people of the Manager's team kept in the editor. Sections: `manager-mode`, `person`.
 - **Dati di Unify Drifts** (`unify-drifts.md`): Usa quando tocchi i campi dei Drift unificati e dei Drift uniti: `unifies`, `unifiedInto`, `resolution: unified` e `origin` e `previous` come liste. Sections: `agent.UNIFY_DRIFTS`, `drift/Unified`.
 - **Dati di Task e Drift** (`work.md`): Usa quando tocchi i dati di Task e Drift. Sections: `task`, `task/Taken by the agent`, `drift`.

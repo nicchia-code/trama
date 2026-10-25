@@ -6,10 +6,12 @@ import { homedir } from "node:os";
 import { delimiter, join, win32 } from "node:path";
 import { announce, newTerminalId, type AgentOrigin } from "../../../src/core/announcements";
 import { ADVISOR_SENTENCE } from "../../../src/core/advisors";
+import { GH_ACCESS_ARGS, GH_LOGIN_ARGS } from "../../../src/core/github";
 import { writeFileAtomic } from "../../../src/core/atomic-write";
 import { releaseTerminalClaims } from "../../../src/core/claims";
 import { developerExclusions, findInstructionFiles, instructionExclusions, mergeExclusions } from "../../../src/core/instruction-files";
 import { TramaError } from "../../../src/core/errors";
+import { publishingIssues } from "../../../src/core/issues";
 import { projectAt } from "../../../src/core/store";
 import { type NtfyTarget, ntfyTarget } from "../../../src/core/ntfy";
 import { releaseTasks } from "../../../src/core/work";
@@ -24,7 +26,7 @@ import { addHolderFollower } from "./followed-holders";
 import { agentCommandLine, isSupportedShell, programName, quote, quoteProgram, type ShellFamily, shellFamily } from "./quote";
 import type { OmpLoginProvider } from "../omp-login";
 import { interruptTerminalRounds, ownWindowId, questionEndpoint } from "./questions";
-import { pruneAgentProcesses, releaseUnfollowed } from "./task-release";
+import { pruneAgentProcesses, releaseUnfollowed, stopUnfollowedPublications } from "./task-release";
 import { ASK_DEVELOPER_SENTENCE, AUTO_EXIT_SENTENCE, instructedMessage, languageSentence, PARALLEL_EXECUTION_SENTENCE, withAsyncDriftResolver, withContextSharing, withLanguage } from "./prompts";
 import { agentTemplate, askMoreCommandLine, askMoreOptions, canScan, launchOverlay, type Models, ompArguments, ompOptions, type Role, roleOf, type RunModel, terminalEnv } from "./terminal-agent";
 import { cursorKeyEnv } from "./cursor-api-key";
@@ -485,6 +487,8 @@ export async function runExecutionCheck(openRoot?: string): Promise<void> {
   if (openRoot !== undefined) roots.add(openRoot);
   for (const root of roots) {
     await releaseUnfollowed(root);
+    // Only when an issue is being published: the check takes no extra turn of the event loop at rest.
+    if (publishingIssues(projectAt(root)).length > 0) await stopUnfollowedPublications(root);
     await pruneAgentProcesses(root);
   }
 }
@@ -722,6 +726,8 @@ export interface LaunchJobOptions {
   runAll?: RunAll;
   /** False for the reconciliation of a merge: the instruction has no sub-agent limit and no sub-agent sentence, and the command has no `--slow`. Absent, true. */
   subAgents?: boolean;
+  /** Called once, with the identity of the terminal (or omp Chat conversation) the instruction goes to, when the launch is sure to go on: the publication of issues records there who publishes them. */
+  onStarted?: (terminal: string) => void;
 }
 
 export async function launchAgent(
@@ -756,6 +762,7 @@ export async function launchAgent(
     if (!canSend()) return undefined;
     if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
     const terminalId = newTerminalId();
+    jobOptions.onStarted?.(terminalId);
     // With omp Chat in use the instruction opens a conversation; its card and job are written first, under the identity a terminal would have, so a failed start hands them to that terminal.
     let writtenFor: "conversation" | undefined;
     if (ompChatInUse()) {
@@ -949,6 +956,18 @@ export function installOmp(onFinished: () => void, windows = process.platform ==
 export function loginOmp(program: string, provider: OmpLoginProvider, onFinished: () => void, windows = process.platform === "win32", systemCertificates = configuredSystemCertificates()): vscode.Terminal {
   const { family, shellPath } = bareTerminalShell(windows);
   return openBareTerminal(`Log in to ${provider.name}`, shellPath, ompTerminalEnv(program, systemCertificates), `${quoteProgram(family, program)} login ${provider.id}`, onFinished);
+}
+
+/**
+ * Log in `gh`, or give it access to Projects (`rules#github-project`): a new visible terminal in the terminals area, shaped like `loginOmp`'s, that runs
+ * `gh auth login --hostname github.com --web --scopes project` (`Log in to GitHub`) or `gh auth refresh --hostname github.com --scopes project` (`Give access to Projects`).
+ * `program` is the `gh` that `findGh` found; `args` is one of the two fixed lists of `src/core/github.ts`, never text the webview sent. It is no agent terminal: no `TRAMA_*`
+ * variable, no hook, no ghost, no job. `onFinished` runs once, when the command ends or the terminal closes, whatever the outcome.
+ */
+export function loginGitHub(program: string, access: boolean, onFinished: () => void, windows = process.platform === "win32"): vscode.Terminal {
+  const { family, shellPath } = bareTerminalShell(windows);
+  const args = access ? GH_ACCESS_ARGS : GH_LOGIN_ARGS;
+  return openBareTerminal(access ? "Give access to Projects" : "Log in to GitHub", shellPath, undefined, `${quoteProgram(family, program)} ${args.join(" ")}`, onFinished);
 }
 
 /** How long `omp auth-broker logout` may take before Trama stops it. */

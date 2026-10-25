@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { basename } from "node:path";
 import * as vscode from "vscode";
 import { boardDecisionCount } from "../../../../src/core/board-decisions";
+import { managerStatus } from "../../../../src/core/manager-mode";
 import { buildSnapshot } from "../../../../src/core/snapshot";
 import type { Project } from "../../../../src/core/store";
 import type { MenuSituation, MenuViewName, MergeMenuState, ToMenuWebview } from "../../menu-protocol";
@@ -163,7 +164,7 @@ export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
         try {
           const snapshot = buildSnapshot(project, driftsFinishing(project.root), proposalsFinishing(project.root), tasksFinishing(project.root));
           this.name = projectName(project, snapshot.system.name);
-          return { decisions: boardDecisionCount(snapshot, configuredAutoUpdateStaleProposals()), tasksSinceScan: snapshot.tasksSinceScan };
+          return { decisions: boardDecisionCount(snapshot, configuredAutoUpdateStaleProposals()), tasksSinceScan: snapshot.tasksSinceScan, handoffs: snapshot.handoffs.length };
         } catch {
           this.name = projectName(project, undefined);
           return undefined;
@@ -174,6 +175,15 @@ export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
       scan: () => this.guarded(() => this.panel.launch({ kind: "scan" })),
       openFolder: () => void vscode.commands.executeCommand("workbench.action.files.openFolder"),
       mergeState: () => this.soloMerge.state(),
+      manager: () => {
+        const project = findProject();
+        if (project === undefined) return false;
+        try {
+          return managerStatus(project).available;
+        } catch {
+          return false;
+        }
+      },
       startMerge: () => this.guarded(() => this.soloMerge.merge()),
       openMergeEditor: () => this.guarded(() => this.soloMerge.openMergeEditor()),
       reconcileMerge: () => this.guarded(() => this.soloMerge.reconcile()),

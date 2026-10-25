@@ -24,6 +24,8 @@ export interface ChatState {
   sendMode: SendMode;
   /** The usage of the subscription, as the host last sent it (`usage`). */
   usage: UsageView;
+  /** The project's GitHub repository (`owner/repo`) the host sent; null without one. */
+  githubRepo: string | null;
 }
 
 /** What the bar and the dialog of the usage draw: the last report (none before the first), whether a request runs, and why the last one failed. */
@@ -33,7 +35,7 @@ export interface UsageView {
   error?: string;
 }
 
-export const initialChatState = (): ChatState => ({ items: [], selected: undefined, conversations: {}, sendMode: "steer", usage: { fetching: false } });
+export const initialChatState = (): ChatState => ({ items: [], selected: undefined, conversations: {}, sendMode: "steer", usage: { fetching: false }, githubRepo: null });
 
 const fresh = (): ConversationView => ({ transcript: emptyTranscript(), models: [], focusToken: 0 });
 
@@ -51,9 +53,11 @@ export function selectedOf(state: ChatState): string | undefined {
 export function reduce(state: ChatState, message: ToChatWebview, now: number): ChatState {
   switch (message.type) {
     case "reset":
-      return { ...initialChatState(), sendMode: state.sendMode };
+      return { ...initialChatState(), sendMode: state.sendMode, githubRepo: state.githubRepo };
     case "theme":
       return state;
+    case "githubRepo":
+      return { ...state, githubRepo: message.repo };
     case "sendMode":
       return { ...state, sendMode: message.mode };
     case "usage":

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ASK_DEVELOPER_SENTENCE, askMorePart, AUTO_EXIT_SENTENCE, buildPrompt, importPrompt, instructedMessage, languageSentence, mayFileDrifts, terminalName, withLanguage } from "../extension/src/host/prompts";
+import { ASK_DEVELOPER_SENTENCE, askMorePart, AUTO_EXIT_SENTENCE, buildPrompt, importPrompt, instructedMessage, languageSentence, mayFileDrifts, type ResolvedAction, terminalName, withLanguage } from "../extension/src/host/prompts";
 
 test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "written-design", request: "2026-10-04T19-05-12" })).toBe(
@@ -48,6 +48,30 @@ test("the agent terminal is named after the work: the card's short number, or a 
   expect(terminalName({ kind: "reconcileMerge", branch: "main" }, short)).toBe("Merge");
   expect(terminalName({ kind: "implement-all" }, short)).toBe("All tasks");
   expect(terminalName({ kind: "import" }, short)).toBe("Import");
+});
+
+test("the handoff request and the publication of issues are one-line instructions of the trama-handoff skill, with their terminals and no Drifts", () => {
+  const short = (kind: "task" | "proposal", id: string) => (kind === "task" ? `T${id.length}` : `P${id.length}`);
+  expect(buildPrompt({ kind: "handoff-request", request: "r1" })).toBe("Use the trama-handoff skill on the handoff request in `.trama/requests/r1.md`. Bind the first handoff you open to it with the `request` field.");
+  expect(buildPrompt({ kind: "publish-issues", handoff: "ab12cd34" })).toBe("Use the trama-handoff skill to publish the issues of handoff ab12cd34.");
+  expect(terminalName({ kind: "handoff-request", request: "r1" }, short)).toBe("Handoff");
+  expect(terminalName({ kind: "publish-issues", handoff: "ab12cd34" }, short)).toBe("Publish P8");
+  expect(mayFileDrifts({ kind: "handoff-request", request: "r1" })).toBe(false);
+  expect(mayFileDrifts({ kind: "publish-issues", handoff: "ab12cd34" })).toBe(false);
+});
+
+test("Comment update and the Scan of a closed issue are one-line instructions with their terminals named after the issue's number: the first files no Drift, the second may", () => {
+  const short = (kind: "task" | "proposal", id: string) => (kind === "task" ? `T${id.length}` : `P${id.length}`);
+  const update: ResolvedAction = { kind: "update-issue", issue: "ab12cd34", number: 126 };
+  const scan: ResolvedAction = { kind: "scan-issue", issue: "ab12cd34", number: 126, refs: ["order/Paid", "requirements/ui#panel"] };
+  expect(buildPrompt(update)).toBe("Use the trama-handoff skill to comment on issue ab12cd34 what changed in the Model since it was published.");
+  expect(buildPrompt(scan)).toBe(
+    "Use the trama-scan skill on the references of issue ab12cd34: `order/Paid`, `requirements/ui#panel`. The work was done by a person of the team from this issue, so a difference leans towards fixing the code.",
+  );
+  expect(terminalName(update, short)).toBe("Update #126");
+  expect(terminalName(scan, short)).toBe("Scan #126");
+  expect(mayFileDrifts(update)).toBe(false);
+  expect(mayFileDrifts(scan)).toBe(true);
 });
 
 test("a chosen language ends every job's instruction on the same line, trimmed and as typed; blank asks nothing", () => {

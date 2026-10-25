@@ -37,7 +37,7 @@ test("the menu's script is shipped in the package and built by the build script"
   expect(build).toContain('format: "iife"');
 });
 
-test("the six Show commands are in the palette under the Trama category, each running the view it names", () => {
+test("the seven Show commands are in the palette under the Trama category, each running the view it names", () => {
   const commands = contributes.commands as { command: string; title: string; category: string }[];
   const shows = commands.filter((entry) => entry.command.startsWith("trama.show") && entry.command !== "trama.showActivities");
   expect(shows).toEqual([
@@ -46,6 +46,7 @@ test("the six Show commands are in the palette under the Trama category, each ru
     { command: "trama.showRequirements", title: "Show Requirements", category: "Trama" },
     { command: "trama.showSpecs", title: "Show Specs", category: "Trama" },
     { command: "trama.showHistory", title: "Show History", category: "Trama" },
+    { command: "trama.showTeam", title: "Show Team", category: "Trama" },
     { command: "trama.showSettings", title: "Show Settings", category: "Trama" },
   ]);
   expect(Object.keys(SHOW_COMMANDS)).toEqual(shows.map((entry) => entry.command));

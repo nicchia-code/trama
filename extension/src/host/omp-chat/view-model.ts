@@ -16,6 +16,8 @@ export interface ChatSurface {
   reveal(preserveFocus: boolean): void;
   /** The `trama.theme` setting. */
   theme(): ThemeSetting;
+  /** The project's GitHub repository (`owner/repo`) read from its `origin` remote; null when there is none or it is not on GitHub. */
+  githubRepo(): string | null;
   /** The text of a file the instruction carries, cut to a reasonable size; undefined when it cannot be read. */
   readText(path: string): string | undefined;
   openLink(url: string): void;
@@ -110,6 +112,8 @@ export class ChatViewModel implements ChatViewPort {
     this.ready = true;
     this.surface.post({ type: "reset" });
     this.surface.post({ type: "theme", setting: this.surface.theme() });
+    const repo = this.surface.githubRepo();
+    if (repo !== null) this.surface.post({ type: "githubRepo", repo });
     this.surface.post({ type: "sendMode", mode: this.sendMode });
     this.postConversations();
     if (this.usage !== undefined) this.surface.post(this.usage.message());

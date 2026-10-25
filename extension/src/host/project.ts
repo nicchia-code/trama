@@ -24,20 +24,30 @@ export function findProject(uri?: vscode.Uri): Project | undefined {
   return folder && projectAt(folder.uri.fsPath);
 }
 
+/** What initializing a folder gives: the project and, when Manager mode was asked for and could not be written, why (the project is created either way). */
+export interface Initialized {
+  project: Project;
+  managerError: string | null;
+}
+
 /**
  * Runs `trama project new` in the workspace folder `root`, the one the developer chose in the setup wizard, with the same code and skills folder as
- * the command line (`trama.skillsDir`, as the wizard has just saved it) and, when the wizard chose it, `solo`: Solo mode is then written before any other file, and a failure
- * (no git repository, a failed write) fails the initialization with nothing created. When it refuses to overwrite customised skill files, shows why and retries
- * with `force: true` only after an explicit modal confirmation. Returns the new Project, or undefined
+ * the command line (`trama.skillsDir`, as the wizard has just saved it) and, when the wizard chose them, `solo` and `manager`. Solo mode is then written before any other file, and a failure
+ * (no git repository, a failed write) fails the initialization with nothing created; Manager mode is written after the project's files, and a failure leaves the project created and
+ * comes back as `managerError`. When it refuses to overwrite customised skill files, shows why and retries
+ * with `force: true` only after an explicit modal confirmation. Returns the new project, or undefined
  * when nothing was created because the developer declined the overwrite. A folder that is already a project keeps its Model, Requirements and skills.
  */
-export async function initializeProject(root: string, solo?: SoloKind): Promise<Project | undefined> {
-  if (existsSync(join(root, TRAMA_DIR))) return projectAt(root);
+export async function initializeProject(root: string, options: { solo?: SoloKind; manager?: boolean } = {}): Promise<Initialized | undefined> {
+  if (existsSync(join(root, TRAMA_DIR))) return { project: projectAt(root), managerError: null };
   const skillsDir = configuredSkillsDir();
+  const { solo, manager } = options;
   for (let force = false; ; force = true) {
     try {
-      run(["--root", root, "project", "new", "--input", JSON.stringify({ skillsDir, ...(solo === undefined ? {} : { solo }), ...(force ? { force: true } : {}) })], root);
-      return projectAt(root);
+      const { out } = run(["--root", root, "--json", "project", "new", "--input", JSON.stringify({ skillsDir, ...(solo === undefined ? {} : { solo }), ...(manager === true ? { manager } : {}), ...(force ? { force: true } : {}) })], root);
+      const result: unknown = JSON.parse(out);
+      const managerError = typeof result === "object" && result !== null && "managerError" in result && typeof result.managerError === "string" ? result.managerError : null;
+      return { project: projectAt(root), managerError };
     } catch (err) {
       if (!(err instanceof TramaError || err instanceof UsageError)) throw err;
       if (force || !err.message.includes('"force": true')) {

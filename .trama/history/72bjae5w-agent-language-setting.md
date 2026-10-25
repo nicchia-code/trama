@@ -6,6 +6,36 @@ tasks:
   - m3lod1ja
   - p80glqst
   - e972yotl
+cleared:
+  p80glqst:
+    title: Lingua in Settings e wizard
+    proposal: ft7jlc46
+    tag: Language
+    finished: 2026-10-24T18:57:28.108Z
+    refs:
+      - setup-wizard
+      - requirements/rules#setup-wizard
+      - requirements/ui#setup-wizard
+      - requirements/ui#panel/Settings
+      - requirements/ui#agent-launching
+  m3lod1ja:
+    title: Frase della lingua attiva
+    proposal: ft7jlc46
+    tag: Language
+    finished: 2026-10-24T18:56:30.873Z
+    refs:
+      - agent-terminal
+      - requirements/rules#agent-terminal
+      - requirements/rules#developer.ASK_MORE
+      - requirements/rules#omp-chat-general
+      - requirements/tech#agent-terminal
+  e972yotl:
+    title: Sezioni Language delle skill
+    proposal: ft7jlc46
+    tag: Language
+    finished: 2026-10-24T18:55:09.320Z
+    refs:
+      - requirements/tech#General
 ---
 # Agent language setting
 

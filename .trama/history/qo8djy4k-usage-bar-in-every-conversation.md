@@ -4,6 +4,25 @@ updated: 2026-10-24T16:44:14.397Z
 summary: The subscription usage bar appears under the message field of every omp Chat conversation, with the provider of that conversation's model, from one report per window.
 tasks:
   - pochz2mv
+cleared:
+  pochz2mv:
+    title: Uso in ogni conversazione
+    proposal: oic1xvs8
+    tag: uso omp Chat
+    finished: 2026-10-24T16:37:55.356Z
+    refs:
+      - omp-chat
+      - omp-chat-general
+      - requirements/rules#omp-chat
+      - requirements/tech#omp-chat
+      - requirements/ui#omp-chat
+      - requirements/data#omp-chat
+      - requirements/quality#omp-chat
+      - requirements/rules#omp-chat-general
+      - requirements/tech#omp-chat-general
+      - requirements/ui#omp-chat-general
+      - requirements/quality#omp-chat-conversation
+      - requirements/data#omp-chat-general
 ---
 # Usage bar in every conversation
 

@@ -35,6 +35,10 @@ frameworks:
     note: draws the Diagram on a canvas, hosted in a React component
   - name: elkjs
     note: lays out the Diagram
+  - name: mermaid
+    version: "12"
+    note: draws the `mermaid` blocks of the panel's Markdown, from its own bundle loaded on demand
+    chosenByAgent: the reference renderer of `mermaid` blocks, the one GitHub uses for issues
   - name: yaml
     note: front matter and settings files
   - name: zod
@@ -58,3 +62,5 @@ deployment:
 infrastructure:
   - name: omp
     note: "the only coding agent Trama runs and the only source of model names; required, installed with its official installer (`https://omp.sh/install`, `install.ps1` on Windows) when missing and updated with `omp update` before Trama launches it"
+  - name: GitHub CLI
+    note: "`gh`, needed only with Manager mode: Trama runs it only to read the GitHub Project, the agent runs it to publish issues; installed and logged in by the Manager, never by Trama"

@@ -16,6 +16,10 @@ export interface ShellState {
   views: Partial<Record<ViewName, ReactNode>>;
   /** The question overlay: its bar sits above the view and its dialog opens above everything. */
   questions: ReactNode;
+  /** The project's GitHub repository (`owner/repo`) the host sent with the picture; null without one. */
+  githubRepo: string | null;
+  /** Whether Team is available (Manager mode on and origin on GitHub): only then the panel has the Team view. */
+  teamAvailable: boolean;
 }
 
 export interface ShellStore {
@@ -41,7 +45,7 @@ export function createShellStore(initial: ShellState): ShellStore {
 }
 
 /** The views of a project, in the order of the side menu. */
-const PROJECT_VIEWS = ["board", "diagram", "requirements", "specs", "history", "settings"] as const;
+const PROJECT_VIEWS = ["board", "diagram", "requirements", "specs", "history", "team", "settings"] as const;
 
 /** The panel: the alerts, the diagnostics and the question bar above the view the developer chose. It has no tab bar: the side menu, the commands and the links choose the view. */
 export function Shell({
@@ -54,7 +58,7 @@ export function Shell({
   const state = useSyncExternalStore(store.subscribe, store.get);
   const present = state.hasProject === true;
   // Without a project the views are Get Started and Settings; with one, every view but Get Started.
-  const views = present ? PROJECT_VIEWS : (["getstarted", "settings"] as const);
+  const views = present ? PROJECT_VIEWS.filter((view) => view !== "team" || state.teamAvailable) : (["getstarted", "settings"] as const);
   return (
     <TooltipProvider>
       <div className="flex h-full flex-col">

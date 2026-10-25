@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import type { ToChatHost, ToChatWebview } from "../../omp-chat-protocol";
 import { GENERAL_ID } from "../../../../src/core/omp-chat-view";
+import { GithubRepoContext } from "../markdown";
 import { TooltipProvider } from "../ui/tooltip";
 import { Conversation, type ConversationActions } from "./conversation";
 import { answerFormIn, answerPermissionIn, type ChatStore, reduce, selectedOf, selectTab, sendMessage } from "./state";
@@ -66,14 +67,16 @@ export function ChatApp({ store, controller }: { store: ChatStore; controller: C
   if (state.items.length === 0) return <Empty />;
   const selected = selectedOf(state);
   return (
-    <TooltipProvider>
-      <div className="flex h-full flex-col">
-        <ConversationTabs items={state.items} selected={selected} generalKept={state.conversations[GENERAL_ID]?.status?.phase === "kept"} onSelect={controller.select} onClose={controller.close} />
-        {state.items.map((item) => {
-          const view = state.conversations[item.id];
-          return view === undefined ? null : <Conversation key={item.id} item={item} view={view} selected={item.id === selected} actions={controller} sendMode={state.sendMode} usage={state.usage} />;
-        })}
-      </div>
-    </TooltipProvider>
+    <GithubRepoContext.Provider value={state.githubRepo}>
+      <TooltipProvider>
+        <div className="flex h-full flex-col">
+          <ConversationTabs items={state.items} selected={selected} generalKept={state.conversations[GENERAL_ID]?.status?.phase === "kept"} onSelect={controller.select} onClose={controller.close} />
+          {state.items.map((item) => {
+            const view = state.conversations[item.id];
+            return view === undefined ? null : <Conversation key={item.id} item={item} view={view} selected={item.id === selected} actions={controller} sendMode={state.sendMode} usage={state.usage} />;
+          })}
+        </div>
+      </TooltipProvider>
+    </GithubRepoContext.Provider>
   );
 }

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startCursorApiKey } from "../extension/src/host/cursor-api-key";
 
+const NO_ORIGIN = { repository: null, reason: "No origin remote" };
 // A minimal editor: one webview panel that records what it is sent, user settings in memory, and the modal dialog answers.
 const messages: Record<string, unknown>[] = [];
 const userSettings = new Map<string, unknown>();
@@ -525,17 +526,17 @@ test("a folder outside the workspace is refused, and the workspace folders are s
   expect(messages.some((m) => m["type"] === "error")).toBe(true);
   messages.length = 0;
   await send({ type: "ready" });
-  expect(messages).toContainEqual({ type: "workspaceFolders", folders: [{ name: "app", root, hasFiles: false, inGit: false }] });
+  expect(messages).toContainEqual({ type: "workspaceFolders", folders: [{ name: "app", root, hasFiles: false, inGit: false, origin: NO_ORIGIN }] });
 });
 
 test("the folders of the first setup say whether a folder has files: a name without a dot counts, a dot name does not", async () => {
   mkdirSync(join(root, ".git"));
   await send({ type: "ready" });
-  expect(messages).toContainEqual({ type: "workspaceFolders", folders: [{ name: "app", root, hasFiles: false, inGit: false }] });
+  expect(messages).toContainEqual({ type: "workspaceFolders", folders: [{ name: "app", root, hasFiles: false, inGit: false, origin: NO_ORIGIN }] });
   writeFileSync(join(root, "main.ts"), "");
   messages.length = 0;
   await send({ type: "ready" });
-  expect(messages).toContainEqual({ type: "workspaceFolders", folders: [{ name: "app", root, hasFiles: true, inGit: false }] });
+  expect(messages).toContainEqual({ type: "workspaceFolders", folders: [{ name: "app", root, hasFiles: true, inGit: false, origin: NO_ORIGIN }] });
 });
 
 test("Import from Code or Start from Scratch on the Diagram with the empty Model opens the wizard in the Settings tab with that path", async () => {
@@ -654,7 +655,7 @@ const soloMessages = () => messages.filter((m) => m["type"] === "soloMode");
 test("the folders of the first setup say whether a folder is in a git repository", async () => {
   gitRepo();
   await send({ type: "ready" });
-  expect(messages).toContainEqual({ type: "workspaceFolders", folders: [{ name: "app", root, hasFiles: false, inGit: true }] });
+  expect(messages).toContainEqual({ type: "workspaceFolders", folders: [{ name: "app", root, hasFiles: false, inGit: true, origin: NO_ORIGIN }] });
 });
 
 test("without a project no soloMode is sent; in a project it is sent at ready and each time the Settings view asks for the omp status", async () => {
@@ -760,4 +761,147 @@ test("a failed write of Solo mode in the Empty Model mode counts as a failed sav
   expect(userSettings.get("scan")).toBe("m");
   expect(launched).toEqual([]);
   expect(setups).toBe(0);
+});
+
+// ---- Manager mode ----
+
+const managerMessages = () => messages.filter((m) => m["type"] === "managerMode");
+const managerFile = () => join(root, ".trama", "manager", "mode.json");
+const GITHUB_ORIGIN = "git@github.com:Acme/Web.git";
+
+/** A git repository with the given origin, and a Trama project with an empty Model when asked. */
+function repoWithOrigin(origin: string | null, project = true): void {
+  gitRepo(project);
+  if (origin !== null) spawnSync("git", ["remote", "add", "origin", origin], { cwd: root });
+}
+
+test("the folders of the first setup carry what their origin says", async () => {
+  repoWithOrigin(GITHUB_ORIGIN, false);
+  await send({ type: "ready" });
+  expect(messages).toContainEqual({ type: "workspaceFolders", folders: [{ name: "app", root, hasFiles: false, inGit: true, origin: { repository: "acme/web", reason: null } }] });
+});
+
+test("without a project no managerMode is sent; in a project it is sent at ready, with every picture and each time the Settings view asks for the omp status", async () => {
+  repoWithOrigin(GITHUB_ORIGIN, false);
+  await send({ type: "ready" });
+  expect(managerMessages()).toEqual([]);
+  mkdirSync(join(root, ".trama", "model"), { recursive: true });
+  writeFileSync(join(root, ".trama", "model", "system.md"), "# App\n\nx\n");
+  messages.length = 0;
+  await send({ type: "ready" });
+  expect(managerMessages()).toEqual([{ type: "managerMode", available: false, recorded: false, repository: "acme/web", reason: null }]);
+  messages.length = 0;
+  await send({ type: "ompStatusWanted" });
+  expect(managerMessages()).toEqual([{ type: "managerMode", available: false, recorded: false, repository: "acme/web", reason: null }]);
+});
+
+test("the origin is read again with every picture: a change of origin reaches the panel without reloading", async () => {
+  repoWithOrigin(GITHUB_ORIGIN);
+  await send({ type: "setManagerMode", on: true });
+  spawnSync("git", ["remote", "set-url", "origin", "https://gitlab.com/acme/web"], { cwd: root });
+  messages.length = 0;
+  await send({ type: "ready" });
+  expect(managerMessages().at(-1)).toEqual({ type: "managerMode", available: false, recorded: true, repository: null, reason: "Origin is not on GitHub" });
+  spawnSync("git", ["remote", "remove", "origin"], { cwd: root });
+  messages.length = 0;
+  await send({ type: "ready" });
+  expect(managerMessages().at(-1)).toEqual({ type: "managerMode", available: false, recorded: true, repository: null, reason: "No origin remote" });
+});
+
+test("setManagerMode writes only the Manager mode file and answers with the status; off deletes only the file", async () => {
+  repoWithOrigin(GITHUB_ORIGIN);
+  await send({ type: "setManagerMode", on: true });
+  expect(managerMessages()).toEqual([{ type: "managerMode", available: true, recorded: true, repository: "acme/web", reason: null }]);
+  expect(readFileSync(managerFile(), "utf8")).toBe("{}\n");
+  expect(readFileSync(join(root, ".trama", "manager", ".gitignore"), "utf8")).toBe("*\n");
+  messages.length = 0;
+  await send({ type: "setManagerMode", on: false });
+  expect(managerMessages()).toEqual([{ type: "managerMode", available: false, recorded: false, repository: "acme/web", reason: null }]);
+  expect(existsSync(managerFile())).toBe(false);
+  expect(existsSync(join(root, ".trama", "model", "system.md"))).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("turning Manager mode on without origin on GitHub is an editor error with the reason, and the row is told the recorded value", async () => {
+  repoWithOrigin(null);
+  await send({ type: "setManagerMode", on: true });
+  expect(errors).toEqual(["Trama: could not save Manager Mode: Manager Mode needs a repository on GitHub (the origin remote)."]);
+  expect(managerMessages()).toEqual([{ type: "managerMode", available: false, recorded: false, repository: null, reason: "No origin remote" }]);
+  expect(existsSync(join(root, ".trama", "manager"))).toBe(false);
+});
+
+test("Manager mode is not a setting: setSetting refuses it, and a value that is not a boolean is refused", async () => {
+  repoWithOrigin(GITHUB_ORIGIN);
+  await send({ type: "setSetting", key: "trama.managerMode", value: true });
+  await send({ type: "setManagerMode", on: "yes" });
+  expect(messages.filter((m) => m["type"] === "error")).toHaveLength(2);
+  expect(existsSync(join(root, ".trama", "manager"))).toBe(false);
+});
+
+test("the first setup with Manager mode passes it to project new: written after the project's files, with the project told", async () => {
+  repoWithOrigin(GITHUB_ORIGIN, false);
+  await send(confirm({ choice: "scratch", manager: true }));
+  expect(existsSync(join(root, ".trama", "model", "system.md"))).toBe(true);
+  expect(readFileSync(managerFile(), "utf8")).toBe("{}\n");
+  expect(results().at(-1)).toEqual({ type: "setup", busy: false, error: null });
+  expect(managerMessages().at(-1)).toEqual({ type: "managerMode", available: true, recorded: true, repository: "acme/web", reason: null });
+  expect(errors).toEqual([]);
+});
+
+test("the first setup with Manager mode off writes nothing of Manager mode", async () => {
+  repoWithOrigin(GITHUB_ORIGIN, false);
+  await send(confirm({ choice: "scratch", manager: false }));
+  expect(existsSync(join(root, ".trama", "model", "system.md"))).toBe(true);
+  expect(existsSync(join(root, ".trama", "manager"))).toBe(false);
+});
+
+test("the first setup whose Manager mode cannot be written still creates the project and goes on, with the reason shown", async () => {
+  repoWithOrigin(null, false);
+  await send(confirm({ choice: "scratch", manager: true }));
+  expect(existsSync(join(root, ".trama", "model", "system.md"))).toBe(true);
+  expect(existsSync(join(root, ".trama", "manager"))).toBe(false);
+  expect(errors).toEqual(["Trama: could not save Manager Mode: Manager Mode needs a repository on GitHub (the origin remote)."]);
+  expect(results().at(-1)).toEqual({ type: "setup", busy: false, error: null });
+  expect(setups).toBe(1);
+});
+
+test("the Guided setup writes Manager mode after the settings, only when it differs from the project's value", async () => {
+  repoWithOrigin(GITHUB_ORIGIN);
+  await send(confirm({ mode: "settings", choice: undefined, root: undefined, manager: true, values: [{ key: "trama.scan", value: "m" }] }));
+  expect(readFileSync(managerFile(), "utf8")).toBe("{}\n");
+  expect(userSettings.get("scan")).toBe("m");
+  expect(results()).toEqual([{ type: "guidedSetupResult", ok: true, error: null }]);
+  // The same value again writes nothing: a file the developer edited is left as it is.
+  writeFileSync(managerFile(), "{ }\n");
+  await send(confirm({ mode: "settings", choice: undefined, root: undefined, manager: true }));
+  expect(readFileSync(managerFile(), "utf8")).toBe("{ }\n");
+  await send(confirm({ mode: "settings", choice: undefined, root: undefined, manager: false }));
+  expect(existsSync(managerFile())).toBe(false);
+  expect(launched).toEqual([]);
+});
+
+test("the Empty Model mode writes Manager mode before going on with the path", async () => {
+  repoWithOrigin(GITHUB_ORIGIN);
+  await send(confirm({ mode: "empty-model", root: undefined, manager: true }));
+  expect(existsSync(managerFile())).toBe(true);
+  expect(results()).toEqual([{ type: "guidedSetupResult", ok: true, error: null }]);
+  expect(launched).toHaveLength(1);
+});
+
+test("a failed write of Manager mode in the other modes counts as a failed save: the wizard stays on the summary and nothing starts", async () => {
+  repoWithOrigin(null);
+  await send(confirm({ mode: "empty-model", root: undefined, manager: true, values: [{ key: "trama.scan", value: "m" }] }));
+  expect(results()).toEqual([{ type: "guidedSetupResult", ok: false, error: "Could not save Manager Mode: Manager Mode needs a repository on GitHub (the origin remote)." }]);
+  expect(userSettings.get("scan")).toBe("m");
+  expect(launched).toEqual([]);
+  expect(setups).toBe(0);
+});
+
+test("a Manager mode left on whose origin moved away stays recorded when the wizard writes nothing for it", async () => {
+  repoWithOrigin(GITHUB_ORIGIN);
+  await send({ type: "setManagerMode", on: true });
+  spawnSync("git", ["remote", "remove", "origin"], { cwd: root });
+  await send(confirm({ mode: "settings", choice: undefined, root: undefined, values: [{ key: "trama.scan", value: "m" }] }));
+  expect(existsSync(managerFile())).toBe(true);
+  expect(results().at(-1)).toEqual({ type: "guidedSetupResult", ok: true, error: null });
 });

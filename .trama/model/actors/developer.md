@@ -125,6 +125,9 @@ Il developer passa alla vista Specs del pannello, dal menu laterale o con il com
 ### SHOW_HISTORY
 Il developer passa alla vista History del pannello, dal menu laterale o con il comando Show History, che aprono il pannello se è chiuso.
 
+### SHOW_TEAM
+The developer goes to the Team view of the panel, from the side menu or with the command Show Team, which open the panel if it is closed. Only with Manager mode on.
+
 ### SHOW_SETTINGS
 Il developer passa alla scheda Settings del pannello, dal menu laterale, con il comando Show Settings o con Open Settings nell'avviso che omp non è installato, che aprono il pannello se è chiuso, anche in una finestra senza cartelle.
 
@@ -187,6 +190,51 @@ The developer turns off Solo Mode in the Settings tab of a project.
 
 ### CHANGE_SOLO_EXCLUSIONS
 The developer chooses, in the Settings tab with Solo Mode on, whether Trama keeps out of git the whole folders where it writes or only the files it writes there.
+
+### TURN_ON_MANAGER_MODE
+The developer turns on Manager Mode in the Settings tab of a project, to plan work for the people of his team.
+
+### TURN_OFF_MANAGER_MODE
+The developer turns off Manager Mode in the Settings tab of a project.
+
+### EDIT_PERSON
+The developer saves the data of a person of the team from the person's dialog in the People tab of the Team view.
+
+### ADD_TO_TEAM
+The developer adds to the team of this project a person he already has in another project's team, from Add from other projects in the People tab.
+
+### REMOVE_FROM_TEAM
+The developer takes a person out of the team of this project, from the People tab.
+
+### DELETE_PERSON
+The developer deletes a person from all his teams, from Delete person in the person's dialog, after confirming.
+
+### CHANGE_ISSUE_FIELD
+The Manager changes, in the issue preview of the Team view, a field the agent proposed for an issue of a handoff (assignee, reviewer, estimate, sprint or another field of the GitHub Project), or undoes the change.
+
+### SPLIT_ISSUE
+The Manager asks, from the issue preview, that the agent split an issue estimated more than three days.
+
+### PUBLISH_AGAIN
+The Manager asks, from the Issues tab, that the agent publish again an issue that is not published.
+
+### LINK_GITHUB_PROJECT
+The Manager chooses, in the Team view, the GitHub Project where Team publishes and reads its sprints.
+
+### UNLINK_GITHUB_PROJECT
+The Manager unlinks the GitHub Project from the Team view.
+
+### LOG_IN_GITHUB
+The Manager asks, from the Team view, to log in the GitHub command line or to give it access to Projects.
+
+### REFRESH_TEAM
+The Manager presses Refresh in the Team view, to read GitHub again.
+
+### ASK_ISSUE_UPDATE
+The Manager presses Comment update on a published issue the Model changed under, in the Issues tab.
+
+### SCAN_ISSUE
+The Manager presses Scan on a closed issue in the Issues tab, to have its references compared with the code.
 
 ### START_MERGE
 The developer presses Merge in the side menu, with Solo mode on.

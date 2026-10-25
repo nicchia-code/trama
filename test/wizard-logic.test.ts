@@ -2,10 +2,15 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ManifestPackage, type SettingsValues, SETTING_GROUPS, settingsSchema } from "../extension/src/host/settings-schema";
+import type { ManagerState } from "../extension/src/webview/settings/logic";
 import { ADVANCED_GROUP_SENTENCE, ignoresInstructionFiles, ROLE_ADVICE, STEP_SENTENCES } from "../extension/src/webview/setup-shared";
 import {
   advancedSubgroups,
   agentCheckLine,
+  chosenManager,
+  managerOrigin,
+  managerRows,
+  managerToWrite,
   ompAnswers,
   ompMissing,
   changedWrites,
@@ -459,9 +464,61 @@ test("the Solo rows say On or Off and, when on, Exclude; they are changed only a
   expect(soloRows("folders", "folders").every((r) => !r.changed)).toBe(true);
 });
 
-test("the summary puts the Solo rows at the end of the Project step, in the first setup and the Empty Model mode, never in the settings", () => {
+test("the summary puts the Solo rows after the skills folder in the first setup and the Empty Model mode, never in the settings, and the Manager Mode row last in every mode", () => {
   const titles = (mode: "first" | "settings" | "empty-model") => summaryRows(schema, open(mode), {}, [{ name: "app", root: "/work/app", inGit: true }]).filter((r) => r.step === "Project").map((r) => r.title);
-  expect(titles("first")).toEqual(["Skills Dir", "Solo Mode"]);
-  expect(titles("empty-model")).toEqual(["Skills Dir", "Solo Mode"]);
-  expect(titles("settings")).toEqual(["Skills Dir"]);
+  expect(titles("first")).toEqual(["Skills Dir", "Solo Mode", "Manager Mode"]);
+  expect(titles("empty-model")).toEqual(["Skills Dir", "Solo Mode", "Manager Mode"]);
+  expect(titles("settings")).toEqual(["Skills Dir", "Manager Mode"]);
+});
+
+const GITHUB = { repository: "acme/web", reason: null };
+const NO_GITHUB = { repository: null, reason: "No origin remote" };
+
+test("Manager mode starts off in the first setup and follows the project in the other modes", () => {
+  expect(open("first").manager).toBe(false);
+  expect(open("settings").manager).toBeNull();
+  expect(open("empty-model").manager).toBeNull();
+  const project = { available: true, recorded: true, repository: "acme/web", reason: null };
+  expect(chosenManager(open("settings"), [], project)).toBe(true);
+  expect(chosenManager({ ...open("settings"), manager: false }, [], project)).toBe(false);
+  expect(chosenManager(open("settings"), [], null)).toBe(false);
+});
+
+test("the origin of the first setup is the one of the folder chosen in Path; in the other modes, the project's from the host", () => {
+  const folders = [{ root: "/work/app", origin: GITHUB }, { root: "/work/lib", origin: NO_GITHUB }];
+  const first = { ...open("first"), manager: true };
+  expect(managerOrigin(first, folders, null)).toEqual(GITHUB);
+  expect(chosenManager(first, folders, null)).toBe(true);
+  expect(managerOrigin({ ...first, root: "/work/lib" }, folders, null)).toEqual(NO_GITHUB);
+  expect(chosenManager({ ...first, root: "/work/lib" }, folders, null)).toBe(false);
+  expect(managerOrigin({ ...first, root: null }, folders, null)).toBeNull();
+  expect(managerOrigin(open("settings"), folders, null)).toBeNull();
+  expect(managerOrigin(open("settings"), folders, { available: false, recorded: false, repository: null, reason: "Origin is not on GitHub" })).toEqual({ repository: null, reason: "Origin is not on GitHub" });
+});
+
+test("the confirmation sends Manager mode: always in the first setup, in the other modes only while origin is on GitHub", () => {
+  const folders = [{ root: "/work/app", origin: GITHUB }, { root: "/work/lib", origin: NO_GITHUB }];
+  expect(managerToWrite({ ...open("first"), manager: true }, folders, null)).toBe(true);
+  expect(managerToWrite(open("first"), folders, null)).toBe(false);
+  expect(managerToWrite({ ...open("first"), root: "/work/lib", manager: true }, folders, null)).toBe(false);
+  const on = { available: true, recorded: true, repository: "acme/web", reason: null };
+  expect(managerToWrite(open("settings"), [], on)).toBe(true);
+  expect(managerToWrite({ ...open("settings"), manager: false }, [], on)).toBe(false);
+  expect(managerToWrite(open("settings"), [], null)).toBeUndefined();
+  // Recorded and then origin moved away: the wizard shows it off and writes nothing, so the recorded value stays.
+  expect(managerToWrite(open("settings"), [], { available: false, recorded: true, repository: null, reason: "Origin is not on GitHub" })).toBeUndefined();
+});
+
+test("the Manager Mode row says On or Off, and is changed only against the project's recorded value, with the value it replaces", () => {
+  const project = (recorded: boolean) => ({ available: recorded, recorded, repository: "acme/web", reason: null });
+  const row = (state: WizardState, manager: ManagerState | null) => managerRows(state, [], manager).map((r) => [r.title, r.value, r.changed, r.was]);
+  expect(row(open("settings"), project(false))).toEqual([["Manager Mode", "Off", false, null]]);
+  expect(row({ ...open("settings"), manager: true }, project(false))).toEqual([["Manager Mode", "On", true, "Off"]]);
+  expect(row({ ...open("empty-model"), manager: false }, project(true))).toEqual([["Manager Mode", "Off", true, "On"]]);
+  expect(row(open("empty-model"), project(true))).toEqual([["Manager Mode", "On", false, null]]);
+  // The first setup has no project: nothing to replace.
+  const folders = [{ root: "/work/app", origin: GITHUB }];
+  expect(managerRows({ ...open("first"), manager: true }, folders, null).map((r) => [r.value, r.changed, r.was])).toEqual([["On", false, null]]);
+  // Origin not on GitHub with Manager mode recorded: shown Off, not changed.
+  expect(row(open("settings"), { available: false, recorded: true, repository: null, reason: "No origin remote" })).toEqual([["Manager Mode", "Off", false, null]]);
 });

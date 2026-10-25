@@ -4,6 +4,18 @@ updated: 2026-10-25T09:50:23.956Z
 summary: Approve, Reject e Rework con feedback sono disabilitati, con il motivo, su una Draft che un agente sta ancora scrivendo o rimasta a metà, sulla Board e nel Diagramma, prima del clic.
 tasks:
   - hwwsh08w
+cleared:
+  hwwsh08w:
+    title: Draft in scrittura non decidibile
+    proposal: 219e67sd
+    tag: Approve su Draft
+    finished: 2026-10-25T09:21:41.580Z
+    refs:
+      - raffinamento
+      - proposal/Draft
+      - requirements/rules#raffinamento
+      - requirements/ui#raffinamento
+      - requirements/tech#raffinamento
 ---
 # Draft in scrittura non decidibile
 

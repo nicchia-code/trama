@@ -4,7 +4,7 @@
 
 ## Conventions
 
-- `trama <object> <verb> [<id>] [<state>] [--input <json>]`. The objects are `model`, `proposal`, `task`, `drift`, `history`, `announcement`, `comparison`, `question`, `advisor`, `project`, `timing` and `hook`. The verbs mean the same for every object: `show <id>` reads one thing, `list` reads several, `new` creates and prints the identity of what it created, `edit <id>` changes the content, `move <id> <state>` takes a card to another state (the state names are the Trama Model's, in lowercase with a dash for a space: `code-to-be-fixed`), `check` reports errors and warnings, `delete <id>` deletes a card for good and exists only for `task`. An object has only the verbs of the reference below; `hook` is the only exception.
+- `trama <object> <verb> [<id>] [<state>] [--input <json>]`. The objects are `model`, `proposal`, `task`, `drift`, `issue`, `history`, `announcement`, `comparison`, `question`, `advisor`, `project`, `timing` and `hook`. The verbs mean the same for every object: `show <id>` reads one thing, `list` reads several, `new` creates and prints the identity of what it created, `edit <id>` changes the content, `move <id> <state>` takes a card to another state (the state names are the Trama Model's, in lowercase with a dash for a space: `code-to-be-fixed`), `check` reports errors and warnings, `delete <id>` deletes a card for good and exists only for `task`. An object has only the verbs of the reference below; `hook` is the only exception.
 - The positional arguments are only the identity of a card (or its short number), the reference of a Model element and the state of arrival of `move`. Every other datum, the filters of the reads included, goes in `--input`: there is no other option. The options that every command takes, in any position, are `--root <dir>`, `--json`, `--input <json>`, `--help` and `-h`.
 - `--input -` reads the JSON from standard input, accepting a leading UTF-8 byte order mark; any other value is the JSON text itself. No command reads standard input without `--input -`, except the `hook` commands. The input is a JSON object with camelCase fields. Each command checks it with its zod schema before doing anything else: an unknown field, a wrong type, a value outside its list or a missing required field is a usage error (exit 2) that lists every problem with the path of its field (for example `options[1].text`), and nothing changes. A command with required fields and no `--input` gives the usage error; a command without fields accepts only `{}`. Identities in the fields follow the rules of the arguments.
 - Without `--root`, the CLI walks up from the current directory to the first folder containing `.trama/`.
@@ -172,13 +172,13 @@ Runs at once; read-only.
 
 #### `trama proposal new`
 
-Every new Proposal starts as a Draft; hand it over with `proposal move <id> open` when it is finished. `kind` is `change` (default), `import` (existing code), `resolution` (a resolution of Drifts) or `setup` (the first Proposal of an empty Model). `label` is the short label (1 to 30 characters, one line), required before a Proposal with Tasks is handed over. `requires` lists the Proposals it depends on. `prepared` applies only to a resolution born from the answer to a Drift's prepared question. `announcement` is the ID printed by `trama announcement new`; `request` binds the Proposal to the written design request it comes from. `reworks` names the rejected Proposal this one redoes (Rework with feedback): when it exists, is rejected and is not already redone, the new Proposal takes its place (same creation instant) and replaces it in the `requires` of every Draft or open Proposal, which the result lists; otherwise the Proposal is created without the link and `reworksNote` says why. `reworks` and `request` cannot be given together.
+Every new Proposal starts as a Draft; hand it over with `proposal move <id> open` when it is finished. `kind` is `change` (default), `import` (existing code), `resolution` (a resolution of Drifts), `setup` (the first Proposal of an empty Model) or `handoff` (work given to the people of the team, with issues instead of Tasks; refused, creating nothing, when Team is not available). `label` is the short label (1 to 30 characters, one line), required before a Proposal with Tasks, or a handoff (its epic), is handed over. `requires` lists the Proposals it depends on. `prepared` applies only to a resolution born from the answer to a Drift's prepared question. `announcement` is the ID printed by `trama announcement new`; `request` binds the Proposal to the written design request it comes from. `reworks` names the rejected Proposal this one redoes (Rework with feedback): when it exists, is rejected and is not already redone, the new Proposal takes its place (same creation instant) and replaces it in the `requires` of every Draft or open Proposal, which the result lists; otherwise the Proposal is created without the link and `reworksNote` says why. `reworks` and `request` cannot be given together.
 
 Input (`--input`):
 
 - `title`: `string not empty`, required. A short title: at most five words.
 - `body`: `string`, optional. The text of the Proposal, in Markdown.
-- `kind`: `"change" | "import" | "resolution" | "setup"`, optional. The kind of Proposal. Default `change`.
+- `kind`: `"change" | "import" | "resolution" | "setup" | "handoff"`, optional. The kind of Proposal. Default `change`.
 - `label`: `string`, optional. The short label of the Proposal: 1 to 30 characters, one line.
 - `requires`: `string not empty[]`, optional. The Proposals this one requires: IDs or short numbers.
 - `prepared`: `boolean`, optional. A resolution born from the answer to a Drift's prepared question. Only with kind `resolution`.
@@ -245,7 +245,7 @@ Runs at once; read-only.
 
 #### `trama proposal edit <id>`
 
-Every use sends an open Proposal back to Draft and says so; hand it over again with `proposal move <id> open`. Without input it only returns an open Proposal to Draft, touching no file. `rebase` records again the starting version of each file the Proposal holds, so a stale Proposal is no longer stale, and marks the Draft refining until it is handed over again; only an ordinary change Proposal not attached to a Drift can be rebased. `label` writes or changes the short label. `edit` makes each path (a Model file, `specs.yaml`, a Requirement fragment such as `requirements/<area>/<fragment>.md`, or a Task as `tasks/<slug>.md`) editable inside the Proposal and prints the path to write for each; a new Task takes a new identity, and a Task is rewritten by the full name printed. `delete` marks each path for deletion. `drifts` records or replaces the decisions of a resolution on open Drifts, and `removeDrifts` takes Drifts out of its list. `images` ties images to the Tasks of the Proposal, a list of `{ task, path }` (`path` is a local `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` or `.svg` file, absolute or relative to the project root), and `removeImages` takes them away, a list of `{ task, name }`. The file is copied into `.trama/task-images/<Task identity>/` (not versioned), and a change returns an open Proposal to Draft.
+Every use sends an open Proposal back to Draft and says so; hand it over again with `proposal move <id> open`. Without input it only returns an open Proposal to Draft, touching no file. `rebase` records again the starting version of each file the Proposal holds, so a stale Proposal is no longer stale, and marks the Draft refining until it is handed over again; only an ordinary change Proposal not attached to a Drift can be rebased. `label` writes or changes the short label. `edit` makes each path (a Model file, `specs.yaml`, a Requirement fragment such as `requirements/<area>/<fragment>.md`, a Task as `tasks/<slug>.md`, or an issue of a handoff as `issues/<slug>.md`) editable inside the Proposal and prints the path to write for each; a new Task or issue takes a new identity, unique among the Tasks and the issues, and one is rewritten by the full name printed. `delete` marks each path for deletion, an issue file as `issues/<identity>-<slug>.md`. The Manager's changes to the fields of an issue (`manager`) are never written by this command. `drifts` records or replaces the decisions of a resolution on open Drifts, and `removeDrifts` takes Drifts out of its list. `images` ties images to the Tasks of the Proposal, a list of `{ task, path }` (`path` is a local `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` or `.svg` file, absolute or relative to the project root), and `removeImages` takes them away, a list of `{ task, name }`. The file is copied into `.trama/task-images/<Task identity>/` (not versioned), and a change returns an open Proposal to Draft.
 
 - `<id>`: The Proposal: its ID, a unique prefix or its short number.
 
@@ -281,7 +281,7 @@ Runs at once; writes in `.trama/`, counts as the agent's activity.
 
 #### `trama proposal move <id> <state>`
 
-`open` hands a valid Draft over to the developer: it checks the Model and Requirements with the Proposal applied and prints the warnings and `proposal show` of the Proposal; a setup Proposal on an empty Model is approved at once. `approved` accepts an open Proposal and applies it in this folder. `rejected` rejects an open Proposal. `discarded` discards a Draft. Approving and rejecting a Proposal attached to an open Drift is refused: the decision is on the Drift. `skillsDir` (with `approved`, and with `open` for a setup Proposal) adds the configured skills folder where the `trama-req-*` skills are regenerated. `feedback` (only with `rejected`) is the text for the agent. Approving, rejecting and discarding are the developer's decisions.
+`open` hands a valid Draft over to the developer: it checks the Model and Requirements with the Proposal applied and prints the warnings and `proposal show` of the Proposal; a setup Proposal on an empty Model is approved at once. A handoff is also refused, naming each problem, when Team is not available, it has no issue, an issue has no title or an empty body, an assignee or a reviewer is not a member of the team (read from the editor, as `trama team show` does: when the editor does not answer the hand-over is refused with the reason) or both are the same person, an estimate is not a number of days from 0.5 in steps of 0.5, a dependency names an issue outside the handoff and the handoffs it requires or the dependencies make a cycle, a reference does not exist, the label is missing or over 30 characters, or it has `tasks/`; the coverage of what it changes and estimates over 3 days are only warnings. `approved` accepts an open Proposal and applies it in this folder; a handoff, only while Team is available and a GitHub Project is linked, creates its issue cards in `.trama/issues/` in the same step, and no Task. `rejected` rejects an open Proposal. `discarded` discards a Draft. Approving and rejecting a Proposal attached to an open Drift is refused: the decision is on the Drift. `skillsDir` (with `approved`, and with `open` for a setup Proposal) adds the configured skills folder where the `trama-req-*` skills are regenerated. `feedback` (only with `rejected`) is the text for the agent. Approving, rejecting and discarding are the developer's decisions.
 
 - `<id>`: The Proposal: its ID, a unique prefix or its short number.
 - `<state>`: Where the Proposal goes. One of `open`, `approved`, `rejected`, `discarded`.
@@ -305,6 +305,7 @@ Output (`--json`):
 - warnings: object[], optional
 - show: string, optional. Toward `open`: the text of `proposal show`.
 - resolved: { drift: string }[], optional. Toward `approved`: the Drifts a resolution decided.
+- issues: string[], optional. Toward `approved`: the identities of the issue cards a handoff created.
 
 Runs at once; writes in `.trama/`, counts as the agent's activity, sends messages to the editor.
 
@@ -611,6 +612,143 @@ Output (`--json`):
 
 Runs at once; writes in `.trama/`.
 
+### `issue`
+
+#### `trama issue list`
+
+Prints the issues of `.trama/issues/` grouped by handoff, each with its identity, title, state (`publishing`, `not-published` or `published`) and GitHub number. The order is the order of publication: the issues an issue depends on come first. `handoff` keeps the issues of one handoff (its identity, a unique prefix or its short number) and `state` those in one state. Read-only. Fails with the reason of Manager mode when Team is not available.
+
+Input (`--input`):
+
+- `handoff`: `string not empty`, optional. Only the issues of this handoff: its ID, a unique prefix or its short number.
+- `state`: `"publishing" | "not-published" | "published"`, optional. Only the issues in this state.
+
+```sh
+trama issue list --input - <<'JSON'
+{"state":"not-published"}
+JSON
+```
+
+Runs at once; read-only.
+
+#### `trama issue show <id>`
+
+Prints one issue with every field and, under `## GitHub body`, the body Trama composes for GitHub (`**Reviewer:**` and `**Depends on:**` lines, the body the agent wrote and, except with Solo mode on, the folded block of references): the same text the Team view previews and the agent publishes. For a published issue whose references changed since it was published or last commented on, `## Changed since publishing` gives, for each changed reference, the text it had (when git has it; otherwise only the reference is named) and the text it has. `--json` has the same fields, `githubBody` and `changed`. It also accepts an issue of a handoff that is not approved yet, by its identity: its fields are then the agent's with the Manager's changes applied. Read-only. Fails with the reason of Manager mode when Team is not available.
+
+- `<id>`: The issue: its ID or a unique prefix.
+
+Output (`--json`):
+
+- id: string, required. The permanent identity of the issue.
+- title: string, required
+- handoff: string, required. The identity of the handoff the issue comes from.
+- state: "publishing" | "not-published" | "published", required
+- number: number | null, required. GitHub's number, once published.
+- url: string | null, required. GitHub's address, once published.
+- dependsOn: string[], required. The identities of the issues it depends on.
+- approved: boolean, required. False for an issue of a handoff that is not approved yet.
+- label: string | null, required. The handoff's label: the epic.
+- body: string, required. What the agent wrote for GitHub, without the title and without the lines Trama adds.
+- refs: string[], required
+- estimate: number | null, required. Days.
+- assignee: string | null, required. GitHub handle, without `@`.
+- reviewer: string | null, required. GitHub handle, without `@`.
+- sprint: string | null, required
+- fields: object, required
+- created: string | null, required
+- published: string | null, required
+- unset: string[], required. The fields GitHub did not take.
+- reason: string | null, required. Why the issue is not published.
+- updated: string | null, required. When the last Comment update was recorded.
+- texts: object, required. The text fingerprint of each reference when the issue was published or last updated.
+- githubBody: string, required. The body to publish on GitHub, composed by Trama.
+- changed: { ref: string, earlier: string | null, current: string | null }[], required. The references of a published issue whose text is not what it was when the issue was published or last commented: the text they had (null when git does not have it) and the text they have (null when the reference no longer exists).
+
+Runs at once; read-only.
+
+#### `trama issue move <id> <state>`
+
+`published` with `number` and `url` records that the agent created the issue on GitHub, right after creating it: Trama records the moment and the fingerprint of the text of each reference of the issue, so it can later tell whether the Model changed under it. `not-published` with `reason` records that GitHub refused it. `publishing` is refused: only Trama moves an issue there, when it asks the agent to publish. An issue that is already `published` is refused. Fails with the reason of Manager mode when Team is not available.
+
+- `<id>`: The issue: its ID or a unique prefix.
+- `<state>`: Where the issue goes. One of `publishing`, `not-published`, `published`.
+
+Input (`--input`):
+
+- `number`: `integer ≥ 1`, optional. Only toward `published`: the number GitHub gave the issue.
+- `url`: `string not empty`, optional. Only toward `published`: the address of the issue on GitHub.
+- `reason`: `string not empty`, optional. Only toward `not-published`: why GitHub did not create the issue.
+
+```sh
+trama issue move a1b2c3d4 published --input - <<'JSON'
+{"number":12,"url":"https://github.com/acme/web/issues/12"}
+JSON
+```
+
+Output (`--json`):
+
+- id: string, required. The permanent identity of the issue.
+- title: string, required
+- handoff: string, required. The identity of the handoff the issue comes from.
+- state: "publishing" | "not-published" | "published", required
+- number: number | null, required. GitHub's number, once published.
+- url: string | null, required. GitHub's address, once published.
+- dependsOn: string[], required. The identities of the issues it depends on.
+- reason: string | null, required
+
+Runs at once; writes in `.trama/`, counts as the agent's activity.
+
+#### `trama issue edit <id>`
+
+`unset` lists the keys of the fields of the Project GitHub did not take (`assignee`, `reviewer`, `estimate`, `sprint` or `fields.<name>`) and replaces the earlier list; `updated: true` records that the agent wrote the Comment of an update on the issue, with the moment and the fingerprint of the text of its references now. Only a published issue is edited, and nothing else of an issue changes from the command line. Fails with the reason of Manager mode when Team is not available.
+
+- `<id>`: The issue: its ID or a unique prefix.
+
+Input (`--input`):
+
+- `unset`: `string not empty[]`, optional. The keys of the fields GitHub did not take: `assignee`, `reviewer`, `estimate`, `sprint` or `fields.<name>`. An empty list says every field was taken.
+- `updated`: `true`, optional. Records a Comment update.
+
+```sh
+trama issue edit a1b2c3d4 --input - <<'JSON'
+{"unset":["sprint"]}
+JSON
+```
+
+Output (`--json`):
+
+- id: string, required. The permanent identity of the issue.
+- title: string, required
+- handoff: string, required. The identity of the handoff the issue comes from.
+- state: "publishing" | "not-published" | "published", required
+- number: number | null, required. GitHub's number, once published.
+- url: string | null, required. GitHub's address, once published.
+- dependsOn: string[], required. The identities of the issues it depends on.
+- unset: string[], required
+- updated: string | null, required
+
+Runs at once; writes in `.trama/`, counts as the agent's activity.
+
+#### `trama issue fields`
+
+Reads, with the GitHub command line (`gh`), the fields of the GitHub Project linked in the Team view, each with its options, and the iterations of its sprint field with their dates, marking the sprint field (the first iteration field) and the current sprint (the one that contains today). Read-only, on GitHub and in the project. Fails, with exit code 1, when no Project is linked (`No GitHub Project is linked: link one in the Team view.`), when `gh` is not installed, is not logged in or cannot read Projects, with the reason the Team view shows, and with the reason of Manager mode when Team is not available.
+
+Output (`--json`):
+
+- project: { owner: string, number: number, title: string }, required. The linked GitHub Project.
+- fields: { id: string, name: string, type: string, options?: { id: string, name: string }[], sprint: boolean }[], required
+- iterations: { id: string, title: string, startDate: string, duration: number, current: boolean }[], required. The iterations of the sprint field, oldest first.
+
+Runs and waits for the editor; read-only.
+
+### `team`
+
+#### `trama team show`
+
+Prints the members of the current project's team, ordered by name: for each, name, `@handle`, level, skills, capacity per sprint in days and the absences that end today or later. The people live only in the Manager's editor, so the command asks the editor window that launched the agent, through the endpoint and secret of `trama question new`: it works only in an agent started by Trama. It has no input and never writes. Fails, with exit code 1, with `trama team show needs the editor: only an agent started by Trama can read the team.` without the editor's endpoint and a recognised terminal, with `The editor did not answer: open the project in the editor with Trama.` when the editor stays silent for 10 seconds, and with the reason of Manager mode when Team is not available. A team with no one prints `No one in this project's team.` (`--json`: `[]`) and exits with 0.
+
+Runs and waits for the editor; read-only.
+
 ### `history`
 
 #### `trama history new`
@@ -766,7 +904,7 @@ Runs at once; writes in `.trama/`, counts as the agent's activity.
 
 #### `trama comparison new <machine>`
 
-Announces the comparison and prints its ID first, then the references to compare (`refs` limits them to those of the Machine; without it, the whole Machine), their States, Events and Transitions, the Requirements that apply, the analysis, the open Tasks and Drifts on the same thing, and the resolved or dismissed Drifts on the same references. Keep the ID: `comparison move` takes it. Without `TRAMA_TERMINAL` the briefing is the same but no announcement, and so no ghost, is made: the comparison data stay in a file of their own that `comparison move <id> delivered` deletes.
+Announces the comparison and prints its ID first, then the references to compare (`refs` limits them to those of the Machine; without it, the whole Machine), their States, Events and Transitions, the Requirements that apply, the analysis, the open Tasks and Drifts on the same thing, the resolved or dismissed Drifts on the same references and, when published issues have references there, the section `## Published issues` with the instruction for the Drifts on those references. Keep the ID: `comparison move` takes it. Without `TRAMA_TERMINAL` the briefing is the same but no announcement, and so no ghost, is made: the comparison data stay in a file of their own that `comparison move <id> delivered` deletes.
 
 - `<machine>`: The Machine to compare.
 
@@ -789,6 +927,7 @@ Output (`--json`):
 - openTasks: { id: string, number: string | null, title: string, column: string }[], required
 - openDrifts: { id: string, number: string | null, title: string, refs: string[] }[], required
 - closedDrifts: { id: string, number: string | null, title: string, resolution: string | null, note: string | null }[], required
+- publishedIssues: { number: number, title: string, status: string, refs: string[] }[], required. The published issues, not `Not planned`, whose references fall in the comparison, with where each was at the last read of GitHub (`Open` as published without one).
 
 Runs at once; writes in `.trama/`, counts as the agent's activity.
 
@@ -870,13 +1009,14 @@ Runs at once; read-only.
 
 #### `trama project new`
 
-Creates `.trama/` in `--root` (or the current directory; it never walks up) with `model/system.md`, `model/actors/`, `requirements/` with the five starting Areas, `proposals/`, `tasks/` and `drifts/`, and installs the agent skills, embedded in the binary, and omp's sub-agent definitions. It refuses, creating nothing, when `.trama/` already exists or when a file to install exists with different content, unless `force` is true; identical files are not a conflict. With `solo` (`folders` or `files`) it first writes Solo mode (`.trama/solo/mode.json` and the block in `.git/info/exclude`, so no file of Trama is ever visible to git) and creates nothing at all, failing with `Solo mode needs a git repository.`, when the folder is not in a git repository or the write fails.
+Creates `.trama/` in `--root` (or the current directory; it never walks up) with `model/system.md`, `model/actors/`, `requirements/` with the five starting Areas, `proposals/`, `tasks/` and `drifts/`, and installs the agent skills, embedded in the binary, and omp's sub-agent definitions. It refuses, creating nothing, when `.trama/` already exists or when a file to install exists with different content, unless `force` is true; identical files are not a conflict. With `solo` (`folders` or `files`) it first writes Solo mode (`.trama/solo/mode.json` and the block in `.git/info/exclude`, so no file of Trama is ever visible to git) and creates nothing at all, failing with `Solo mode needs a git repository.`, when the folder is not in a git repository or the write fails. With `manager: true` it writes Manager mode (`.trama/manager/mode.json`) after every file of the project; when `origin` is not a repository on GitHub, or the write fails, the project stays, Manager mode stays off and the output says why (`managerError`).
 
 Input (`--input`):
 
 - `skillsDir`: `string not empty`, optional. The folder of the agent skills, relative to the project root. Default `.agents/skills`.
 - `force`: `boolean`, optional. Overwrite skill files, sub-agent definitions and advisor instructions that differ from Trama's. Default false.
 - `solo`: `"off" | "folders" | "files"`, optional. Solo mode of this working copy: `off`, `folders` (keeps `.trama/`, the skills folder and `.omp/` out of git) or `files` (keeps only the files Trama writes there). The block goes in `.git/info/exclude`, never committed. Needs a git repository.
+- `manager`: `boolean`, optional. Manager mode of this working copy: `true` records it in `.trama/manager/mode.json` (local, never committed; refused when `origin` is not a repository on GitHub), `false` deletes that file. Never deletes the people or the files of Team's work.
 
 ```sh
 trama project new --input - <<'JSON'
@@ -893,17 +1033,21 @@ Output (`--json`):
 - areas: string[], required. The Requirement Areas created.
 - solo: "off" | "folders" | "files", required. Solo mode now.
 - tracked: string[], required. Trama's files git already tracks under the paths Solo mode keeps out of git, relative to the project root; their changes still enter commits. Empty when Solo mode is off.
+- manager: boolean, required. Manager mode as recorded.
+- managerRepository: string | null, required. The GitHub repository `<owner>/<repo>` of `origin`, or null when origin is not on GitHub.
+- managerError: string | null, required. Why Manager mode was asked for and not written, or null; the project is created either way.
 
 Runs at once; writes in `.trama/`.
 
 #### `trama project edit`
 
-Writes this version's agent skills into the project's skill folder, replacing older or edited copies, and lists the files it changed; deletes the retired `trama-fix` skill; adds the starting Requirement Areas when the project has none; moves single-file Areas into Area folders; regenerates the `trama-req-*` skills; and rewrites omp's sub-agent definition and the advisor instructions. With `solo` alone it changes only Solo mode and installs nothing: it records the choice in `.trama/solo/mode.json` and rewrites the block in `.git/info/exclude` (`off` removes both). With `solo` and `skillsDir` the block covers that skills folder; without `skillsDir` it covers `.agents/skills`. `solo` other than `off` needs a git repository, otherwise it fails with `Solo mode needs a git repository.` and writes nothing. The result carries `solo` and `tracked`, Trama's files git already tracks, whose changes still enter commits. With Solo mode on, the skills update also writes the block again when it is missing or different.
+Writes this version's agent skills into the project's skill folder, replacing older or edited copies, and lists the files it changed; deletes the retired `trama-fix` skill; adds the starting Requirement Areas when the project has none; moves single-file Areas into Area folders; regenerates the `trama-req-*` skills; and rewrites omp's sub-agent definition and the advisor instructions. With `solo` alone it changes only Solo mode and installs nothing: it records the choice in `.trama/solo/mode.json` and rewrites the block in `.git/info/exclude` (`off` removes both). With `solo` and `skillsDir` the block covers that skills folder; without `skillsDir` it covers `.agents/skills`. `solo` other than `off` needs a git repository, otherwise it fails with `Solo mode needs a git repository.` and writes nothing. The result carries `solo` and `tracked`, Trama's files git already tracks, whose changes still enter commits. With Solo mode on, the skills update also writes the block again when it is missing or different. With `manager` (alone, or with `solo`, without `skillsDir`) it changes only Manager mode and installs nothing: `true` writes `.trama/manager/mode.json`, and fails with `Manager Mode needs a repository on GitHub (the origin remote).` writing nothing when `origin` is not a repository on GitHub; `false` deletes that file and nothing else. The result carries `manager` and `managerRepository`.
 
 Input (`--input`):
 
 - `skillsDir`: `string not empty`, optional. The folder of the agent skills, relative to the project root. Default `.agents/skills`.
 - `solo`: `"off" | "folders" | "files"`, optional. Solo mode of this working copy: `off`, `folders` (keeps `.trama/`, the skills folder and `.omp/` out of git) or `files` (keeps only the files Trama writes there). The block goes in `.git/info/exclude`, never committed. Needs a git repository.
+- `manager`: `boolean`, optional. Manager mode of this working copy: `true` records it in `.trama/manager/mode.json` (local, never committed; refused when `origin` is not a repository on GitHub), `false` deletes that file. Never deletes the people or the files of Team's work.
 
 ```sh
 trama project edit --input - <<'JSON'
@@ -924,6 +1068,8 @@ Output (`--json`):
 - generated: object, optional. The regeneration of the Requirement skills.
 - solo: "off" | "folders" | "files", required. Solo mode now.
 - tracked: string[], required. Trama's files git already tracks under the paths Solo mode keeps out of git, relative to the project root; their changes still enter commits. Empty when Solo mode is off.
+- manager: boolean, required. Manager mode as recorded.
+- managerRepository: string | null, required. The GitHub repository `<owner>/<repo>` of `origin`, or null when origin is not on GitHub.
 
 Runs at once; writes in `.trama/`.
 
@@ -939,6 +1085,8 @@ Output (`--json`):
 - doing: object[], required
 - done: object[], required
 - solo: "off" | "folders" | "files", required. Solo mode of this working copy: `off`, `folders` or `files`.
+- manager: boolean, required. Manager mode as recorded.
+- managerRepository: string | null, required. The GitHub repository `<owner>/<repo>` of `origin`, or null when origin is not on GitHub.
 
 Runs at once; read-only.
 
@@ -1080,6 +1228,34 @@ Durante la verifica finale e lo scan mirato l'agente tiene un controllo sulla Bo
 
 On the Board, Run all is unavailable while the agent has taken a Task, when no Task is in `todo`, and when every Task in `todo` is blocked. The tooltip says why, naming the Task the agent is working on, or the Drift or fix Task of the first blocked Task; when both reasons hold it gives the agent working. The host refuses the launch in the same cases.
 
+
+## Issues
+
+The issues of Team live in `.trama/issues/` as cards (`<id>-<slug>.md`): the identity, title and body the Manager approved with the handoff, and a front matter with `handoff`, `label`, `refs`, `estimate`, `assignee`, `reviewer`, `sprint`, `fields`, `dependsOn`, `created`, `state` (`publishing`, `not-published` or `published`) and, as they come, `number`, `url`, `published`, `unset`, `reason`, `updated` and `texts` (the text fingerprint of each reference when the issue was published or last updated, the one of the comparisons). They follow the rest of `.trama/`: versioned with the project, or out of git with Solo mode on. The agent publishes them on GitHub with the `trama-handoff` skill and records each with `trama issue move` right after creating it; Trama's own `gh` calls only read. Every `trama issue` command fails, writing nothing, with the reason of Manager mode (`Manager Mode is off in this working copy.` or `Manager Mode needs a repository on GitHub (the origin remote).`) when Team is not available, and none of them is developer-only.
+
+| Command | Effect |
+|---|---|
+| `trama issue list` with `{ handoff?, state? }` | The issues grouped by handoff, in the order of publication (the issues an issue depends on first); `--json` is a list of `{ id, title, handoff, state, number, url, dependsOn }` |
+| `trama issue show <id>` | One issue with every field and, under `## GitHub body`, the body composed for GitHub; `--json` adds `githubBody`. It also reads an issue of a handoff that is not approved yet, by its identity |
+| `trama issue move <id> published` with `{ number, url }` | Records the publication: the moment (`published`) and `texts`, the fingerprint of the text of each reference now |
+| `trama issue move <id> not-published` with `{ reason }` | Records that GitHub refused the issue |
+| `trama issue edit <id>` with `{ unset?, updated? }` | On a published issue, records the keys of the fields GitHub did not take (`assignee`, `reviewer`, `estimate`, `sprint`, `fields.<name>`) and, with `updated: true`, a Comment update (the moment and `texts` again) |
+
+`trama issue move <id> publishing` is refused: only Trama moves an issue there, when it asks the agent to publish (after the approval of the handoff and with **Publish again**, whose instruction is `Use the trama-handoff skill to publish the issues of handoff <handoff id>.` in a terminal named `Publish <short number>`). Moving an issue that is already `published` is refused. The execution check moves to `not-published`, with the reason `The agent stopped before publishing it.`, every `publishing` issue whose publishing agent no longer lives.
+
+The body published on GitHub is composed by Trama, the same in the Team view's preview and on GitHub: a first line `**Reviewer:** @<handle>` when there is a reviewer, a line `**Depends on:** #<n>, …` for the issues it depends on (one that is not published yet is named by its title), an empty line, the body the agent wrote and, except with Solo mode on, a folded `<details><summary>Trama references</summary>` block listing each reference as inline code. Nothing else is added.
+
+## Team
+
+The people of the Manager's team live only in the Manager's editor (`Team` view), never in the project. `trama team show` is how the agent reads them: it asks the editor window that launched the agent, through the same endpoint and secret as `trama question new` (`TRAMA_QUESTION_ENDPOINT` and a recognised `TRAMA_TERMINAL`), with a request that carries the secret and the project's root. The window answers only for a terminal or omp Chat conversation it opened, with the members of that project's team. It has no input and never writes, and it is not a command reserved to the developer.
+
+| Case | Output | Exit code |
+|---|---|---|
+| Members | Markdown with, for each member in order of name, `## <name> (@<handle>)` and the lines `Level`, `Skills`, `Capacity` (days per sprint) and `Absences` (only those that end today or later); `--json` is a list of `{ name, handle, level, skills, capacity, absences: { from, to }[] }` | 0 |
+| An empty team | `No one in this project's team.` (`--json`: `[]`) | 0 |
+| Without the editor's endpoint or a recognised terminal | `trama team show needs the editor: only an agent started by Trama can read the team.` | 1 |
+| The editor does not answer within 10 seconds | `The editor did not answer: open the project in the editor with Trama.` | 1 |
+| Team is not available | `Manager Mode is off in this working copy.` or `Manager Mode needs a repository on GitHub (the origin remote).` | 1 |
 
 ## History
 

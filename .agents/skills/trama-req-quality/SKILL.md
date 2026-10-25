@@ -14,9 +14,11 @@ This is the index of the Area's Requirements. The General Requirements are below
 
 - **Quality of agent launching** (`agents.md`): Use for the security, privacy and reliability of launching omp, the agent terminal and the installation and update of omp. Sections: `agent-launching`, `agent-terminal`.
 - **Away notifications quality** (`away-notifications.md`): Use for the privacy, security, reliability and acceptance of Trama's ntfy notifications. Sections: `notice`.
+- **Handoffs and issues** (`handoff.md`): Use when the work touches what Team sends to GitHub, the safety of the gh calls or the accessibility of the Decisions and Issues tabs. Sections: `issue`.
 - **Quality of agent instruction files** (`instruction-files.md`): Use for the security, privacy and reliability of finding agent instruction files in the setup wizard and of leaving them out of omp launches. Sections: `setup-wizard/omp`, `agent-terminal/Agent running`.
 - **Quality** (`main.md`): Use for performance, security, privacy, accessibility, offline, localisation or reliability. Sections: `task`, `drift-resolution`, `panel/Settings`, `developer.CLEAR_DONE`.
 - **omp Chat** (`omp-chat.md`): Usa quando lavori alla sicurezza, all'affidabilità, alla compatibilità o all'accettazione di omp Chat. Sections: `omp-chat-conversation`, `omp-chat`.
 - **Login dei fornitori di omp** (`omp-login.md`): Usa quando il lavoro sul login ai fornitori di omp o sulla chiave API di Cursor tocca credenziali, sicurezza del terminale o accessibilità. Sections: `developer.LOG_IN_PROVIDER`, `developer.SET_CURSOR_API_KEY`.
 - **Raffinamento delle Proposal obsolete** (`raffinamento.md`): Usa per sicurezza, affidabilità e collaudo di Auto-update Stale Proposals. Sections: `raffinamento`.
 - **System certificates** (`system-certificates.md`): Use when work on System Certificates or on certificate error messages touches security, privacy, reliability or accessibility. Sections: `developer.REFRESH_SYSTEM_CERTIFICATES`.
+- **Team** (`team.md`): Use when the work touches the privacy of the people of the Manager's team or the accessibility of the Team view. Sections: `person`.

@@ -321,8 +321,8 @@ test("trama-resolve-drifts splits fragments over 12 KB in the same Proposal, kee
   expect(skill).toContain("prefer a few medium fragments to many tiny ones");
 });
 
-test("the five skills name cards by short number and title but write only the permanent identity", () => {
-  for (const name of ["trama-design", "trama-scan", "trama-implement", "trama-import", "trama-resolve-drifts"]) {
+test("the six skills name cards by short number and title but write only the permanent identity", () => {
+  for (const name of ["trama-design", "trama-scan", "trama-implement", "trama-import", "trama-resolve-drifts", "trama-handoff"]) {
     const skill = SKILLS[`${name}/SKILL.md`] as string;
     expect(skill).toContain("## Naming cards");
     expect(skill).toContain("by short number and title");
@@ -331,8 +331,8 @@ test("the five skills name cards by short number and title but write only the pe
   }
 });
 
-test("the six skills that create cards give them a short title, and no command checks its length", () => {
-  for (const name of ["trama-design", "trama-setup", "trama-scan", "trama-implement", "trama-import", "trama-resolve-drifts"]) {
+test("the seven skills that create cards give them a short title, and no command checks its length", () => {
+  for (const name of ["trama-design", "trama-setup", "trama-scan", "trama-implement", "trama-import", "trama-resolve-drifts", "trama-handoff"]) {
     const skill = SKILLS[`${name}/SKILL.md`] as string;
     expect(skill).toContain("a **short title**: at most five words, about 40 characters");
     expect(skill).toContain("\"Testo fantasma\" instead of");
@@ -344,13 +344,13 @@ test("the six skills that create cards give them a short title, and no command c
 test("the skills give the writing rules: no first person in Trama's texts, and self-contained Tasks", () => {
   const firstPerson = "- **No first person in Trama's texts.**";
   const selfContained = "The body of a Task is understood without the conversation that produced it";
-  for (const name of ["trama-design", "trama-setup", "trama-scan", "trama-compare", "trama-implement", "trama-import", "trama-resolve-drifts", "trama-merge"]) {
+  for (const name of ["trama-design", "trama-setup", "trama-scan", "trama-compare", "trama-implement", "trama-import", "trama-resolve-drifts", "trama-merge", "trama-handoff"]) {
     const skill = SKILLS[`${name}/SKILL.md`] as string;
     expect(skill).toContain("## Language");
     expect(skill).toContain(firstPerson);
     expect(skill).toContain('Trama is always "Trama" and you are "the agent"');
     expect(skill).toContain("Your replies in the conversation are not Trama's texts and do not change");
-    if (name !== "trama-import" && name !== "trama-resolve-drifts" && name !== "trama-merge") expect(skill).toContain(selfContained);
+    if (name !== "trama-import" && name !== "trama-resolve-drifts" && name !== "trama-merge" && name !== "trama-handoff") expect(skill).toContain(selfContained);
   }
 });
 
@@ -370,7 +370,7 @@ test("trama-merge resolves the conflicts of the merge in progress and never comm
 test("every Language section carries the same list of what goes in the language and what stays English, with no transliteration of Model names", () => {
   const root = join(import.meta.dir, "..");
   const texts: Record<string, string> = {};
-  for (const name of ["trama-design", "trama-setup", "trama-scan", "trama-compare", "trama-implement", "trama-import", "trama-resolve-drifts", "trama-merge"]) texts[name] = SKILLS[`${name}/SKILL.md`] as string;
+  for (const name of ["trama-design", "trama-setup", "trama-scan", "trama-compare", "trama-implement", "trama-import", "trama-resolve-drifts", "trama-merge", "trama-handoff"]) texts[name] = SKILLS[`${name}/SKILL.md`] as string;
   for (const name of ["ask-more", "general", "unify-drifts"]) texts[name] = readFileSync(join(root, "extension", "media", `${name}.md`), "utf8");
   const bullet = (text: string, start: string): string => {
     // A Windows checkout (core.autocrlf) gives the media files CRLF line ends.
@@ -430,4 +430,44 @@ test("Asking sections tell the agent the developer sees only the round, in the s
     expect(text).toContain(sentence);
     expect(text).toContain('no first person (write "Trama" or "the agent", never "I" or "we")');
   }
+});
+
+test("trama-handoff turns a request into a handoff of issues, publishes them with gh, and never decides", () => {
+  const skill = SKILLS["trama-handoff/SKILL.md"] as string;
+  expect(skill).toContain("name: trama-handoff");
+  expect(skill).toContain("\"kind\":\"handoff\"");
+  expect(skill).toContain("`trama team show --json`");
+  expect(skill).toContain("`trama issue fields --json`");
+  expect(skill).toContain("`trama question new --root <project> --input -`");
+  expect(skill).toContain("`Suggested steps` (only for a junior assignee");
+  expect(skill).toContain("`stateDiagram-v2`");
+  expect(skill).toContain("`trama proposal move <id> open`");
+  expect(skill).toContain("Not covered: <ref>");
+  expect(skill).toContain("Estimated <n> d: more than 3 days per issue");
+  expect(skill).toContain("Approving is never yours");
+  expect(skill).toContain('"reworks":"<id>"');
+  expect(skill).toContain("## Splitting an issue");
+  expect(skill).toContain("Never rewrite, delete or reorder another issue");
+  expect(skill).toContain("## Publishing the issues");
+  expect(skill).toContain("gh issue create");
+  expect(skill).toContain("gh project item-add");
+  expect(skill).toContain("trama issue move <issue id> published --input -");
+  expect(skill).toContain("trama issue move <issue id> not-published --input -");
+  expect(skill).toContain("Depends on an issue that is not published");
+  expect(skill).toContain("Never run `trama issue move <id> publishing`");
+  expect(skill).toContain("Never write the Manager's choices");
+});
+
+test("the epic label colour of trama-handoff is the colour the Board gives a tag", async () => {
+  const skill = SKILLS["trama-handoff/SKILL.md"] as string;
+  const { TAG_COLOURS, tagColour } = await import("../extension/src/webview/board/logic");
+  const hex = { blue: "2563eb", green: "16a34a", amber: "d97706", violet: "7c3aed", cyan: "0891b2", red: "dc2626" } as const;
+  TAG_COLOURS.forEach((name, index) => expect(skill).toContain(`\`${index}\` ${name} \`${hex[name]}\``));
+  // The hash the skill describes: 31 * hash + code, modulo 2^32, then the remainder by 6.
+  const byTheSkill = (label: string): string => {
+    let hash = 0;
+    for (const ch of label) hash = (hash * 31 + ch.charCodeAt(0)) % 2 ** 32;
+    return TAG_COLOURS[hash % 6] as string;
+  };
+  for (const label of ["Cancel", "Miglioramento UX", "Checkout", "Épica"]) expect(byTheSkill(label)).toBe(tagColour(label));
 });

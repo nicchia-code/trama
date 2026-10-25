@@ -1,4 +1,5 @@
-import { approvalBlock, changes, coversScope, getProposal, health, listProposals, proposalCoverage, type Proposal, resolutionHolding, unfixableDrifts, validateProposal } from "../core/proposals";
+import { approvalBlock, changes, coversScope, getProposal, handoffCoverage, health, listProposals, proposalCoverage, proposalWarnings, type Proposal, resolutionHolding, unfixableDrifts, validateProposal } from "../core/proposals";
+import { appliedFields, type ProposalIssue } from "../core/issues";
 import { readTaskImages } from "../core/task-images";
 import { decisionText } from "../core/resolution";
 import { requiredReasons } from "../core/required";
@@ -51,6 +52,23 @@ function resolvedDriftsOf(p: Project, proposal: Proposal) {
   });
 }
 
+/** An issue of a handoff as `proposal show` lists it: the title, then each field as the Manager left it, with `(changed by the Manager)` on those that have a value in `manager`, the dependencies and the references. */
+function handoffIssueLine(issue: ProposalIssue): string {
+  const values = appliedFields(issue.data);
+  const changed = (key: string): string => (Object.hasOwn(issue.data.manager, key) ? " (changed by the Manager)" : "");
+  const codes = (items: readonly string[]): string => (items.length === 0 ? "none" : items.map((item) => `\`${item}\``).join(", "));
+  const parts = [
+    `${values.estimate === null ? "no estimate" : `${values.estimate} d`}${changed("estimate")}`,
+    `assignee ${values.assignee === null ? "none" : `@${values.assignee}`}${changed("assignee")}`,
+    `reviewer ${values.reviewer === null ? "none" : `@${values.reviewer}`}${changed("reviewer")}`,
+    `sprint ${values.sprint ?? "none"}${changed("sprint")}`,
+    ...Object.entries(values.fields).map(([name, value]) => `${name} ${value}${changed(`fields.${name}`)}`),
+    `depends on ${codes(issue.data.dependsOn)}`,
+    `references ${codes(issue.data.refs)}`,
+  ];
+  return `- \`${issue.id}\` ${issue.title === "" ? "(no title)" : issue.title} · ${parts.join(" · ")}`;
+}
+
 export function proposalShowView(p: Project, proposal: Proposal): Result {
   const numbers = syncShortNumbers(p);
   const live = proposal.data.status === "draft" || proposal.data.status === "open";
@@ -62,6 +80,10 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
   // Only an ordinary Proposal not attached to a Drift brings Tasks, so only it has removals and scope: computed now while it is live; once approved, only the scope it saved before is history.
   const coverage = live && coversScope(proposal.data.kind) && attached === null ? proposalCoverage(p, proposal) : null;
   const history = live ? null : proposal.data.scanScope ?? null;
+  // A handoff has issues instead of Tasks: its scope is covered by them, only as a warning, and it has warnings of its own.
+  const handoff = proposal.data.kind === "handoff";
+  const handoffScope = handoff && live ? handoffCoverage(p, proposal) : null;
+  const warnings = handoff && live ? proposalWarnings(p, proposal) : [];
   const fileChanges = changes(p, proposal);
   const errors = live ? [...validateProposal(p, proposal), ...unfixableDrifts(p, proposal).map((message) => ({ file: "proposal.md", line: 0, message }))] : [];
   const md = [
@@ -89,9 +111,12 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
     ),
     "",
     ...(proposal.tasks.length === 0 ? [] : ["## Tasks", bullets(proposal.tasks.map((t) => `- \`${t.id}\` ${t.title}${t.technical ? " (technical)" : ""}${t.refs.length === 0 ? "" : ` · ${t.refs.map((r) => `\`${r}\``).join(", ")}`}`)), ""]),
+    ...(handoff ? ["## Issues", bullets(proposal.issues.map(handoffIssueLine), "_No issues yet._"), ""] : []),
     ...(proposal.data.kind === "resolution" ? ["Resolves Drifts", bullets(resolvedDrifts.map((r) => `- ${numbers.name("drift", r.drift)} ${r.title}: ${r.decision}${r.note === undefined ? "" : ` · ${r.note}`}`), "_None yet._"), ""] : []),
     ...(coverage === null || coverage.removals.length === 0 ? [] : ["## Created on approval", bullets(coverage.removals.map((r) => `- Remove code of \`${r.ref}\`${r.coveredBy === null ? "" : ` → \`${r.coveredBy}\``}`)), ""]),
     ...(coverage === null ? [] : ["## Scope", bullets(coverage.scope.map((e) => `- \`${e.ref}\` (${e.reason}) — ${e.coveredBy}`), "_Nothing to scan._"), ""]),
+    ...(handoffScope === null ? [] : ["## Scope", bullets(handoffScope.map((e) => `- \`${e.ref}\` (${e.reason}) — ${e.coveredBy.length === 0 ? "not covered (warning)" : e.coveredBy.map((id) => `\`${id}\``).join(", ")}`), "_Nothing to scan._"), ""]),
+    ...(handoff ? ["## Warnings", warnings.length === 0 ? "None." : warnings.map((d) => `- ${formatDiagnostic(d)}`).join("\n"), ""] : []),
     ...(history === null ? [] : ["## Scan scope", bullets(history.map((e) => `- \`${e.ref}\` (${e.reason})`), "_Nothing to scan._"), ""]),
     "## Validation of the Model and Requirements with the Proposal applied",
     !live ? "Not checked for a finished Proposal." : errors.length === 0 ? "Valid." : errors.map((d) => `- ${formatDiagnostic(d)}`).join("\n"),
@@ -111,6 +136,9 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
       drifts: proposal.data.drifts,
       tasks: proposal.tasks.map((t) => ({ id: t.id, title: t.title, technical: t.technical, refs: t.refs, images: readTaskImages(p, t.id).map((i) => i.name) })),
       ...(proposal.data.kind === "resolution" ? { resolvesDrifts: resolvedDrifts } : {}),
+      ...(handoff
+        ? { issues: proposal.issues.map((i) => ({ id: i.id, title: i.title, body: i.body, ...appliedFields(i.data), refs: i.data.refs, dependsOn: i.data.dependsOn, manager: i.data.manager, problems: i.problems })), warnings, ...(handoffScope === null ? {} : { scope: handoffScope }) }
+        : {}),
       requires: proposal.data.requires,
       blockedBy: h.requires,
       stale: h.stale,
@@ -410,7 +438,8 @@ export function driftCandidatesView(p: Project, refs: string[], originArg: strin
 export function boardView(p: Project): Result {
   const numbers = syncShortNumbers(p);
   const allProposals = listProposals(p);
-  const summaries = allProposals.map((x) => proposalSummary(p, x, numbers)).filter((x) => !x.attachedTo);
+  // A handoff never shows on the Board (`rules#proposal/Draft`): `trama proposal list` and the Team view are where it is read.
+  const summaries = allProposals.filter((x) => x.data.kind !== "handoff").map((x) => proposalSummary(p, x, numbers)).filter((x) => !x.attachedTo);
   const proposals = summaries.filter((x) => x.status === "open");
   const drafts = summaries.filter((x) => x.status === "draft");
   const open = listDrifts(p).filter((d) => d.data.status === "open");

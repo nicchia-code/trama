@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
-import { createQuestionServer, questionProjectId, type CoordinatorMessage, type QuestionServer } from "../../../src/core/question-channel";
+import { createQuestionServer, type IssueStateRead, questionProjectId, type CoordinatorMessage, type QuestionServer } from "../../../src/core/question-channel";
 import { QuestionRoundQueue } from "../../../src/core/question-rounds";
 import { type QuestionRequest, type QuestionResult, unavailableQuestions } from "../../../src/core/questions";
 import { projectAt, type Project } from "../../../src/core/store";
@@ -10,6 +10,7 @@ import { checkTaskHolder } from "./task-check";
 import { followsAgent, receiveNotice, receiveAgentIdle, receiveAgentStarted } from "./drift-resolution";
 import { followsHolder } from "./followed-holders";
 import { noteCommandSeen } from "./terminal-activity";
+import { teamAnswer, type People } from "./team/people";
 interface WindowRoundService {
   identity: string;
   windowId: string;
@@ -68,8 +69,11 @@ export class EditorQuestions implements vscode.Disposable {
   private closed = false;
   private readonly subscriptions: vscode.Disposable[];
 
-  /** `ownsTerminal` says whether a terminal or omp Chat conversation of this window, working or idle, has the identity a round names: any other asker is told the editor is unavailable. */
-  constructor(private readonly project: () => Project | undefined, private readonly session: QuestionSession, private readonly ownsTerminal: (terminal: string, root: string) => boolean) {
+  /**
+   * `ownsTerminal` says whether a terminal or omp Chat conversation of this window, working or idle, has the identity a round names: any other asker is told the editor is unavailable.
+   * `people` are the Manager's people that `trama team show` reads from this window; `issueStates` says where the published issues were at the last read of GitHub, for the briefing of a comparison.
+   */
+  constructor(private readonly project: () => Project | undefined, private readonly session: QuestionSession, private readonly ownsTerminal: (terminal: string, root: string) => boolean, private readonly people: People, private readonly issueStates: (project: Project) => readonly IssueStateRead[] = () => []) {
     windowQuestions = this;
     this.queue = new QuestionRoundQueue(session.present);
     // Directory deletion/rename does not emit separate events for its children.
@@ -168,6 +172,8 @@ export class EditorQuestions implements vscode.Disposable {
         // The terminals in Agent running and the omp Chat conversations with a job this window follows, of those asked.
         onFollowedHolders: (holders) => holders.filter((holder) => followsHolder(holder)),
         onCheckTask: (task) => checkTaskHolder(project.root, task),
+        onTeam: () => teamAnswer(project, this.people),
+        onIssueStates: () => this.issueStates(project),
         onCoordinatorMessage: (message) => {
           const rooted: CoordinatorMessage = { ...message, root: project.root };
           if (!notFollowedFiling(rooted)) receiveNotice(rooted);

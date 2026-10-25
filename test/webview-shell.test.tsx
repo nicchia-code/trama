@@ -8,8 +8,8 @@ afterEach(cleanup);
 
 function setup(initial: Partial<Parameters<typeof createShellStore>[0]> = {}) {
   const views = {} as Record<ViewName, ReactNode>;
-  for (const name of ["getstarted", "diagram", "board", "requirements", "specs", "history", "settings"] as const) views[name] = <p data-view={name}>{`view ${name}`}</p>;
-  const store = createShellStore({ view: "board", hasProject: true, error: null, diagnostics: [], views, questions: null, ...initial });
+  for (const name of ["getstarted", "diagram", "board", "requirements", "specs", "history", "team", "settings"] as const) views[name] = <p data-view={name}>{`view ${name}`}</p>;
+  const store = createShellStore({ view: "board", hasProject: true, error: null, diagnostics: [], views, questions: null, githubRepo: null, teamAvailable: false, ...initial });
   const opened: string[] = [];
   const utils = render(<Shell store={store} openModelFile={(path) => opened.push(path)} />);
   return { store, opened, ...utils };
@@ -32,6 +32,25 @@ test("with a project every view but Get Started is mounted; without one only Get
   unmount();
   setup({ hasProject: false, view: "getstarted" });
   expect(mountedViews()).toEqual(["getstarted", "settings"]);
+});
+
+test("Team is mounted, after History and before Settings, only while it is available", () => {
+  const { unmount } = setup({ teamAvailable: true });
+  expect(mountedViews()).toEqual(["board", "diagram", "requirements", "specs", "history", "team", "settings"]);
+  unmount();
+  setup({ teamAvailable: false });
+  expect(mountedViews()).not.toContain("team");
+  cleanup();
+  setup({ hasProject: false, view: "getstarted", teamAvailable: true });
+  expect(mountedViews()).toEqual(["getstarted", "settings"]);
+});
+
+test("when Team stops being available it goes away and the view shown is the one the host navigates to", () => {
+  const { store } = setup({ teamAvailable: true, view: "team" });
+  expect(shown()).toEqual(["team"]);
+  act(() => store.set({ teamAvailable: false, view: "board" }));
+  expect(mountedViews()).not.toContain("team");
+  expect(shown()).toEqual(["board"]);
 });
 
 test("every view stays mounted with what it drew, and only the current one shows", () => {

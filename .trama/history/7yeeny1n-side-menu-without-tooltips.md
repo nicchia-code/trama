@@ -15,6 +15,12 @@ cleared:
       - menu-laterale
       - requirements/ui#menu-laterale
       - requirements/tech#menu-laterale
+  6bec8jmb:
+    title: "Fix code to match the Model: Open Folder loses its name"
+    finished: 2026-10-24T20:46:21.237Z
+    refs:
+      - menu-laterale/No folder
+      - requirements/ui#menu-laterale
 ---
 # Side menu without tooltips
 

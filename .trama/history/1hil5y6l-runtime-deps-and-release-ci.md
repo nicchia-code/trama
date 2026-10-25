@@ -25,6 +25,11 @@ cleared:
     finished: 2026-10-18T21:17:57.849Z
     refs:
       - requirements/tech#General
+  qny1in1b:
+    title: Skip symlink test on Windows
+    finished: 2026-10-24T20:45:59.990Z
+    refs:
+      - requirements/tech#General
 ---
 # Runtime deps and release CI
 

@@ -42,6 +42,17 @@ cleared:
     refs:
       - diagram
       - developer.CHOOSE_DRAWN_PROPOSAL
+  yh0ni696:
+    title: "Fix code to match the Model: Choosing a Proposal ends focus"
+    finished: 2026-10-24T20:47:46.653Z
+    refs:
+      - focus/Con focus
+  vs2q3cjz:
+    title: Animate Diagram view on steps
+    finished: 2026-10-24T20:46:59.288Z
+    refs:
+      - focus/Con focus
+      - requirements/ui#focus
 ---
 # Focus delle schede
 

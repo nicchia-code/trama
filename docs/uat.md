@@ -725,6 +725,12 @@ Setup: `mkdir -p /tmp/trama-empty && code --extensionDevelopmentPath=/home/luca/
 | Q5 | Write `<img src=x onerror=alert(1)>`, `![pic](https://example.com/a.png)`, a `| a | b |` table, `[x](javascript:alert(1))` and `[rel](docs/x.md)` in a Requirement section | The first three show as written text; no image loads and no alert fires; the table keeps its lines; the last two show only their label, as plain text without a link | ☐ |
 | Q6 | Write `2 * 3 * 4` and an unclosed `**bold` | Both show as written | ☐ |
 | Q7 | Nelle descrizioni di Diagramma, Board e Requisiti e nei testi dell'overlay domande, scrivere `[Manuale](https://example.com "Capitolo ) finale")` e `<span title="**testo**">valore</span>` | Compare solo il link `Manuale`, senza residui del titolo; il tooltip mostra l'indirizzo e il clic passa all'editor senza navigare il pannello. Il frammento HTML resta testo letterale, compresi gli asterischi dell'attributo, senza elementi HTML né grassetto aggiunti | ☐ |
+| Q8 | In a Requirement section write a `mermaid` fenced block with `graph TD` and `A-->B`, in the Diagram, Board, Requirements, Specs and History texts, in a question of the overlay and in an omp Chat message | Each shows `Drawing diagram…` in secondary text and then the diagram, as wide as the text at most and never larger than its natural size; the diagram has no clickable part and no tooltip; a screen reader reads an image named `Diagram` described by the block's text | ☐ |
+| Q9 | Make the diagram wider than the text (a long `graph LR` chain) and narrow the panel | The diagram scrolls sideways inside its own box, like a table; the panel never scrolls sideways | ☐ |
+| Q10 | With `trama.theme` on Auto, switch the editor between a light and a dark theme with a diagram open | The diagram is drawn again in the other theme (`default` or `dark`) without reloading the panel; the same with `trama.theme` set to Light and Dark | ☐ |
+| Q11 | Write a `mermaid` block with a syntax error (`graph TD` and `A--`), and another with `<script>alert(1)</script>` as a node label | The first shows as a plain code block, as written, with no error message; the second draws its label as text and no alert fires | ☐ |
+| Q12 | Write `~~gone~~`, `- [ ] open`, `- [x] done` (also with `*`, `+`, `1.` and nested) and `see https://example.com/a.` (and one in parentheses) | `gone` is struck through; each task item has a read-only checkbox before its text, ticked for `[x]`, and clicking it changes nothing; the address is a link to itself without the final `.` or the `)` that has no `(`; clicking it opens the system browser | ☐ |
+| Q13 | In a project whose `origin` is on GitHub write `#12` and `@octocat` (and `me@example.com`, and the same inside a code span) in a Task body and in an omp Chat message | `#12` links to `https://github.com/<owner>/<repo>/issues/12` and `@octocat` to `https://github.com/octocat`, opened in the system browser; the email and the code span show as written. Remove `origin` or point it at another host: the references show as plain text | ☐ |
 
 ---
 
@@ -1101,6 +1107,198 @@ Written from the Requirements (`menu-laterale`, `solo-merge`). Needs a scratch r
 | AH12 | Drag the side bar until it is narrower than 56 px | `Merge` and the ghost buttons show only their icon; the lines are hidden; a screen reader still reads their names (`Merge. <line>`, `Open Merge Editor`, `Reconcile with Agent`, `Abort Merge`); no tooltip | ☐ |
 | AH13 | Change `trama.language` to Italian and look at the menu | Every text of Merge stays in English | ☐ |
 | AH14 | With the keyboard only reach `Merge` and the buttons below it | Each is a button reached by Tab and pressed with Enter or Space; a disabled `Merge` is skipped | ☐ |
+
+## AM. Manager mode (command line, Settings row and wizard)
+
+Written from the Requirements (`manager-mode`, `setup-wizard`, `Get Started`, `cli#team`). Needs a scratch repository whose `origin` is on GitHub (for example `git remote add origin git@github.com:acme/web.git`; nothing is ever sent there), a second one without any remote, a third whose `origin` is not on GitHub (`https://gitlab.com/acme/web`) and a folder without git, each open in the editor when the row says so. Manager mode has no key in the editor settings and holds only for the working copy.
+
+| # | Action | Expected | ✓ |
+|---|--------|----------|---|
+| AM1 | In the repository with origin on GitHub run `trama project new --input '{"manager":true}'` | The text says `Manager mode is on (acme/web).`; `.trama/manager/mode.json` holds `{}` and `.trama/manager/.gitignore` holds `*`; `git status` shows no file of `.trama/manager/` | ☐ |
+| AM2 | Run `trama project show` and `trama project show --json` | The last line is `Manager mode: on (acme/web)`; the JSON has `"manager": true` and `"managerRepository": "acme/web"` | ☐ |
+| AM3 | Run `git remote set-url origin https://gitlab.com/acme/web`, then `trama project show` | `Manager mode: on, but origin is not on GitHub`; `.trama/manager/mode.json` is still there; the JSON has `"manager": true` and `"managerRepository": null` | ☐ |
+| AM4 | Run `git remote remove origin`, then `trama project edit --input '{"manager":true}'` | It fails with `Manager Mode needs a repository on GitHub (the origin remote).`; nothing is written | ☐ |
+| AM5 | In the repository without remote run `trama project new --input '{"manager":true}'` | The project is created; the text says `Manager mode was not turned on: Manager Mode needs a repository on GitHub (the origin remote).`; there is no `.trama/manager/`; `trama project show` ends with `Manager mode: off` | ☐ |
+| AM6 | Run `trama project edit --input '{"manager":false}'` in AM1's repository, after writing a file under `.trama/` of your own | `Manager mode is off.`; only `mode.json` is gone, `.trama/manager/.gitignore` and your file are as they were; no skill was rewritten | ☐ |
+| AM7 | Write `not json` in `.trama/manager/mode.json` and run `trama project show --json` | `"manager": true`; `trama project edit --input '{"manager":true}'` replaces it with `{}` and a final newline | ☐ |
+| AM8 | In the project with origin on GitHub open **Settings**, **Project** group | After **Solo Mode** the row **Manager Mode**: unchecked checkbox, the description «Plan work for your team and publish it as GitHub issues. Only for this working copy.» and under it `Repository: acme/web · origin on GitHub`, with `acme/web` in the monospace font | ☐ |
+| AM9 | Check **Manager Mode** | The checkbox is disabled while it is written, then stays checked; `.trama/manager/mode.json` exists; `git status` shows nothing new | ☐ |
+| AM10 | Uncheck it | The file is gone; the people of the Manager's editor and any file of Team's work under `.trama/` are untouched; the Team entry of the side menu goes away | ☐ |
+| AM11 | Make `.trama/manager/` read-only (or put a file named `manager` where the folder should be), then check **Manager Mode** | The editor shows `Trama: could not save Manager Mode: <reason>.`; the checkbox goes back to unchecked | ☐ |
+| AM12 | With **Manager Mode** on, run `git remote set-url origin https://gitlab.com/acme/web` and press **Settings** in the side menu again, without reloading the window | The checkbox is unchecked and disabled, with the `Info` icon and `Needs a repository on GitHub (the origin remote).` under the description, and the line `Origin is not on GitHub` instead of the repository; the Team entry is gone; `.trama/manager/mode.json` is still there | ☐ |
+| AM13 | Run `git remote remove origin` and look at the row | Same, with `No origin remote` | ☐ |
+| AM14 | Put `origin` back on GitHub, without reloading | The row is checked again and Team is available again | ☐ |
+| AM15 | In a project in a folder without git open **Settings** | **Manager Mode** is unchecked and disabled with the `Info` line, and `No origin remote` | ☐ |
+| AM16 | In a folder without a project, with origin on GitHub, open **Get Started**, choose Start from Scratch and go to **Project** | After **Solo Mode** a box with `Repository` on the left and `acme/web · origin on GitHub` on the right, then, last, the row **Manager Mode** in its own box, unchecked, without a repository line | ☐ |
+| AM17 | Go back to **Path** and choose, in a workspace with several folders, a folder without origin on GitHub, then to **Project** | The box says `No origin remote` or `Origin is not on GitHub`, and the row is unchecked and disabled with the `Info` line, also if it was checked before | ☐ |
+| AM18 | Check **Manager Mode**, go to **Summary** | In **Project**: `Manager Mode` `On`, not marked as changed; nothing was written yet (no `.trama/`) | ☐ |
+| AM19 | Confirm **Set up Trama** | The project is created and `.trama/manager/mode.json` is written after its files; the Settings row is checked | ☐ |
+| AM20 | Repeat AM18 and make `.trama/manager/` unwritable before confirming (on a copy of the folder) | The project is created, Manager mode stays off, and the editor shows `Trama: could not save Manager Mode: <reason>.` | ☐ |
+| AM21 | In a project with Manager mode on open **Guided setup** from **Settings** and go to **Project** | The box `Repository` and the row **Manager Mode** checked (there is no Solo Mode row); uncheck it and go to **Summary**: `Manager Mode` `Off`, highlighted with `was On` and the `changed` badge | ☐ |
+| AM22 | Confirm | The settings are saved and the file is gone; confirming again with the same value writes nothing | ☐ |
+| AM23 | In a project with an empty Model open **Import from Code**, go to **Project**, check **Manager Mode**, and confirm | The file is written after the settings and before the import starts; if it cannot be written, the wizard stays on the summary with `Could not save Manager Mode: <reason>.` and nothing starts | ☐ |
+| AM24 | With Manager mode on and origin moved away (AM12), open **Guided setup** and confirm without touching Manager Mode | The row is shown unchecked and disabled; `.trama/manager/mode.json` is still there afterwards | ☐ |
+| AM25 | Change `trama.language` to Italian and look at the row and the wizard box | Every text of Manager mode stays in English | ☐ |
+| AM26 | With the keyboard only reach **Manager Mode**, change it, and read it with a screen reader | It has the name `Manager Mode`; the description, the `Info` line and the repository are read with it; a disabled checkbox is skipped | ☐ |
+
+## AN. `trama team show`
+
+Written from the Requirements (`cli#team`, `cli#General`). Needs a project with Manager mode on and origin on GitHub, open in the editor with a few people in the team (one with an absence that ended last week, one with an absence next week), and an agent started by Trama in its terminal.
+
+| # | Action | Expected | ✓ |
+|---|--------|----------|---|
+| AN1 | In the agent's terminal run `trama team show` | `# Team`, then each member of the team ordered by name with `## <name> (@<handle>)` and the lines `Level`, `Skills`, `Capacity` (days per sprint) and `Absences`; the absence that ended last week is not there, the one next week is; nothing is written in `.trama/` | ☐ |
+| AN2 | Run `trama team show --json` | A list of `{ name, handle, level, skills, capacity, absences }` with `from` and `to` in each absence, and no other field | ☐ |
+| AN3 | Take everyone out of the team in the Team view and run it again, with and without `--json` | `No one in this project's team.` and `[]`, exit code 0 | ☐ |
+| AN4 | Run it in a terminal that Trama did not start (no `TRAMA_QUESTION_ENDPOINT`, or `TRAMA_TERMINAL` unset) | `trama team show needs the editor: only an agent started by Trama can read the team.`, exit code 1 | ☐ |
+| AN5 | Close the window and run it again from the agent's old terminal | `The editor did not answer: open the project in the editor with Trama.` after at most 10 seconds, exit code 1 | ☐ |
+| AN6 | Turn Manager mode off (or move `origin` away from GitHub) and run it again in the agent's terminal | `Manager Mode is off in this working copy.` (or `Manager Mode needs a repository on GitHub (the origin remote).`), exit code 1 | ☐ |
+| AN7 | Run `trama team show --help` | The usage and the description, exit code 0, with nothing asked of the editor | ☐ |
+
+---
+
+## AO. Team view and people
+
+Written from the Requirements (`panel/Team`, `person`, `ui#person`, `data#person`, `rules#person`). Needs a project with Manager mode on and origin on GitHub open in the editor (the Team entry of the side menu is there), and a second project (another window, also with Manager mode and origin on GitHub) to see the same person in two teams. The people are in the editor's global state (`trama.team`): they never appear in the project's files.
+
+| # | Action | Expected | ✓ |
+|---|--------|----------|---|
+| AO1 | With Manager mode on, look at the side menu; then run **Trama: Show Team** from the palette with the panel closed | **Team** (icon `Users`) is right after **History** and before the line; the command opens the panel on **Team**, titled `Team`, with the title, the tab bar with the single tab **People** in the segmented style and a line under it | ☐ |
+| AO2 | Turn Manager mode off from **Settings** | The entry **Team** goes away without leaving a gap; with the panel on **Team** it passes to the Board; **Trama: Show Team** now opens the panel as usual and does not move an open panel | ☐ |
+| AO3 | Turn it on again, open **Team** with no person saved | The empty state: round icon `Users`, `No one in this team yet`, the text, the buttons **Add the first person** and **Add from other projects**; the second is disabled and its tooltip says `Everyone you know is already in this team` | ☐ |
+| AO4 | Press **Add the first person** | The dialog `Add person` (about 480 px) with `Trama uses this to propose assignees, reviewers and sprint load.`; Level shows `Mid`, Capacity per sprint `5` and `days`; **Delete person** is not there | ☐ |
+| AO5 | Press **Save** with everything empty and the handle `a b` | Name and GitHub handle get the destructive border and the `CircleAlert` message (`Enter a name of 1 to 80 characters.`, `A GitHub handle can't contain spaces.`); the focus is on Name; a screen reader reads the message with the field; nothing is saved | ☐ |
+| AO6 | Fill in `Ada Lovelace`, `@ada`, Level Senior, capacity 4.5, the skills `Rust` (Enter) and `Go` (comma), and an absence next month; try 0.3 and 5.5 as capacity first | The chips appear with their `X` (name `Remove Rust`), Backspace in the empty field takes the last off; capacity 0.3 and 5.5 are refused with `Enter 0.5 to 5 days, in steps of 0.5.`; **Save** closes the dialog and the table shows the row with the initials `AL` (no photo), `@ada` in the monospace font, `Senior`, the skills, `4.5 d / sprint` and `Off <day>–<day> <month>` | ☐ |
+| AO7 | Add `Grace Hopper` with the handle `ADA` | The dialog stays open: `@ADA is already in your list: add them from other projects.` under the handle | ☐ |
+| AO8 | Add Grace with the handle `grace` and no absence | The header says `2 people in this project's team`; the rows are ordered by name; Grace has `None planned` | ☐ |
+| AO9 | Press the pencil of Ada, change the level and the capacity, add an absence with the end before the start, **Save** | The absence row is marked with `The end of an absence can't be before its start.` and the first date field gets the focus; fix it and **Save**: the dialog closes, the row shows the new data | ☐ |
+| AO10 | Narrow the panel under 640 px | The table becomes a list: avatar, name and handle with the actions on the first line; level, capacity and next absence separated by `·` on the second; the skills on the third | ☐ |
+| AO11 | Press the `UserMinus` of Grace | She leaves the table at once, with no question; the notice `Grace Hopper left this team.` with **Undo** stays at the top for 10 seconds | ☐ |
+| AO12 | Press **Undo**; remove her again and wait 10 seconds; remove Ada before the notice ends | **Undo** puts her back; the notice goes away after 10 seconds; the next removal replaces the notice | ☐ |
+| AO13 | Press **Add from other projects** and type `gra` | A popover with `Search people…` lists the people outside the team, each with initials, name, `@handle` and level; choosing Grace adds her at once and closes the popover | ☐ |
+| AO14 | In the second project open **Team** and press **Add from other projects** | Ada and Grace are offered; add Ada; then change her capacity in this second project | ☐ |
+| AO15 | Go back to the first project's window and show **Team** again | Ada has the new capacity (a change holds in every project); the second project's change shows when the view is shown | ☐ |
+| AO16 | In Ada's dialog press **Delete person**, then **Cancel** in the editor's dialog | The modal dialog says `Delete Ada Lovelace?` with `They leave every project's team. Issues already assigned to them on GitHub stay assigned.`; cancelling changes nothing and Ada's dialog stays open | ☐ |
+| AO17 | Press **Delete person** again and confirm with **Delete** | Ada leaves the table, the dialog closes and the focus goes back; in the second project she is gone too | ☐ |
+| AO18 | Make the editor's global state unwritable (or run with a read-only profile) and **Save** a person | At the top of the tab `Trama could not save the team: <reason>.` with **Close**; the table shows the data as stored | ☐ |
+| AO19 | Search the project's files, `.trama/`, the Output channel, the notifications and the History for the name and handle of a person | Nothing is found; `git status` shows no change caused by the people | ☐ |
+| AO20 | Change `trama.language` to Italian and open **Team** | Every text stays in English | ☐ |
+| AO21 | With the keyboard only add a person, edit her and remove her; check the focus ring and the arrows on the tab list | Everything is reachable; the focus stays inside the dialog while it is open and returns to the button that opened it; icon-only buttons have their tooltip as the name; the level is shown as text, never by colour alone; the contrast is readable in light and dark themes | ☐ |
+
+## AP. GitHub Project and reads with `gh`
+
+Written from the Requirements (`github-project`, `rules#github-project`, `ui#github-project`, `data#github-project`). Needs a project with Manager mode on and origin on GitHub, the GitHub CLI (`gh`) logged in with `project` access, an owner with at least one Project that has an Iteration field and one that has none. Steps AP6–AP9 need `gh` to be missing or logged out: rename it or run `gh auth logout --hostname github.com`. Nothing here changes anything on GitHub.
+
+| # | Action | Expected | ✓ |
+|---|--------|----------|---|
+| AP1 | Open **Team** with no Project linked | While the first read runs the content shows skeleton rows and the header says `Loading from GitHub…`; then the heading `Link a GitHub Project`, the line `Team publishes issues to a Project and reads its sprints from the Iteration field.` and a bordered list of radio rows, each with the title and `Iteration · … fields`; a Project without an Iteration field is disabled with `No Iteration field — add one on GitHub to use it`; **Link Project** and **Create a Project on GitHub** under the list. The tab bar and **People** stay usable | ☐ |
+| AP2 | Press **Create a Project on GitHub** | The owner's Projects page opens in the browser | ☐ |
+| AP3 | Choose a Project with an Iteration field and press **Link Project** | The button `<owner>/<repo> · <Project>` appears next to the title with `SquareKanban` and `ChevronsUpDown`; at the right `Updated just now` and **Refresh**; `.trama/manager/project.json` holds `{ "owner", "number", "title" }` and `git status` does not show it | ☐ |
+| AP4 | Open the button | The popover `Change GitHub Project` with `Search Projects of <owner>…`, the Projects of the owner (the linked one checked), `Link another Project…` and **Unlink**; typing narrows the list; a Project without an Iteration field is disabled | ☐ |
+| AP5 | Choose another Project, then **Link another Project…**, then **Unlink** | The link changes and the view reads again; `Link another Project…` shows the picker page with **Cancel**; **Unlink** removes `.trama/manager/project.json` and shows the page `Link a GitHub Project`; on GitHub nothing changed and the issues already published stay where they are | ☐ |
+| AP6 | Make `gh` unavailable (rename it) and press **Refresh** | The box `GitHub CLI is not installed` with **Install gh** (opens <https://cli.github.com>) and **Refresh** | ☐ |
+| AP7 | Put `gh` back and log out (`gh auth logout --hostname github.com`), then **Refresh** | The box `You're not logged in to GitHub`; **Log in to GitHub** opens a visible terminal named `Log in to GitHub` in the terminal area with the cursor inside, running `gh auth login --hostname github.com --web --scopes project`; when the command ends the view reads again by itself | ☐ |
+| AP8 | Log in without the `project` scope (`gh auth login --scopes repo`) and **Refresh** | The box `GitHub CLI can't read Projects`; **Give access** opens the terminal running `gh auth refresh --hostname github.com --scopes project`; afterwards the view reads again | ☐ |
+| AP9 | Cut the network and press **Refresh** with a Project linked | The box `Couldn't read the GitHub Project` in the destructive colour with the reason in monospace and `Showing data from <time ago>.`; the view keeps showing the last data; **Retry** reads again, **Show details** opens the `Trama` Output channel with everything `gh` said | ☐ |
+| AP10 | Open the popover or the picker page with a Project that has no Iteration field in the list | It cannot be chosen: the row is disabled and says `No Iteration field — add one on GitHub to use it`; nothing is written | ☐ |
+| AP11 | Run `trama issue fields` from an agent terminal with a Project linked, then with none, then with `gh` unavailable | The fields and iterations (the sprint field and the current sprint marked); `No GitHub Project is linked: link one in the Team view.`; the reason of the state of `gh` with how to fix it; exit code 1 for the last two | ☐ |
+| AP12 | Search the Output channels and the notifications while Team is open | Trama sends no request other than the `gh` reads and the optional ntfy notification; no timer reads GitHub | ☐ |
+| AP13 | Change `trama.language` to Italian and open **Team** | Every text of the GitHub parts stays in English | ☐ |
+| AP14 | With the keyboard only: open the popover, choose a Project, press **Refresh**; check light, dark and a narrow panel; with reduced motion on | Everything is reachable with a visible focus; **Refresh** does not spin and the skeleton does not pulse with reduced motion; the state is told by text and icon, never by colour alone | ☐ |
+
+---
+
+## AQ. Handoffs: the Decisions and Issues tabs
+
+Written from the Requirements (`ui#proposal/Open`, `ui#issue`, `ui#menu-laterale`, `ui#panel/Team`, `rules#issue`, `tech#issue`). Needs Team available, the GitHub CLI logged in, a linked Project with an Iteration field and a team with at least two people.
+
+| # | Action | Expected | ✓ |
+|---|--------|----------|---|
+| AQ1 | Open **Team** | The tabs are `Decisions`, `Issues` and `People`, in this order, in the segmented style, and the view opens on `Decisions`; under the title the Project button, at the right `Updated …` and **Refresh**; narrower than 480 px the Project button goes under the title | ☐ |
+| AQ2 | With no handoff open | `No handoff waits for a decision`, the text `When the agent turns a request into issues for your team, its proposal appears here for you to approve.`, **New handoff** and **View published issues** (opens `Issues`) | ☐ |
+| AQ3 | Press **New handoff** and send the request; let the agent hand a handoff over | A handoff request opens like a design request; the handoff appears as a card `P<n> <title>`, the epic chip with a coloured dot and `Creates <n> issues · changes <m> Machines · proposed <time ago>`; a Draft still being written is not shown | ☐ |
+| AQ4 | Look at the number of handoffs waiting | The tab `Decisions` has a round primary `Badge`; the side menu entry `Team` has a `Badge` and the name `Team, N handoffs wait for a decision` (`1 handoff waits…`); **Board** and the icon of the activity bar do not count them; with none there is no badge | ☐ |
+| AQ5 | Open the arrow of **Reject** | `Rework with feedback…` with its description, and `Reject`; **Approve** is disabled with `The agent is still finishing` while the agent works, with the first reason when the handoff is blocked and with `Link a GitHub Project first` without a Project | ☐ |
+| AQ6 | Click a card (or press Enter on its title) | The preview of its first issue: bar with `Decisions`, the short number and title, `<i> of <n>`, the arrows with `Previous issue · Alt+↑` and `Next issue · Alt+↓`, **Approve** and **Reject**; the pill `Not published`, `New issue in <owner>/<repo>`, the title and the label chips | ☐ |
+| AQ7 | Press Alt+↓ and Alt+↑ anywhere in the preview, then Esc | The preview moves between the issues; Esc goes back to the cards | ☐ |
+| AQ8 | Read an issue with an estimate over 3 days and a requirement the handoff does not cover | The box `Estimated <n> d: more than 3 days per issue.` with **Split**, and `Not covered: <ref>.` with `No issue of this handoff is about it.`; the estimate field has the warning border | ☐ |
+| AQ9 | Read the body and open `Trama references` | The body as it will be published, with its sections and its `mermaid` diagram drawn; `Trama references` lists the references as chips that open the focus | ☐ |
+| AQ10 | Change the reviewer, the estimate (also to `0.25`) and the sprint (also to an ended one) | A valid value is kept and the line says `Changed by you · Undo`; an invalid one shows its message under the input and writes nothing; **Undo** goes back to the agent's value; the handoff stays Open, neither stale nor a Draft | ☐ |
+| AQ11 | Press **Split** on the long issue | The agent is asked to cut that issue; the handoff goes back to Draft and comes back handed over again, with the other issues and your changes kept | ☐ |
+| AQ12 | Press **Approve** | The cards leave `Decisions`, the issues appear in `Issues` as `Publishing` (the icon turns; not with reduced motion) and the agent publishes them in the order of their dependencies | ☐ |
+| AQ13 | Make a publication fail (a missing label) and press **Publish again** | The row says `Not published` and `Publish failed: <reason>`; **Publish again** is disabled with the reason while the same handoff is publishing, and sends the instruction again otherwise | ☐ |
+| AQ14 | Try to approve, reject or rework a handoff from the Board or from a command | The editor refuses with `Trama could not … the handoff: decide it in the Team view.` and nothing changes | ☐ |
+| AQ15 | Read the `Issues` tab | `<n> issues in <m> epics · ordered by dependencies`, rows grouped by epic with `Fold <epic>`, `<n> issues · <days> d`; columns `Issue`, `Title`, the assignee's avatar, `Sprint`, `Status`, `Actions`; narrower than 640 px each row is a block | ☐ |
+| AQ16 | With the keyboard only, in light and dark themes, with `trama.language` in Italian | Every control is reachable with a visible focus ring; the state of an issue is told in words as well as colour; every text stays in English | ☐ |
+
+---
+
+## AR. The states of the issues from GitHub
+
+Written from the Requirements (`rules#issue/Published`, `ui#issue/Published`, `tech#issue/Published`, `github`, `issue/Published`). Needs a published handoff and a team that works on GitHub.
+
+| # | Action | Expected | ✓ |
+|---|--------|----------|---|
+| AR1 | Open **Team**, then **Issues** right after publishing, before any read ends | The published issues are `Open`; no state is invented | ☐ |
+| AR2 | On GitHub put a draft pull request, or a linked branch, or the Project status `doing` on an issue; press **Refresh** | The row says `In progress` (blue, icon `LoaderCircle`, still) | ☐ |
+| AR3 | Mark the pull request ready for review | The row says `In review` (amber, `Eye`) | ☐ |
+| AR4 | Merge it so the issue closes as completed | The row says `Closed` (violet, `CircleCheck`) and the group says `· 1 closed` | ☐ |
+| AR5 | Close another issue as not planned, then reopen it | `Not planned` (muted, `CircleSlash`), then `Open` after a read | ☐ |
+| AR6 | Remove an issue from the Project, or delete it, and **Refresh** | `Not found on GitHub` (muted, `CircleHelp`) and only **Open on GitHub** | ☐ |
+| AR7 | Change the assignee, the sprint and the estimate of an issue on GitHub, and **Refresh** | The row shows GitHub's values; an issue with no sprint on GitHub says `No sprint` even if it was published with one; the group's days follow the estimate field (first number field with `estimate` or `days` in its name) | ☐ |
+| AR8 | Cut the network and press **Refresh** | The states of the last read stay, with the banner of `Couldn't read the GitHub Project` and its age | ☐ |
+| AR9 | Inspect GitHub afterwards | Trama changed nothing: no comment, no field, no state | ☐ |
+| AR10 | Run a scan (or a Run) from an agent terminal started by Trama and read the briefing of `trama comparison new` for a Machine whose references an issue has | The section `## Published issues` lists `#<n> <title> (<state>): <refs>` with the state of the last read in the editor, and the rule: a Drift names the issue and its first Fix option fixes the code | ☐ |
+| AR11 | Run `trama comparison new` from a terminal that is not Trama's, and with no read of GitHub yet | The section is there with `Open` as published; an issue `Not planned` is not listed | ☐ |
+| AR12 | Let the agent file a Drift on one of those references | The Drift names `#<n>` and its first Fix option fixes the code | ☐ |
+
+---
+
+## AS. The Timeline tab
+
+Written from the Requirements (`ui#github-project/Linked`, `rules#github-project/Linked`, `rules#issue/Published`, `tech#issue/Published`). Needs a linked Project with iterations, a team with capacities and absences, and published issues.
+
+| # | Action | Expected | ✓ |
+|---|--------|----------|---|
+| AS1 | Open **Team** | The tabs are `Decisions`, `Issues`, `Timeline`, `People`, in this order | ☐ |
+| AS2 | Open **Timeline** | A segmented toggle `By person` (chosen) / `By epic` and, at the right, `Block width = estimate (full width = 5 days)`; the grid is in a bordered card: a lane column of about 220 px, a column per sprint with its title and dates (`26–30 Oct`), the current sprint with the `Current` badge and a light primary background, and a last column `No iteration` with `After <date>` and a faint hatch | ☐ |
+| AS3 | Look at the first sprint | It is the earliest current or past sprint with an open issue of Trama, or the current one when none; the last one is the Project's last iteration | ☐ |
+| AS4 | By person, read a lane | The initials avatar, the name and `<capacity> d / sprint`; lanes are ordered by name; `Unassigned` and `Not in this team` appear only when an issue needs them | ☐ |
+| AS5 | Add an absence of three working days to a person in **People** and come back | Their cell in that sprint has a dashed block with `CalendarOff` and `Off <dates>`, three fifths of the cell wide, and the capacity in that cell shrinks (rounded to half a day) | ☐ |
+| AS6 | Give a person more estimated days in a sprint on GitHub than their capacity, and **Refresh** | The cell says `<load> / <capacity> d · over` in red; a screen reader says `<load> of <capacity> days, over capacity`; an item with no estimate is noted in the cell's tooltip as `<n> items without estimate` | ☐ |
+| AS7 | Assign to a person an item of the Project that Trama did not publish, with an estimate | It counts in their load, and has no block | ☐ |
+| AS8 | Read a block | The epic's dot, `#<n>`, the title cut with an ellipsis and `<d> d`; its width is the estimate over 5 days of the cell; the tooltip and the accessible name are `#<n> <title> · <d> d · <status>`; a click opens the issue on GitHub | ☐ |
+| AS9 | Close an issue on GitHub and **Refresh** | Its block is muted and the number is struck through; a closed issue with no sprint is not shown | ☐ |
+| AS10 | Press **By epic** | A lane per epic with its chip and `<n> issues`, in the order of the Issues tab; each cell shows the epic's `<days> d` in that sprint; go to **Issues** and back: **By epic** is still chosen | ☐ |
+| AS11 | Use a Project whose last iteration ends in less than three weeks | A warning box `The Project has no iteration after <sprint>.` with **Add iterations on GitHub**, which opens the Project's settings page in the browser | ☐ |
+| AS12 | Narrow the panel under 720 px | The grid scrolls sideways inside its card with the lane column fixed; the page never scrolls sideways | ☐ |
+| AS13 | Unlink the Project, then publish nothing and link one | Without a Project the tab shows `Link a GitHub Project`; with no published issue it says `No published issues yet: the timeline fills as handoffs are approved.` above the empty grid of the sprints | ☐ |
+| AS14 | Open the preview of a handoff's issue with an assignee of the team and a sprint | Under the `Sprint` field: `<first name> has <load> / <capacity> d in this sprint`, counting this issue, in red when it goes over the capacity | ☐ |
+| AS15 | Try to change something from the Timeline | Nothing can be dragged or edited: sprints, estimates and assignees change on GitHub | ☐ |
+
+---
+
+## AT. Signals, Comment update and Scan
+
+Written from the Requirements (`rules#issue/Published`, `rules#developer.ASK_ISSUE_UPDATE`, `rules#developer.SCAN_ISSUE`, `ui#issue/Published`, `tech#issue/Published`). Needs published issues, a team and a Project with sprints.
+
+| # | Action | Expected | ✓ |
+|---|--------|----------|---|
+| AT1 | Change the text of a Model element or Requirement an open issue is about (for example a state of a Machine it names), without reading GitHub again | The next picture of the Issues tab gives the issue the badge `Stale` (`Clock`) with `The Model changed after publishing`; no read of GitHub started | ☐ |
+| AT2 | Give an open issue a sprint that ended before today | `Carry-over` (`ArrowRight`) with `From <sprint>` | ☐ |
+| AT3 | Assign to a member more estimated days in a sprint than their capacity there (an absence lowers it) | `Overload` (`Gauge`) with `<first name> <load> / <capacity> d` on their issues of that sprint | ☐ |
+| AT4 | Make an issue depend on one that is open with no sprint, then with a later sprint, then in the same sprint with another assignee | `Dependency` (`Link`) with `Blocked by #<n>` each time; no signal when the dependency is closed, earlier or the same sprint with the same assignee | ☐ |
+| AT5 | Read an issue with several signals | They come in the order `Stale`, `Carry-over`, `Overload`, `Dependency`; each has its word and reason, so none is told by colour alone; a closed or not planned issue has none | ☐ |
+| AT6 | Open **Timeline** | The block of an issue with a signal has a left border in the colour of its first signal | ☐ |
+| AT7 | On the stale issue press **Comment update** | A terminal `Update #<n>` starts with `Use the trama-handoff skill to comment on issue <issue id> what changed in the Model since it was published.`; a ghost shows in the status bar; the button says it is disabled with `Updating…` as its tooltip while it works; **Open on GitHub** is an icon with a tooltip | ☐ |
+| AT8 | Read what the agent does | `trama issue show <id>` prints `## Changed since publishing` with the earlier and current text of each changed reference (the earlier one only with git), one comment is written on the issue in its language without any mention of Trama, `trama issue edit` with `{ "updated": true }` records it, the body of the issue is not touched, and the `Stale` badge goes away | ☐ |
+| AT9 | Change the Model again | The issue is `Stale` again, and **Comment update** offers it again | ☐ |
+| AT10 | Close an issue as completed on GitHub, **Refresh**, and press **Scan** | A terminal `Scan #<n>` starts with `Use the trama-scan skill on the references of issue <issue id>: <refs>. The work was done by a person of the team from this issue, so a difference leans towards fixing the code.`; only those references are compared; the Drifts it files name the issue and put fixing the code first | ☐ |
+| AT11 | Compare the label of **Scan System** and run it once more | `· N` did not change because of the scan of the issue, and the memory of the last scan of the System is the one of before | ☐ |
+| AT12 | Start a Run, then look at **Comment update** and **Scan** | Both are disabled with `A run is in progress` as tooltip | ☐ |
+| AT13 | Turn Manager mode off while the view is open | The Team view goes to the Board; a message `askIssueUpdate` or `scanIssue` sent by then changes nothing and says `Manager Mode is off in this working copy.` | ☐ |
+| AT14 | An issue closed as not planned, and one removed from the Project | Neither has **Comment update** or **Scan**; `Not found on GitHub` has only **Open on GitHub** | ☐ |
+| AT15 | With Solo mode on, merge a branch and read the Drifts of the scan that follows, on files of an issue of the team | They lean towards fixing the code | ☐ |
 
 ---
 

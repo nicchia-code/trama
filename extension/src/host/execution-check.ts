@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { listAnnouncements } from "../../../src/core/announcements";
+import { publishingIssues } from "../../../src/core/issues";
 import { projectAt } from "../../../src/core/store";
 import { listTasks } from "../../../src/core/work";
 import { hasTerminalWork, runExecutionCheck } from "./agent";
@@ -9,10 +10,10 @@ import { followsHolder } from "./followed-holders";
 /** The delay between two execution checks (`time.CHECK_DUE`); not a setting. */
 export const CHECK_INTERVAL_MS = 60_000;
 
-/** Whether the project at `root` has a Task taken by the agent (`agent` other than `false`). */
+/** Whether the project at `root` has a Task taken by the agent (`agent` other than `false`) or an issue being published. */
 function hasTakenTask(root: string): boolean {
   try {
-    return listTasks(projectAt(root)).some((task) => task.data.agent);
+    return listTasks(projectAt(root)).some((task) => task.data.agent) || publishingIssues(projectAt(root)).length > 0;
   } catch {
     // An unreadable board says nothing: no work is assumed.
     return false;
@@ -77,7 +78,7 @@ export function startExecutionCheck(root: () => string | undefined, files: vscod
   };
 
   const onWorkFile = (uri: vscode.Uri): void => {
-    if (/[\\/]\.trama[\\/](tasks|announcements)[\\/]/.test(uri.fsPath)) arm();
+    if (/[\\/]\.trama[\\/](tasks|announcements|issues)[\\/]/.test(uri.fsPath)) arm();
   };
 
   const subscriptions = [onDriftResolutionChange(arm), files.onDidCreate(onWorkFile), files.onDidChange(onWorkFile)];

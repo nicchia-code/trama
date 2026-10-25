@@ -30,6 +30,7 @@
     "cytoscape": "^3.34.3",
     "elkjs": "^0.12.0",
     "lucide-react": "^1.60.0",
+    "mermaid": "^12",
     "react": "^19",
     "react-dom": "^19",
     "simple-icons": "^16.35.0",

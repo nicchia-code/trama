@@ -5,6 +5,26 @@ summary: Il menu laterale porta il nome del progetto nell'intestazione; la sched
 tasks:
   - 3g600tqt
   - n1b6rn0g
+cleared:
+  3g600tqt:
+    title: Nome progetto nel menu laterale
+    proposal: 0s8f36sq
+    tag: Titoli schede
+    finished: 2026-10-25T09:09:02.195Z
+    refs:
+      - menu-laterale
+      - requirements/ui#menu-laterale
+      - requirements/tech#menu-laterale
+  n1b6rn0g:
+    title: Titolo scheda dal nome vista
+    proposal: 0s8f36sq
+    tag: Titoli schede
+    finished: 2026-10-25T09:07:34.535Z
+    refs:
+      - panel
+      - requirements/ui#panel
+      - requirements/ui#panel/Get Started
+      - requirements/tech#panel
 ---
 # Nome progetto nel menu e titolo scheda dalla vista
 

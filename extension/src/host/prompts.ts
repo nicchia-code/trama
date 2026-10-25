@@ -8,12 +8,22 @@ export type ResolvedAction =
   | { kind: "written-design"; request: string }
   /** A written design request that starts a project from scratch: the `trama-setup` skill, named `Setup`. */
   | { kind: "setup-request"; request: string }
+  /** A written handoff request, saved as `.trama/requests/<request>.md`: the `trama-handoff` skill, named `Handoff`. */
+  | { kind: "handoff-request"; request: string }
+  /** The publication of the issues of the approved handoff `handoff` that are not published yet: the `trama-handoff` skill, named `Publish <short number>`. */
+  | { kind: "publish-issues"; handoff: string }
   /** Resolve Drifts on the one Drift the developer chose: always a manual request, answered with a round of questions. */
   | { kind: "resolve-drifts"; drift: string }
   /** Unify Drifts on the `drifts` gathered when the instruction is sent, in creation order: one agent unites them into one Drift. */
   | { kind: "unify-drifts"; drifts: string[] }
-  /** Rework with feedback on a rejected Proposal, redone with the `skill` that wrote it: `design` (change, or setup on a Model that has a Feature or an Actor), `setup` (setup on an empty Model) or `import`. */
-  | { kind: "rework"; proposal: string; skill: "design" | "setup" | "import" }
+  /** Rework with feedback on a rejected Proposal, redone with the `skill` that wrote it: `design` (change, or setup on a Model that has a Feature or an Actor), `setup` (setup on an empty Model), `import` or `handoff`. */
+  | { kind: "rework"; proposal: string; skill: "design" | "setup" | "import" | "handoff" }
+  /** Split the issue `issue` of the open handoff `handoff` into issues that each fit a sprint, on the same handoff: the `trama-handoff` skill, named `Split <short number>`. */
+  | { kind: "split-issue"; handoff: string; issue: string }
+  /** Comment update on the published, open, stale issue `issue` (its GitHub number is `number`): the `trama-handoff` skill, named `Update #<number>`. */
+  | { kind: "update-issue"; issue: string; number: number }
+  /** Scan of the closed issue `issue` (its GitHub number is `number`): the `trama-scan` skill on its `refs` alone, named `Scan #<number>`. */
+  | { kind: "scan-issue"; issue: string; number: number; refs: string[] }
   /** Rework with feedback on a rejected resolution: one agent resolves its `drifts`, the ones still open and in no other resolution. */
   | { kind: "rework-resolution"; proposal: string; drifts: string[] }
   /** Refine a stale Proposal on the current Model and Requirements (`trama.autoUpdateStaleProposals`). `seats`: the sub-agent places this refinement holds, the limit its instruction gives. `job`: the identity of its job, kept in memory to tell its end from another's. */
@@ -26,14 +36,24 @@ export function buildPrompt(action: ResolvedAction): string {
       return `Use the trama-setup skill on the project request in \`.trama/requests/${action.request}.md\`. Bind the setup Proposal you open to it with the \`request\` field.`;
     case "written-design":
       return `Use the trama-design skill on the design request in \`.trama/requests/${action.request}.md\`. Bind the first Proposal you open to it with the \`request\` field.`;
+    case "handoff-request":
+      return `Use the trama-handoff skill on the handoff request in \`.trama/requests/${action.request}.md\`. Bind the first handoff you open to it with the \`request\` field.`;
+    case "publish-issues":
+      return `Use the trama-handoff skill to publish the issues of handoff ${action.handoff}.`;
     case "resolve-drifts":
       return `Use the trama-resolve-drifts skill on the open Drift ${action.drift}, and on no other open Drift: ask the developer what should happen for it, then write one resolution Proposal.`;
     case "unify-drifts":
       return `Unify the open Drifts ${action.drifts.map((d) => `\`${d}\``).join(", ")} into one Drift, following the instructions above.`;
     case "rework":
-      return action.skill === "setup"
-        ? `Use the trama-setup skill to rework the rejected setup Proposal ${action.proposal} with the developer's feedback. Bind the setup Proposal you open to it with the \`reworks\` field.`
-        : `Use the trama-${action.skill} skill to rework the rejected Proposal ${action.proposal} with the developer's feedback. Bind the first Proposal you open to it with the \`reworks\` field.`;
+      if (action.skill === "setup") return `Use the trama-setup skill to rework the rejected setup Proposal ${action.proposal} with the developer's feedback. Bind the setup Proposal you open to it with the \`reworks\` field.`;
+      if (action.skill === "handoff") return `Use the trama-handoff skill to rework the rejected handoff ${action.proposal} with the developer's feedback. Bind the first handoff you open to it with the \`reworks\` field.`;
+      return `Use the trama-${action.skill} skill to rework the rejected Proposal ${action.proposal} with the developer's feedback. Bind the first Proposal you open to it with the \`reworks\` field.`;
+    case "split-issue":
+      return `Use the trama-handoff skill to split issue ${action.issue} of handoff ${action.handoff} into issues that each fit a sprint, on the same handoff.`;
+    case "update-issue":
+      return `Use the trama-handoff skill to comment on issue ${action.issue} what changed in the Model since it was published.`;
+    case "scan-issue":
+      return `Use the trama-scan skill on the references of issue ${action.issue}: ${action.refs.map((ref) => `\`${ref}\``).join(", ")}. The work was done by a person of the team from this issue, so a difference leans towards fixing the code.`;
     case "refine":
       return `Use the trama-design skill to refine the stale Proposal ${action.proposal} on the current Model and Requirements, as the "Refining a stale Proposal" section says.`;
     case "rework-resolution":
@@ -105,6 +125,10 @@ export function terminalName(action: ResolvedAction, short: (kind: "task" | "pro
       return "Merge";
     case "written-design":
       return "Design";
+    case "handoff-request":
+      return "Handoff";
+    case "publish-issues":
+      return `Publish ${short("proposal", action.handoff)}`;
     case "setup-request":
       return "Setup";
     case "resolve-drifts":
@@ -113,7 +137,13 @@ export function terminalName(action: ResolvedAction, short: (kind: "task" | "pro
     case "unify-drifts":
       return "Unify";
     case "rework":
-      return action.skill === "design" ? "Design" : action.skill === "setup" ? "Setup" : "Import";
+      return action.skill === "design" ? "Design" : action.skill === "setup" ? "Setup" : action.skill === "handoff" ? "Handoff" : "Import";
+    case "split-issue":
+      return `Split ${short("proposal", action.handoff)}`;
+    case "update-issue":
+      return `Update #${action.number}`;
+    case "scan-issue":
+      return `Scan #${action.number}`;
     case "refine":
       return `Refine ${short("proposal", action.proposal)}`;
   }
@@ -169,11 +199,16 @@ export function mayFileDrifts(action: ResolvedAction): boolean {
     case "implement-all":
     case "import":
     case "unify-drifts":
+    case "scan-issue":
       return true;
     case "written-design":
     case "setup-request":
+    case "handoff-request":
+    case "publish-issues":
+    case "update-issue":
     case "resolve-drifts":
     case "refine":
+    case "split-issue":
     case "reconcileMerge":
     case "rework-resolution":
       return false;

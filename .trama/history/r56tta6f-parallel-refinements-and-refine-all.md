@@ -6,6 +6,56 @@ tasks:
   - 3unikug3
   - qi8v06xv
   - p78pzkxy
+cleared:
+  p78pzkxy:
+    title: Approve e Refine All durante un Run
+    proposal: t7ad9axm
+    tag: Refine All
+    finished: 2026-10-24T16:28:25.553Z
+    refs:
+      - proposal/Open
+      - proposal/Draft/agent.SUBMIT_PROPOSAL
+      - proposal/Draft/drift-resolution.PREPARED_RESOLUTION_WRITTEN
+      - requirements/rules#proposal
+  qi8v06xv:
+    title: Refine All sulla Board
+    proposal: t7ad9axm
+    tag: Refine All
+    finished: 2026-10-24T16:27:46.579Z
+    refs:
+      - panel/Board
+      - panel/Closed/developer.SHOW_BOARD
+      - panel/Closed/developer.OPEN_GHOST_DETAILS
+      - panel/Open/developer.OPEN_GHOST_DETAILS
+      - panel/Open/developer.SHOW_BOARD
+      - panel/Settings/developer.CONFIRM_SETUP
+      - panel/Settings/developer.CANCEL_SETUP
+      - panel/Get Started/developer.INITIALIZE_PROJECT
+      - panel/Get Started/workspace.MODEL_CHANGED
+      - developer.RAFFINA_TUTTE
+      - developer.ANNULLA_RAFFINA_TUTTE
+      - requirements/ui#panel/Board
+      - requirements/ui#General
+      - requirements/ui#panel
+      - requirements/ui#raffinamento
+      - requirements/ui#developer.RAFFINA_TUTTE
+      - requirements/ui#developer.UNIFY_DRIFTS
+      - requirements/tech#developer.UNIFY_DRIFTS
+  3unikug3:
+    title: Raffinamenti paralleli e Refine All
+    proposal: t7ad9axm
+    tag: Refine All
+    finished: 2026-10-24T16:25:14.186Z
+    refs:
+      - raffinamento
+      - agent-launching
+      - requirements/rules#raffinamento
+      - requirements/rules#developer.RAFFINA_TUTTE
+      - requirements/rules#developer.ANNULLA_RAFFINA_TUTTE
+      - requirements/tech#raffinamento
+      - requirements/tech#developer.RAFFINA_TUTTE
+      - requirements/data#raffinamento
+      - requirements/quality#raffinamento
 ---
 # Parallel refinements and Refine All
 

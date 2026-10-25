@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { TramaError } from "../core/errors";
+import type { IssueStateRead, TeamReply } from "../core/question-channel";
 import type { AgentOrigin } from "../core/announcements";
 import { findProject, projectAt, type Project, TRAMA_DIR } from "../core/store";
 import { syncShortNumbers } from "../core/short-numbers";
@@ -17,6 +18,10 @@ export interface Context {
   job?: string;
   /** Whether the terminal carries the sign of a Run with the Advisor Scanner on (`TRAMA_ADVISOR_SCANNER` is `1`). */
   advisorScanner: boolean;
+  /** What the editor answered to `team`, read before the command by the executable for a command that needs it (`beforeRun`); absent otherwise, and always in the synchronous `run`. */
+  team?: TeamReply;
+  /** Where the editor said the published issues were at its last read of GitHub, read before `comparison new` by the executable; absent without an editor, and always in the synchronous `run`. */
+  issueStates?: readonly IssueStateRead[];
   project(assignNumbers?: boolean): Project;
 }
 

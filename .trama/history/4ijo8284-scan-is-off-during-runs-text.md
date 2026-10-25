@@ -4,6 +4,17 @@ updated: 2026-10-24T16:30:10.178Z
 summary: With the Advisor Scanner on, disabled Scan buttons explain themselves with the shorter text Scan is off during Runs. in the tooltip, accessible name and side menu line.
 tasks:
   - 2xadjkgy
+cleared:
+  2xadjkgy:
+    title: Testo Scan disattivato
+    proposal: 8ymyjtvh
+    tag: Scan disattivato
+    finished: 2026-10-24T16:10:46.970Z
+    refs:
+      - panel
+      - menu-laterale
+      - requirements/ui#panel
+      - requirements/ui#menu-laterale
 ---
 # Scan is off during Runs text
 

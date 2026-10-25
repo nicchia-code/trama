@@ -1,0 +1,24 @@
+---
+description: "Use when implementing how Trama follows published issues on GitHub, the signals of the Issues tab, the load and capacity of the Timeline, Comment update and the Scan of a closed issue."
+---
+# Timeline and signals
+
+## issue/Published
+- Every read of GitHub (`rules#github-project`) also reads the items of the linked Project that are issues of the repository: number, title, state and state reason, assignees, the value of every field (the sprint field and the estimate field included), the pull requests that close it with their state and draft flag, and the linked branches. Trama compares what it reads for each of its published issues with the last read and moves the issue's state accordingly, as the Events of `github`: closed as completed → `Closed`; closed as not planned → `Not planned`; open with an open non-draft pull request that closes it → `In review`; open with a draft pull request, a linked branch, or a status whose option is `In progress` or `Doing` (without case) → `In progress`; otherwise `Open`. The state is computed, never written in the issue's card. An issue not found any more is `Not found on GitHub`.
+- The sprint, estimate and assignee of an issue are always those read from GitHub; when GitHub has none, the published values are not used.
+- The estimate field is the first number field of the Project whose name contains `estimate` or `days` (without case); without one, estimates come from Trama's cards for Trama's issues and count 0 for other items.
+- Capacity of a person in a sprint: their capacity per sprint times the working days of the sprint (Monday to Friday within the iteration's dates) that are not absences, divided by 5, rounded to 0.5.
+- Load of a person in a sprint: the sum of the estimates of the open items of the Project assigned to them in that sprint, Trama's issues or not; an item without estimate counts 0, and the Timeline notes `<n> items without estimate` in that cell's tooltip. A person is matched to an assignee by GitHub handle, without case.
+- Signals of an open published issue, computed at every read and every picture of the panel: `Stale` when the text fingerprint of at least one of its references (`tech#scans`) differs from the one recorded at publication or at the last Comment update, or a reference no longer exists; `Carry-over` when its sprint ended before today; `Overload` when the load of its assignee in its sprint is over their capacity in that sprint; `Dependency` when an issue it depends on is open and has no sprint, or a later sprint, or the same sprint and another assignee. Signals never change anything on GitHub or in the project.
+- Every comparison of code and Model (a scan, the comparisons of a Run, the scan after a Merge) receives, for the Machine it compares, the published issues whose references fall in it and are not `Not planned` (`tech#issue/Published`). A Drift it files on such a reference names the issue (`#<n>`) and recommends, as its first Fix option, fixing the code to what the Model says.
+
+## developer.ASK_ISSUE_UPDATE
+- Available on a published, open, `Stale` issue. The instruction is one line: "Use the trama-handoff skill to comment on issue <issue id> what changed in the Model since it was published." The terminal is named `Update #<n>`, with the execution role (`rules#agent-launching`), and its ghost shows in the status bar.
+- The skill reads `trama issue show <id>` (which prints, under `## Changed since publishing`, the earlier and current text of each reference whose fingerprint differs), writes with `gh issue comment` a comment in the language of the issue that says, for the person and without any reference to Trama, what changed and what it means for the work, then runs `trama issue edit <id>` with `{ updated: true }`, which records the instant and the current fingerprints. The body of the issue is never rewritten.
+
+## developer.SCAN_ISSUE
+- Available on a published issue in `Closed`, with Team available and no Run launched from this window in progress. The instruction is one line: "Use the trama-scan skill on the references of issue <issue id>: <refs>. The work was done by a person of the team from this issue, so a difference leans towards fixing the code." The terminal is named `Scan #<n>`, with the scan role; it compares only the Machines and Requirement sections of those references, files its Drifts as any scan and never changes the number of `Scan System`.
+
+## github-project/Linked
+- Sprints shown by the Timeline: from the earliest sprint, current or past, that holds an open published issue, or from the current sprint when none, to the last iteration of the Project. The Project lacks sprints when its last iteration ends less than three weeks after today; the warning names the last iteration.
+- The Timeline counts only the items of the linked Project: issues of other Projects are never read.

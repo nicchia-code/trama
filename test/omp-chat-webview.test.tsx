@@ -140,6 +140,24 @@ test("the agent's streamed text builds one Markdown message, and a tool call who
   expect(screen.queryByText("3 passed")).toBeNull();
 });
 
+test("a message of the agent links #123 and @handle once the host sends the project's GitHub repository, and keeps it over a reset", () => {
+  const { host, posted } = setup();
+  host({ type: "conversations", items: [item("a", "T3", "running")], selected: "a" });
+  host({ type: "conversationUpdate", id: "a", update: chunk("Closes #7 for @octo-cat") });
+  expect(document.querySelector('[data-message="agent"] a')).toBeNull();
+  host({ type: "githubRepo", repo: "acme/shop" });
+  const links = Array.from(document.querySelectorAll<HTMLAnchorElement>('[data-message="agent"] a'));
+  expect(links.map((a) => a.title)).toEqual(["https://github.com/acme/shop/issues/7", "https://github.com/octo-cat"]);
+  fireEvent.click(links[0] as HTMLAnchorElement);
+  expect(posted).toEqual([{ type: "openLink", url: "https://github.com/acme/shop/issues/7" }]);
+  host({ type: "reset" });
+  host({ type: "conversations", items: [item("a", "T3", "running")], selected: "a" });
+  host({ type: "conversationUpdate", id: "a", update: chunk("Closes #7") });
+  expect(document.querySelector('[data-message="agent"] a')?.getAttribute("title")).toBe("https://github.com/acme/shop/issues/7");
+  host({ type: "githubRepo", repo: null });
+  expect(document.querySelector('[data-message="agent"] a')).toBeNull();
+});
+
 test("a failed call shows the first line of omp's error under its row, in the error colour, and nothing when there is no error text", () => {
   const { host } = setup();
   host({ type: "conversations", items: [item("a", "T3")], selected: "a" });

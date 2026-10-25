@@ -2,7 +2,7 @@ import type { ViewName } from "./protocol";
 import type { ThemeSetting } from "./webview/theme";
 
 /** The views the panel shows, as its `viewChanged` messages name them. */
-export const PANEL_VIEWS = ["getstarted", "diagram", "board", "requirements", "specs", "history", "settings"] as const satisfies readonly ViewName[];
+export const PANEL_VIEWS = ["getstarted", "diagram", "board", "requirements", "specs", "history", "team", "settings"] as const satisfies readonly ViewName[];
 
 /** The views the menu and the commands `Trama: Show <view>` name: the panel's. */
 export type MenuViewName = ViewName;
@@ -15,6 +15,7 @@ export const SHOW_COMMANDS = {
   "trama.showRequirements": "requirements",
   "trama.showSpecs": "specs",
   "trama.showHistory": "history",
+  "trama.showTeam": "team",
   "trama.showSettings": "settings",
 } as const satisfies Record<string, MenuViewName>;
 
@@ -52,6 +53,10 @@ export interface MenuState {
   panelView: ViewName | null;
   /** Merge of Solo mode: absent with Solo mode off. */
   merge?: MergeMenuState;
+  /** Team is available (`rules#manager-mode`): the menu shows the `Team` entry. Absent otherwise. */
+  manager?: true;
+  /** The open handoffs that wait for a decision (the number of the `Team` entry): present only with Team available and more than none. They never count in `decisions`. */
+  handoffs?: number;
 }
 
 /** Host -> menu webview. */

@@ -6,6 +6,7 @@ import type { OpenLink } from "../markdown";
 import { Column, InstructionFiles, OmpStatusBox, ignoresInstructionFiles, Providers, ROLE_ADVICE, STEP_SENTENCES, Subgroups } from "../setup-shared";
 import { SettingField } from "../settings/field";
 import { SYSTEM_CERTIFICATES_KEY, SKILLS_DIR_KEY } from "../settings/logic";
+import { ManagerModeRow, OriginBox } from "../settings/manager-mode";
 import { SoloModeRow } from "../settings/solo-mode";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -17,6 +18,7 @@ import type { WizardController, WizardSnapshot } from "./controller";
 import {
   advancedSubgroups,
   agentCheckLine,
+  chosenManager,
   chosenSolo,
   confirmLabel,
   hasPrevious,
@@ -25,6 +27,7 @@ import {
   ompMissing,
   previousSteps,
   showsFolderNotice,
+  managerOrigin,
   soloAvailable,
   STEP_KEYS,
   type SummaryRow,
@@ -226,6 +229,23 @@ function WizardSoloRow({ controller, snapshot, state, openLink }: BodyProps) {
   return <SoloModeRow solo={chosenSolo(state, snapshot.folders, snapshot.projectSolo)} available={soloAvailable(state, snapshot.folders, snapshot.projectSolo)} openLink={openLink} onChange={(solo) => controller.setSolo(solo)} />;
 }
 
+/**
+ * The `Repository` box and, last in the Project step, the `Manager Mode` row in a box of its own, in every mode, with the wizard's choice: nothing is written before the confirmation. Nothing shows while the host
+ * has not told what origin says.
+ */
+function WizardManagerRows({ controller, snapshot, state }: BodyProps) {
+  const origin = managerOrigin(state, snapshot.folders, snapshot.projectManager);
+  if (origin === null) return null;
+  return (
+    <>
+      <OriginBox repository={origin.repository} reason={origin.reason} />
+      <div className="min-w-0 rounded-lg border px-4 py-3">
+        <ManagerModeRow checked={chosenManager(state, snapshot.folders, snapshot.projectManager)} repository={origin.repository} reason={origin.reason} showRepository={false} onChange={(on) => controller.setManager(on)} />
+      </div>
+    </>
+  );
+}
+
 /** The settings of a step, one under the other in the width of the column, each with its explanation in the page. */
 function SettingsBody({ controller, snapshot, state, openLink, step }: BodyProps & { step: WizardStep }) {
   const field = (key: string) => {
@@ -254,7 +274,11 @@ function SettingsBody({ controller, snapshot, state, openLink, step }: BodyProps
         <Subgroups groups={advancedSubgroups(snapshot.schema).map((group) => ({ title: group.title, items: group.keys }))} render={field} />
       ) : (
         <div className="grid gap-5">
-          {(STEP_KEYS[step] ?? []).flatMap((key) => [field(key), ...(key === SKILLS_DIR_KEY && offersSolo(state.mode) ? [<WizardSoloRow key="solo-mode" controller={controller} snapshot={snapshot} state={state} openLink={openLink} />] : [])])}
+          {(STEP_KEYS[step] ?? []).flatMap((key) => [
+            field(key),
+            ...(key === SKILLS_DIR_KEY && offersSolo(state.mode) ? [<WizardSoloRow key="solo-mode" controller={controller} snapshot={snapshot} state={state} openLink={openLink} />] : []),
+            ...(key === SKILLS_DIR_KEY ? [<WizardManagerRows key="manager-mode" controller={controller} snapshot={snapshot} state={state} openLink={openLink} />] : []),
+          ])}
         </div>
       )}
       {step === "omp" ? <InstructionFiles files={snapshot.instructionFiles} ignored={ignoresInstructionFiles(snapshot.schema, state.values)} onOpen={(path) => controller.openInstructionFile(path)} /> : null}
@@ -300,7 +324,7 @@ function SummaryLine({ row }: { row: SummaryRow }) {
 
 /** The summary: a card for each step, in the order of the steps, with its «Edit» that goes back to the step. */
 function SummaryBody({ controller, snapshot, state }: BodyProps) {
-  const rows = summaryRows(snapshot.schema, state, snapshot.current, snapshot.folders, snapshot.models?.list ?? [], snapshot.projectSolo);
+  const rows = summaryRows(snapshot.schema, state, snapshot.current, snapshot.folders, snapshot.models?.list ?? [], snapshot.projectSolo, snapshot.projectManager);
   const steps = stepsOf(state).filter((step) => rows.some((row) => row.step === step));
   return (
     <div className="grid min-w-0 gap-4">

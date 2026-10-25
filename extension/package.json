@@ -69,6 +69,11 @@
         "category": "Trama"
       },
       {
+        "command": "trama.showTeam",
+        "title": "Show Team",
+        "category": "Trama"
+      },
+      {
         "command": "trama.showSettings",
         "title": "Show Settings",
         "category": "Trama"

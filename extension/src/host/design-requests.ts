@@ -2,9 +2,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, relative, sep } from "node:path";
 import * as vscode from "vscode";
 import { consumeRequest, createRequest, isEmptyRequest, requestFile, requestIdAt, requestsDir, requestTitle, sweepRequestImages } from "../../../src/core/design-requests";
+import { teamUnavailableReason } from "../../../src/core/manager-mode";
 import { approvalBlock, listProposals, pruneImages } from "../../../src/core/proposals";
 import type { Project } from "../../../src/core/store";
-import { type DesignAnnouncement, type Launch, launchAgent, launched } from "./agent";
+import { type DesignAnnouncement, type Launch, launchAgent, type LaunchAnnouncement, launched } from "./agent";
 import { findProject, NO_PROJECT_WARNING } from "./project";
 import { buildPrompt } from "./prompts";
 
@@ -16,13 +17,19 @@ const RESOURCE_CONTEXT_KEY = "trama.designRequestResources";
 export const SENT_KEY = "trama.sentDesignRequests";
 /** The workspace state key of the IDs of the requests that start a project from scratch (the setup requests). */
 export const SETUP_KEY = "trama.setupDesignRequests";
+/** The workspace state key of the IDs of the handoff requests (`New handoff` of the Team view). */
+export const HANDOFF_KEY = "trama.handoffDesignRequests";
 const EMPTY_WARNING = "Trama: write the design request before sending it.";
 /** How long after the last change Trama saves a request by itself. */
 export const SAVE_DELAY_MS = 300;
 
-/** The ghost texts of an empty request never sent: one for a design request, one for a setup request. */
+/** The ghost texts of an empty request never sent: one for a design request, one for a setup request, one for a handoff request. */
 const DESIGN_GHOST = "Describe the change to design: behaviour, edge cases, requirements. Paste or drop images for context. Close this tab or press Send to agent when you are done.";
 const SETUP_GHOST = "Describe the application to build: what it does and who it is for. Paste or drop images for context. Close this tab or press Send to agent when you are done.";
+const HANDOFF_GHOST = "Describe the work to give your team: what should change, for whom, any deadline or constraint. Close this tab or press Send to agent when you are done.";
+
+/** What a written request asks for: a design, the setup of a project from scratch or a handoff to the team. */
+type RequestKind = "design" | "setup" | "handoff";
 
 /**
  * Written design requests in the editor. A request is a file in `.trama/requests/` from the moment + Add Work Item creates
@@ -44,6 +51,7 @@ export class DesignRequests implements vscode.Disposable {
   private readonly ghosts = {
     design: vscode.window.createTextEditorDecorationType({ after: { contentText: DESIGN_GHOST, color: new vscode.ThemeColor("disabledForeground") } }),
     setup: vscode.window.createTextEditorDecorationType({ after: { contentText: SETUP_GHOST, color: new vscode.ThemeColor("disabledForeground") } }),
+    handoff: vscode.window.createTextEditorDecorationType({ after: { contentText: HANDOFF_GHOST, color: new vscode.ThemeColor("disabledForeground") } }),
   };
   private readonly subscriptions: vscode.Disposable[];
 
@@ -52,7 +60,7 @@ export class DesignRequests implements vscode.Disposable {
     /** The extension's watcher of `.trama/`, on for the extension's whole life, whether or not the panel is open. */
     tramaFiles: vscode.FileSystemWatcher,
     private readonly project: () => Project | undefined = findProject,
-    private readonly launch: (root: string, instruction: string, name: string, announceProposal?: DesignAnnouncement, canSend?: () => boolean) => Promise<Launch | undefined> = (root, instruction, name, announceProposal, canSend) => launchAgent(root, instruction, name, announceProposal, canSend),
+    private readonly launch: (root: string, instruction: string, name: string, announceProposal?: DesignAnnouncement | LaunchAnnouncement, canSend?: () => boolean) => Promise<Launch | undefined> = (root, instruction, name, announceProposal, canSend) => launchAgent(root, instruction, name, announceProposal, canSend),
     /** Run all, started when a setup Proposal is approved on its own; the host always passes it. */
     private readonly runAll?: () => Promise<void>,
   ) {
@@ -84,15 +92,26 @@ export class DesignRequests implements vscode.Disposable {
 
   /** + Add Work Item: the empty file of a new request, in a tab that is not a preview. */
   async write(): Promise<void> {
-    await this.open(false);
+    await this.open("design");
   }
 
   /** Start from Scratch: the empty file of a request that starts the setup, opened as + Add Work Item does; its ID joins the setup list. */
   async writeSetup(): Promise<void> {
-    await this.open(true);
+    await this.open("setup");
   }
 
-  private async open(setup: boolean): Promise<void> {
+  /** `New handoff` of the Team view: the empty file of a handoff request, opened as + Add Work Item does, only while Team is available; its ID joins the handoff list. */
+  async writeHandoff(): Promise<void> {
+    const project = this.project();
+    const unavailable = project === undefined ? null : teamUnavailableReason(project);
+    if (unavailable !== null) {
+      void vscode.window.showWarningMessage(`Trama: ${unavailable}`);
+      return;
+    }
+    await this.open("handoff");
+  }
+
+  private async open(kind: RequestKind): Promise<void> {
     const project = this.project();
     if (!project) {
       void vscode.window.showWarningMessage(NO_PROJECT_WARNING);
@@ -100,7 +119,8 @@ export class DesignRequests implements vscode.Disposable {
     }
     const { id, file } = createRequest(project);
     this.finished.delete(id); // A new request may reuse the ID of one deleted earlier in the session.
-    if (setup) await this.state.update(SETUP_KEY, [...this.setupIds(), id]);
+    if (kind === "setup") await this.state.update(SETUP_KEY, [...this.setupIds(), id]);
+    if (kind === "handoff") await this.state.update(HANDOFF_KEY, [...this.handoffIds(), id]);
     await vscode.window.showTextDocument(vscode.Uri.file(file), { preview: false });
     this.refreshGhosts();
     this.updateContext();
@@ -170,9 +190,11 @@ export class DesignRequests implements vscode.Disposable {
     const file = requestFile(project, id);
     const canSend = () => file !== undefined && existsSync(file);
     if (!canSend()) return false;
-    const setup = this.setupIds().includes(id);
-    const instruction = buildPrompt(setup ? { kind: "setup-request", request: id } : { kind: "written-design", request: id });
-    const launch = await this.launch(project.root, instruction, setup ? "Setup" : "Design", requestTitle(text) || id, canSend);
+    const kind = this.kindOf(id);
+    const instruction = buildPrompt(kind === "setup" ? { kind: "setup-request", request: id } : kind === "handoff" ? { kind: "handoff-request", request: id } : { kind: "written-design", request: id });
+    const title = requestTitle(text) || id;
+    // The ghost of a handoff request has no column on the Board: it is a work, shown in the status bar.
+    const launch = await this.launch(project.root, instruction, kind === "setup" ? "Setup" : kind === "handoff" ? "Handoff" : "Design", kind === "handoff" ? { kind: "work", title } : title, canSend);
     if (!launched(launch) || !canSend()) return false;
     await this.state.update(SENT_KEY, [...this.sentIds(), id]);
     this.refreshGhosts();
@@ -187,15 +209,33 @@ export class DesignRequests implements vscode.Disposable {
     return this.state.get<string[]>(SETUP_KEY, []);
   }
 
-  /** Takes out of the setup list the IDs whose file is gone, and returns them. */
-  private async takeGoneSetup(project: Project): Promise<string[]> {
-    const setup = this.setupIds();
-    const gone = setup.filter((id) => {
+  private handoffIds(): string[] {
+    return this.state.get<string[]>(HANDOFF_KEY, []);
+  }
+
+  /** What request `id` asks for: the lists remember it also after the editor restarts. */
+  private kindOf(id: string): RequestKind {
+    return this.setupIds().includes(id) ? "setup" : this.handoffIds().includes(id) ? "handoff" : "design";
+  }
+
+  /** Takes out of the list at `key` the IDs whose file is gone, and returns them. */
+  private async takeGone(key: string, ids: string[], project: Project): Promise<string[]> {
+    const gone = ids.filter((id) => {
       const file = requestFile(project, id);
       return file !== undefined && !existsSync(file);
     });
-    if (gone.length > 0) await this.state.update(SETUP_KEY, setup.filter((id) => !gone.includes(id)));
+    if (gone.length > 0) await this.state.update(key, ids.filter((id) => !gone.includes(id)));
     return gone;
+  }
+
+  /** Takes out of the setup list the IDs whose file is gone, and returns them. */
+  private takeGoneSetup(project: Project): Promise<string[]> {
+    return this.takeGone(SETUP_KEY, this.setupIds(), project);
+  }
+
+  /** Takes out of the handoff list the IDs whose file is gone: a handoff request consumed by its handoff, or deleted from outside. */
+  private takeGoneHandoff(project: Project): Promise<string[]> {
+    return this.takeGone(HANDOFF_KEY, this.handoffIds(), project);
   }
 
   /**
@@ -225,7 +265,10 @@ export class DesignRequests implements vscode.Disposable {
    */
   private async clearGoneSetup(): Promise<void> {
     const project = this.project();
-    if (project) await this.takeGoneSetup(project);
+    if (project) {
+      await this.takeGoneSetup(project);
+      await this.takeGoneHandoff(project);
+    }
   }
 
   private isSent(id: string): boolean {
@@ -309,6 +352,7 @@ export class DesignRequests implements vscode.Disposable {
     if (!gone(uri.fsPath) && !within(uri.fsPath, requestsDir(project))) return;
     sweepRequestImages(project);
     void this.settleSetup(project);
+    void this.takeGoneHandoff(project);
     const allTabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs);
     const open = [...vscode.workspace.textDocuments.map((document) => document.uri), ...allTabs.flatMap((tab) => (tab.input instanceof vscode.TabInputText ? [tab.input.uri] : []))];
     for (const { scheme, fsPath } of open) {
@@ -349,9 +393,10 @@ export class DesignRequests implements vscode.Disposable {
     const start = new vscode.Range(0, 0, 0, 0);
     for (const editor of vscode.window.visibleTextEditors) {
       const id = this.requestId(editor.document);
-      const kind = id !== undefined && !this.isDone(id) && editor.document.getText() === "" ? (this.setupIds().includes(id) ? "setup" : "design") : undefined;
+      const kind = id !== undefined && !this.isDone(id) && editor.document.getText() === "" ? this.kindOf(id) : undefined;
       editor.setDecorations(this.ghosts.design, kind === "design" ? [start] : []);
       editor.setDecorations(this.ghosts.setup, kind === "setup" ? [start] : []);
+      editor.setDecorations(this.ghosts.handoff, kind === "handoff" ? [start] : []);
     }
   }
 

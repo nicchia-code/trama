@@ -2,7 +2,7 @@ import type { SetupChoice, SetupMode, ToWebview } from "../../protocol";
 import { ompTooOldText } from "../../../../src/core/omp-version";
 import { groupKeys, MODEL_ROLE_KEYS, NTFY_SERVER_KEY, NTFY_TOPIC_KEY, SETTING_GROUPS, type SettingSchema, type SettingsValues, type SettingValue, settingValueError, storedValue } from "../../host/settings-schema";
 import type { ModelSuggestion } from "../../host/model-lists";
-import { type CertificatesState, ompAnsweredText, ompFailureText, roleLabel, SOLO_EXCLUDE_OPTIONS, type SoloState, SYSTEM_CERTIFICATES_KEY } from "../settings/logic";
+import { type CertificatesState, MANAGER_TITLE, type ManagerState, ompAnsweredText, ompFailureText, roleLabel, SOLO_EXCLUDE_OPTIONS, type SoloState, SYSTEM_CERTIFICATES_KEY } from "../settings/logic";
 import type { SoloKind } from "../../../../src/core/solo-mode";
 
 /** Which wizard is open: the first setup of a folder without a project (Get Started), the settings of a project, or a project with an empty Model that carries on with a path. */
@@ -84,6 +84,8 @@ export interface WizardState {
   tree: Tree;
   /** The Solo mode the developer chose in the Project step (first setup and empty-Model modes only): `null` follows the project's current value, which is how an empty-Model wizard opens; the first setup opens with `off`. */
   solo: SoloKind | null;
+  /** The Manager mode the developer chose in the Project step (every mode): `null` follows the project's recorded value, which is how the Guided setup and the empty-Model wizard open; the first setup opens with `false`. */
+  manager: boolean | null;
 }
 
 /** The wizard as it opens: on its first step, with the user values of the settings and, for the first setup, no path. */
@@ -92,7 +94,7 @@ export function openWizard(mode: WizardMode, choice: WizardChoice | null, values
   for (const step of ["omp", "Models", "Project", "Advanced"] as const) {
     for (const key of STEP_KEYS[step] ?? []) initial[key] = values[key]?.user as SettingValue | undefined;
   }
-  const state: WizardState = { mode, choice, root, step: "omp", initial, values: initial, invalid: [], excluded: [], tree: {}, solo: mode === "first" ? "off" : null };
+  const state: WizardState = { mode, choice, root, step: "omp", initial, values: initial, invalid: [], excluded: [], tree: {}, solo: mode === "first" ? "off" : null, manager: mode === "first" ? false : null };
   return { ...state, step: stepsFor(mode, choice)[0] as WizardStep };
 }
 
@@ -118,6 +120,39 @@ export function soloAvailable(state: WizardState, folders: readonly { root: stri
 export function chosenSolo(state: WizardState, folders: readonly { root: string; inGit?: boolean }[], project: SoloState | null): SoloKind {
   if (!soloAvailable(state, folders, project)) return "off";
   return state.solo ?? project?.solo ?? "off";
+}
+
+/** What origin says: the GitHub repository, or why there is none. */
+export interface OriginView {
+  repository: string | null;
+  reason: string | null;
+}
+
+/** A folder as the Manager Mode logic needs it: the origin the host read for it (absent while unknown). */
+export type ManagerFolder = { root: string; origin?: OriginView };
+
+/**
+ * What origin says for the `Manager Mode` row: the folder chosen in `Path` (first setup), or the project's, from the host's last `managerMode`. Null while it is not known: the row and the
+ * box of the repository are not shown then.
+ */
+export function managerOrigin(state: WizardState, folders: readonly ManagerFolder[], project: ManagerState | null): OriginView | null {
+  if (state.mode === "first") return folders.find((folder) => folder.root === state.root)?.origin ?? null;
+  return project === null ? null : { repository: project.repository, reason: project.reason };
+}
+
+/** The Manager mode the wizard shows and would write: the developer's choice, the project's recorded value when there is none, and off without origin on GitHub. */
+export function chosenManager(state: WizardState, folders: readonly ManagerFolder[], project: ManagerState | null): boolean {
+  if ((managerOrigin(state, folders, project)?.repository ?? null) === null) return false;
+  return state.manager ?? project?.recorded ?? false;
+}
+
+/**
+ * The value the confirmation sends as `manager`: always one in the first setup (off by default), and, in the other modes, only while origin is on GitHub, so a Manager mode left on in a
+ * working copy whose origin moved away is never turned off by the wizard.
+ */
+export function managerToWrite(state: WizardState, folders: readonly ManagerFolder[], project: ManagerState | null): boolean | undefined {
+  if (state.mode === "first") return chosenManager(state, folders, project);
+  return (managerOrigin(state, folders, project)?.repository ?? null) === null ? undefined : chosenManager(state, folders, project);
 }
 
 
@@ -378,8 +413,19 @@ export function soloRows(chosen: SoloKind, current: SoloKind | null): SummaryRow
   return rows;
 }
 
+/**
+ * The `Manager Mode` row of the Project step, in every mode: `On` or `Off`. `current` is the project's recorded value (null in the first setup, which has no project): the row that changes it is marked changed and
+ * shows the value it replaces. Without origin on GitHub the row is `Off` and never changed: a Manager mode left on stays recorded, and the wizard writes nothing for it.
+ */
+export function managerRows(state: WizardState, folders: readonly ManagerFolder[], project: ManagerState | null): SummaryRow[] {
+  const chosen = chosenManager(state, folders, project);
+  const current = state.mode === "first" ? null : (project?.recorded ?? null);
+  const changed = current !== null && (managerOrigin(state, folders, project)?.repository ?? null) !== null && chosen !== current;
+  return [{ step: "Project", group: null, title: MANAGER_TITLE, value: chosen ? "On" : "Off", empty: false, mono: false, isDefault: false, changed, was: changed ? (current ? "On" : "Off") : null }];
+}
+
 /** The rows of the summary, grouped by step in order, from the values and the current user values. */
-export function summaryRows(schema: readonly SettingSchema[], state: WizardState, current: Readonly<Record<string, SettingsValues>>, folders: readonly { name: string; root: string; inGit?: boolean }[], models: readonly ModelSuggestion[] = [], project: SoloState | null = null): SummaryRow[] {
+export function summaryRows(schema: readonly SettingSchema[], state: WizardState, current: Readonly<Record<string, SettingsValues>>, folders: readonly { name: string; root: string; inGit?: boolean; origin?: OriginView }[], models: readonly ModelSuggestion[] = [], project: SoloState | null = null, manager: ManagerState | null = null): SummaryRow[] {
   const rows: SummaryRow[] = [];
   for (const step of stepsOf(state)) {
     if (step === "Path") {
@@ -410,6 +456,7 @@ export function summaryRows(schema: readonly SettingSchema[], state: WizardState
         });
       }
       if (step === "Project" && offersSolo(state.mode)) rows.push(...soloRows(chosenSolo(state, folders, project), state.mode === "empty-model" ? (project?.solo ?? "off") : null));
+      if (step === "Project") rows.push(...managerRows(state, folders, manager));
     }
   }
   return rows;

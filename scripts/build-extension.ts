@@ -57,6 +57,16 @@ const menu = await Bun.build({
   define: { "process.env.NODE_ENV": '"production"' },
   sourcemap: "linked",
 });
+/** `mermaid` in its own bundle, loaded on demand by the first diagram of a page: never part of `webview.js` or `omp-chat.js`. */
+const mermaid = await Bun.build({
+  entrypoints: ["extension/src/webview/mermaid-entry.ts"],
+  outdir: "extension/dist",
+  naming: "mermaid.js",
+  target: "browser",
+  format: "iife",
+  minify: true,
+  define: { "process.env.NODE_ENV": '"production"' },
+});
 const ompHook = await Bun.build({
   entrypoints: ["extension/src/omp/trama-hook.ts"],
   outdir: "extension/dist",
@@ -66,9 +76,9 @@ const ompHook = await Bun.build({
 });
 
 let failed = false;
-for (const result of [host, webview, ompChat, menu, ompHook]) {
+for (const result of [host, webview, ompChat, menu, mermaid, ompHook]) {
   for (const log of result.logs) console.error(String(log));
   failed ||= !result.success;
 }
 if (failed) process.exit(1);
-console.log("built extension/dist/host.js, webview.js, omp-chat.js, menu.js and omp-hook.js");
+console.log("built extension/dist/host.js, webview.js, omp-chat.js, menu.js, mermaid.js and omp-hook.js");

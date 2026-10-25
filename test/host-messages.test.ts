@@ -14,6 +14,7 @@ const ok = (message: unknown) => {
 test("accepts every well-formed message of the contract", () => {
   expect(ok({ type: "ready" })).toEqual({ type: "ready" });
   expect(ok({ type: "writeDesignRequest" })).toEqual({ type: "writeDesignRequest" });
+  expect(ok({ type: "writeHandoffRequest" })).toEqual({ type: "writeHandoffRequest" });
   expect(parseToHost({ type: "openQuickTask" })).toEqual({ ok: false, reason: 'unknown message type "openQuickTask"' });
   expect(parseToHost({ type: "launch", action: { kind: "scan" } })).toEqual({ ok: false, reason: 'unknown action "scan"' });
   expect(parseToHost({ type: "launch", action: { kind: "scan", feature: "checkout" } })).toEqual({ ok: false, reason: 'unknown action "scan"' });
@@ -301,4 +302,59 @@ test("setSoloMode carries one of the three kinds and nothing else; confirmSetup 
   expect(parse({ mode: "first", choice: "scratch", root: "/work/app" })).toEqual({ ok: true, message: { type: "confirmSetup", mode: "first", choice: "scratch", root: "/work/app", values: [], excluded: [] } });
   expect(parse({ mode: "first", choice: "scratch", root: "/work/app", solo: "everything" }).ok).toBe(false);
   expect(parse({ mode: "settings", solo: "folders" }).ok).toBe(false);
+});
+
+test("setManagerMode carries a boolean and nothing else; confirmSetup carries manager in every mode, as a boolean", () => {
+  for (const on of [true, false]) expect(ok({ type: "setManagerMode", on })).toEqual({ type: "setManagerMode", on });
+  for (const on of ["true", 1, 0, "", undefined, null]) expect(parseToHost({ type: "setManagerMode", on }).ok).toBe(false);
+  const parse = (message: Record<string, unknown>) => parseToHost({ type: "confirmSetup", values: [], excluded: [], ...message });
+  expect(parse({ mode: "first", choice: "scratch", root: "/work/app", manager: true })).toEqual({ ok: true, message: { type: "confirmSetup", mode: "first", choice: "scratch", root: "/work/app", values: [], manager: true, excluded: [] } });
+  expect(parse({ mode: "settings", manager: false })).toEqual({ ok: true, message: { type: "confirmSetup", mode: "settings", values: [], manager: false, excluded: [] } });
+  expect(parse({ mode: "empty-model", choice: "import", manager: true })).toEqual({ ok: true, message: { type: "confirmSetup", mode: "empty-model", choice: "import", values: [], manager: true, excluded: [] } });
+  expect(parse({ mode: "settings" })).toEqual({ ok: true, message: { type: "confirmSetup", mode: "settings", values: [], excluded: [] } });
+  for (const manager of ["on", 1, null]) expect(parse({ mode: "settings", manager }).ok).toBe(false);
+});
+
+test("linkGitHubProject carries the owner and a positive whole number; the four other GitHub messages carry nothing", () => {
+  expect(ok({ type: "linkGitHubProject", owner: "acme", number: 3 })).toEqual({ type: "linkGitHubProject", owner: "acme", number: 3 });
+  for (const bad of [{ owner: "", number: 3 }, { owner: "acme", number: 0 }, { owner: "acme", number: -1 }, { owner: "acme", number: 1.5 }, { owner: "acme", number: "3" }, { owner: 7, number: 3 }, { number: 3 }, { owner: "acme" }]) {
+    expect(parseToHost({ type: "linkGitHubProject", ...bad }).ok).toBe(false);
+  }
+  for (const type of ["unlinkGitHubProject", "refreshTeam", "logInGitHub", "showGitHubDetails"] as const) expect(ok({ type })).toEqual({ type });
+});
+
+test("savePerson carries a person of a sane shape, whose values the host checks; the four other people messages carry the ID of a person", () => {
+  const person = { name: "Ada Lovelace", handle: "@ada", level: "senior" as const, skills: ["Rust"], capacity: 4.5, absences: [{ from: "2026-11-10", to: "2026-11-12" }] };
+  expect(ok({ type: "savePerson", person })).toEqual({ type: "savePerson", person });
+  expect(ok({ type: "savePerson", person: { ...person, id: "ab12cd34" } })).toEqual({ type: "savePerson", person: { ...person, id: "ab12cd34" } });
+  // A value outside `rules#person` is not the parser's to refuse: the host answers with the message of each field.
+  expect(ok({ type: "savePerson", person: { ...person, level: "chief", capacity: 99 } }).type).toBe("savePerson");
+  for (const bad of [
+    undefined,
+    null,
+    [],
+    { ...person, id: "AB" },
+    { ...person, name: 3 },
+    { ...person, handle: undefined },
+    { ...person, capacity: "5" },
+    { ...person, skills: "Rust" },
+    { ...person, skills: [1] },
+    { ...person, absences: [{ from: "2026-11-10" }] },
+    { ...person, absences: "none" },
+    { ...person, name: "x".repeat(10_000) },
+  ])
+    expect(parseToHost({ type: "savePerson", person: bad }).ok).toBe(false);
+  for (const type of ["addToTeam", "removeFromTeam", "undoRemoveFromTeam", "deletePerson"] as const) {
+    expect(ok({ type, id: "ab12cd34" })).toEqual({ type, id: "ab12cd34" });
+    for (const id of [undefined, "", "AB12CD34", "ab12cd3", "../x", 7]) expect(parseToHost({ type, id }).ok).toBe(false);
+  }
+});
+
+test("Comment update and Scan of an issue carry the issue's identity and nothing else", () => {
+  expect(ok({ type: "askIssueUpdate", issue: "abcd1234" })).toEqual({ type: "askIssueUpdate", issue: "abcd1234" });
+  expect(ok({ type: "scanIssue", issue: "abcd1234" })).toEqual({ type: "scanIssue", issue: "abcd1234" });
+  for (const type of ["askIssueUpdate", "scanIssue"]) {
+    for (const bad of [undefined, 126, "", "../../etc", "ab cd", "x".repeat(101)]) expect(parseToHost({ type, issue: bad }).ok).toBe(false);
+    expect(parseToHost({ type }).ok).toBe(false);
+  }
 });

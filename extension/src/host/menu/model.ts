@@ -14,7 +14,7 @@ export interface MenuSurface {
   /** No folder open, a folder that is no project (the one that counts for the panel), or a project. */
   situation(): MenuSituation;
   /** The numbers of the project's Snapshot, read now with `src/core`; undefined when the files cannot be read. */
-  facts(): { decisions: number; tasksSinceScan: number } | undefined;
+  facts(): { decisions: number; tasksSinceScan: number; handoffs: number } | undefined;
   /** The view the panel shows, or undefined with the panel closed. */
   panelView(): ViewName | undefined;
   /** The entry of a view: the same as the command `Trama: Show <view>`. */
@@ -25,6 +25,8 @@ export interface MenuSurface {
   openFolder(): void;
   /** Merge of Solo mode as the menu shows it, read now; undefined with Solo mode off. */
   mergeState(): MergeMenuState | undefined;
+  /** Whether Team is available in the project of the window (`rules#manager-mode`): Manager mode recorded and origin on GitHub. */
+  manager(): boolean;
   /** The press of Merge. */
   startMerge(): void;
   /** Open Merge Editor of the merge Trama started. */
@@ -66,7 +68,7 @@ export function menuBadge(state: Pick<MenuState, "situation" | "decisions">): { 
  */
 export class MenuModel {
   /** The numbers of the last Snapshot that could be read: they stay when the files cannot be read for a moment. */
-  private last = { decisions: 0, tasksSinceScan: 0 };
+  private last = { decisions: 0, tasksSinceScan: 0, handoffs: 0 };
 
   constructor(private readonly surface: MenuSurface) {}
 
@@ -74,9 +76,11 @@ export class MenuModel {
   state(): MenuState {
     const situation = this.surface.situation();
     if (situation === "project") this.last = this.surface.facts() ?? this.last;
-    const facts = situation === "project" ? this.last : { decisions: 0, tasksSinceScan: 0 };
+    const facts = situation === "project" ? this.last : { decisions: 0, tasksSinceScan: 0, handoffs: 0 };
     const merge = situation === "project" ? this.surface.mergeState() : undefined;
-    return { situation, ...facts, panelView: this.surface.panelView() ?? null, ...(merge === undefined ? {} : { merge }) };
+    const manager = situation === "project" && this.surface.manager();
+    const { handoffs, ...numbers } = facts;
+    return { situation, ...numbers, panelView: this.surface.panelView() ?? null, ...(merge === undefined ? {} : { merge }), ...(manager ? { manager: true as const } : {}), ...(manager && handoffs > 0 ? { handoffs } : {}) };
   }
 
   /** Computes the state and sends it to the menu and the badge to the icon: after a change of the files, the panel, the folders or the settings, and when the menu is shown. */

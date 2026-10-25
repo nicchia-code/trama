@@ -55,7 +55,12 @@ test("quoted link titles keep parentheses and escaped quotes inside the link", (
       text(" after"),
     ]);
   }
-  expect(parseInline('[Manuale](https://example.com "unclosed )')).toEqual([text('[Manuale](https://example.com "unclosed )')]);
+  // Not a link: the address inside it is the bare address it is.
+  expect(parseInline('[Manuale](https://example.com "unclosed )')).toEqual([
+    text("[Manuale]("),
+    { t: "link", href: "https://example.com/", c: [text("https://example.com")] },
+    text(' "unclosed )'),
+  ]);
   expect(parseInline("[quote](https://example.com/it's)")).toEqual([
     { t: "link", href: "https://example.com/it's", c: [text("quote")] },
   ]);
@@ -168,4 +173,71 @@ test("a table right after a line of text keeps its rows, the text stays a paragr
   expect(parseMarkdown("> Colonne:\n> | a |\n> |---|")).toEqual([
     { t: "quote", c: [para(text("Colonne:")), { t: "table", align: ["left"], head: [[text("a")]], rows: [] }] },
   ]);
+});
+
+test("strikethrough is two tildes around text; other runs of tildes stay text", () => {
+  expect(parseInline("a ~~gone~~ b")).toEqual([text("a "), { t: "del", c: [text("gone")] }, text(" b")]);
+  expect(parseInline("~~a **b** c~~")).toEqual([{ t: "del", c: [text("a "), { t: "strong", c: [text("b")] }, text(" c")] }]);
+  expect(parseInline("~one~ ~~~three~~~ ~~open")).toEqual([text("~one~ ~~~three~~~ ~~open")]);
+  expect(parseInline("`~~code~~`")).toEqual([{ t: "code", text: "~~code~~" }]);
+});
+
+test("task list items lead with a checkbox block: `[ ]`, `[x]` and `[X]`, with every marker, numbered and nested", () => {
+  const unchecked: Block = { t: "task", checked: false };
+  const checked: Block = { t: "task", checked: true };
+  expect(parseMarkdown("- [ ] open\n* [x] done\n+ [X] also done\n- [] not a task\n- [x]no space\n- plain")).toEqual([
+    {
+      t: "list",
+      ordered: false,
+      start: 1,
+      items: [[unchecked, para(text("open"))], [checked, para(text("done"))], [checked, para(text("also done"))], [para(text("[] not a task"))], [para(text("[x]no space"))], [para(text("plain"))]],
+    },
+  ]);
+  expect(parseMarkdown("1. [x] first\n2. [ ] second")).toEqual([
+    { t: "list", ordered: true, start: 1, items: [[checked, para(text("first"))], [unchecked, para(text("second"))]] },
+  ]);
+  expect(parseMarkdown("- [ ] outer\n  - [x] inner")).toEqual([
+    {
+      t: "list",
+      ordered: false,
+      start: 1,
+      items: [[unchecked, para(text("outer")), { t: "list", ordered: false, start: 1, items: [[checked, para(text("inner"))]] }]],
+    },
+  ]);
+});
+
+test("bare http and https addresses become links to themselves, without the punctuation that ends a sentence", () => {
+  const link = (address: string, href = address): Inline => ({ t: "link", href, c: [text(address)] });
+  expect(parseInline("see https://example.com/a, then http://example.org.")).toEqual([text("see "), link("https://example.com/a"), text(", then "), link("http://example.org", "http://example.org/"), text(".")]);
+  for (const end of [".", ",", ":", ";", "!", "?"]) expect(parseInline(`go to https://example.com/x${end}`)).toEqual([text("go to "), link("https://example.com/x"), text(end)]);
+  // A `)` without its `(` stays out; one that closes a `(` of the address stays in.
+  expect(parseInline("(https://example.com/a)")).toEqual([text("("), link("https://example.com/a"), text(")")]);
+  expect(parseInline("https://en.wikipedia.org/wiki/Foo_(bar)")).toEqual([link("https://en.wikipedia.org/wiki/Foo_(bar)")]);
+  expect(parseInline("(see https://en.wikipedia.org/wiki/Foo_(bar)).")).toEqual([text("(see "), link("https://en.wikipedia.org/wiki/Foo_(bar)"), text(").")]);
+  // Emphasis around an address is not part of it.
+  expect(parseInline("**https://example.com/a**")).toEqual([{ t: "strong", c: [link("https://example.com/a")] }]);
+  // Not at the start of a word, not an address, not other schemes, never inside code or a link label.
+  expect(parseInline("xhttps://example.com ftp://example.com https:// https")).toEqual([text("xhttps://example.com ftp://example.com https:// https")]);
+  expect(parseInline("`https://example.com`")).toEqual([{ t: "code", text: "https://example.com" }]);
+  expect(parseInline("[the site https://example.com](https://example.org)")).toEqual([{ t: "link", href: "https://example.org/", c: [text("the site https://example.com")] }]);
+});
+
+test("GitHub references: #123 and @handle at the start of a word; never inside an email address, a longer word or code", () => {
+  const issue = (n: number): Inline => ({ t: "issue", n });
+  const user = (name: string): Inline => ({ t: "user", name });
+  expect(parseInline("fixes #123, thanks @octo-cat!")).toEqual([text("fixes "), issue(123), text(", thanks "), user("octo-cat"), text("!")]);
+  expect(parseInline("(#7) and [@a]")).toEqual([text("("), issue(7), text(") and ["), user("a"), text("]")]);
+  expect(parseInline("#1 @a")).toEqual([issue(1), text(" "), user("a")]);
+  expect(parseInline("write to me@example.com or a#12 or issue#3 or #12abc or #0 or #")).toEqual([text("write to me@example.com or a#12 or issue#3 or #12abc or #0 or #")]);
+  expect(parseInline("@-bad @bad- @a--b @under_score @" + "x".repeat(40))).toEqual([
+    text("@-bad "),
+    user("bad"),
+    text("- @a--b @under_score @" + "x".repeat(40)),
+  ]);
+  expect(parseInline("@" + "x".repeat(39))).toEqual([user("x".repeat(39))]);
+  expect(parseInline("`#12 @a` and \\#12")).toEqual([{ t: "code", text: "#12 @a" }, text(" and #12")]);
+  // A reference inside a link label stays the label's text.
+  expect(parseInline("[see #12 by @a](https://example.com)")).toEqual([{ t: "link", href: "https://example.com/", c: [text("see #12 by @a")] }]);
+  // Raw HTML stays text, entities included.
+  expect(parseInline("&#123; <a href=\"#12\">")).toEqual([text("&#123; <a href=\"#12\">")]);
 });

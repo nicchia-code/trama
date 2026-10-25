@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import { InlineMarkdown, Markdown } from "../extension/src/webview/markdown";
+import { GithubRepoContext, InlineMarkdown, Markdown } from "../extension/src/webview/markdown";
 
 afterEach(cleanup);
 
@@ -78,4 +78,64 @@ test("a malformed table shows as written, and raw HTML in a table cell is text",
   expect(container.querySelector("img")).toBeNull();
   expect(container.querySelector("td")?.textContent).toBe("<img src=x onerror=alert(1)>");
   expect(container.textContent).toContain("| a | b | | <b>c</b> | d |");
+});
+
+test("strikethrough renders as del, and a bare address as a link that opens through the host", () => {
+  const opened: string[] = [];
+  const { container } = render(<Markdown source={"~~old~~ new, see https://example.com/a."} openLink={(url) => opened.push(url)} />);
+  expect(container.querySelector("del")?.textContent).toBe("old");
+  const link = container.querySelector("a") as HTMLAnchorElement;
+  expect(link.textContent).toBe("https://example.com/a");
+  expect(link.title).toBe("https://example.com/a");
+  expect(container.querySelector("p")?.textContent).toBe("old new, see https://example.com/a.");
+  expect(fireEvent.click(link)).toBe(false);
+  expect(opened).toEqual(["https://example.com/a"]);
+});
+
+test("a task list item has a read-only checkbox before its text, ticked for [x] and [X], and nests", () => {
+  const { container } = render(<Markdown source={"- [ ] open\n- [x] done\n  - [X] inner\n- plain"} openLink={() => {}} />);
+  const items = Array.from(container.querySelectorAll("li"));
+  expect(items).toHaveLength(4);
+  const boxes = Array.from(container.querySelectorAll<HTMLInputElement>('li > input[type="checkbox"]'));
+  expect(boxes.map((box) => box.checked)).toEqual([false, true, true]);
+  expect(boxes.every((box) => box.readOnly)).toBe(true);
+  expect(items[0]?.firstElementChild).toBe(boxes[0] ?? null);
+  expect(items[0]?.textContent).toBe("open");
+  expect(items[3]?.querySelector("input")).toBeNull();
+  // Clicking changes nothing.
+  fireEvent.click(boxes[0] as HTMLInputElement);
+  expect(boxes[0]?.checked).toBe(false);
+  expect(container.querySelector("li ul li input")).not.toBeNull();
+});
+
+test("#123 and @handle are links only with the project's GitHub repository, and open through the host", () => {
+  const source = "fixes #12 by @octo-cat, mail me@example.com, `#9 @x`";
+  const without = render(<Markdown source={source} openLink={() => {}} />);
+  expect(without.container.querySelector("a")).toBeNull();
+  expect(without.container.textContent).toBe("fixes #12 by @octo-cat, mail me@example.com, #9 @x");
+  cleanup();
+  const opened: string[] = [];
+  const { container } = render(
+    <GithubRepoContext.Provider value="acme/shop">
+      <Markdown source={source} openLink={(url) => opened.push(url)} />
+    </GithubRepoContext.Provider>,
+  );
+  const links = Array.from(container.querySelectorAll("a"));
+  expect(links.map((a) => [a.textContent, a.title])).toEqual([
+    ["#12", "https://github.com/acme/shop/issues/12"],
+    ["@octo-cat", "https://github.com/octo-cat"],
+  ]);
+  for (const link of links) fireEvent.click(link);
+  expect(opened).toEqual(["https://github.com/acme/shop/issues/12", "https://github.com/octo-cat"]);
+  // Inside inline code they stay text; the text of the paragraph is unchanged.
+  expect(container.querySelector("code")?.textContent).toBe("#9 @x");
+  expect(container.textContent).toBe("fixes #12 by @octo-cat, mail me@example.com, #9 @x");
+  // Inline Markdown follows the same rule.
+  cleanup();
+  const inline = render(
+    <GithubRepoContext.Provider value="acme/shop">
+      <InlineMarkdown source="see #5" openLink={() => {}} />
+    </GithubRepoContext.Provider>,
+  );
+  expect(inline.container.querySelector("a")?.title).toBe("https://github.com/acme/shop/issues/5");
 });

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { requestExists } from "../../core/design-requests";
 import { announcementNote } from "../../core/announcements";
 import { TramaError, UsageError } from "../../core/errors";
+import { rosterOf, stopPublishing } from "../../core/issues";
 import {
   approveProposal,
   checkedLabel,
@@ -21,7 +22,7 @@ import {
   withProposalLock,
   type DriftDecisionKind,
 } from "../../core/proposals";
-import { filingOrigin, sendCoordinatorMessageSoon } from "../../core/question-channel";
+import { askTeam, filingOrigin, sendCoordinatorMessageSoon } from "../../core/question-channel";
 import { resolveDriftInProposal } from "../../core/resolution";
 import { syncShortNumbers } from "../../core/short-numbers";
 import { loadModel } from "../../core/store";
@@ -32,7 +33,7 @@ import { text } from "../result";
 import { proposalListView, proposalShowView } from "../work";
 
 const stringList = z.array(z.string().min(1));
-const KINDS = ["change", "import", "resolution", "setup"] as const;
+const KINDS = ["change", "import", "resolution", "setup", "handoff"] as const;
 const DECISIONS = ["proposal", "dismissed", "fix-code"] as const;
 const STATES = ["open", "approved", "rejected", "discarded"] as const;
 const card = z.looseObject({ id: z.string(), number: z.string().nullable(), status: z.string() });
@@ -47,7 +48,7 @@ const create = defineCommand({
   mode: "immediate",
   summary: "Create a Draft Proposal.",
   description:
-    "Every new Proposal starts as a Draft; hand it over with `proposal move <id> open` when it is finished. `kind` is `change` (default), `import` (existing code), `resolution` (a resolution of Drifts) or `setup` (the first Proposal of an empty Model). `label` is the short label (1 to 30 characters, one line), required before a Proposal with Tasks is handed over. `requires` lists the Proposals it depends on. `prepared` applies only to a resolution born from the answer to a Drift's prepared question. `announcement` is the ID printed by `trama announcement new`; `request` binds the Proposal to the written design request it comes from. `reworks` names the rejected Proposal this one redoes (Rework with feedback): when it exists, is rejected and is not already redone, the new Proposal takes its place (same creation instant) and replaces it in the `requires` of every Draft or open Proposal, which the result lists; otherwise the Proposal is created without the link and `reworksNote` says why. `reworks` and `request` cannot be given together.",
+    "Every new Proposal starts as a Draft; hand it over with `proposal move <id> open` when it is finished. `kind` is `change` (default), `import` (existing code), `resolution` (a resolution of Drifts), `setup` (the first Proposal of an empty Model) or `handoff` (work given to the people of the team, with issues instead of Tasks; refused, creating nothing, when Team is not available). `label` is the short label (1 to 30 characters, one line), required before a Proposal with Tasks, or a handoff (its epic), is handed over. `requires` lists the Proposals it depends on. `prepared` applies only to a resolution born from the answer to a Drift's prepared question. `announcement` is the ID printed by `trama announcement new`; `request` binds the Proposal to the written design request it comes from. `reworks` names the rejected Proposal this one redoes (Rework with feedback): when it exists, is rejected and is not already redone, the new Proposal takes its place (same creation instant) and replaces it in the `requires` of every Draft or open Proposal, which the result lists; otherwise the Proposal is created without the link and `reworksNote` says why. `reworks` and `request` cannot be given together.",
   input: z
     .strictObject({
       title: z.string().min(1).describe("A short title: at most five words."),
@@ -159,7 +160,7 @@ const edit = defineCommand({
   mode: "immediate",
   summary: "Open a Proposal for writing: label, files and decisions on Drifts.",
   description:
-    "Every use sends an open Proposal back to Draft and says so; hand it over again with `proposal move <id> open`. Without input it only returns an open Proposal to Draft, touching no file. `rebase` records again the starting version of each file the Proposal holds, so a stale Proposal is no longer stale, and marks the Draft refining until it is handed over again; only an ordinary change Proposal not attached to a Drift can be rebased. `label` writes or changes the short label. `edit` makes each path (a Model file, `specs.yaml`, a Requirement fragment such as `requirements/<area>/<fragment>.md`, or a Task as `tasks/<slug>.md`) editable inside the Proposal and prints the path to write for each; a new Task takes a new identity, and a Task is rewritten by the full name printed. `delete` marks each path for deletion. `drifts` records or replaces the decisions of a resolution on open Drifts, and `removeDrifts` takes Drifts out of its list. `images` ties images to the Tasks of the Proposal, a list of `{ task, path }` (`path` is a local `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` or `.svg` file, absolute or relative to the project root), and `removeImages` takes them away, a list of `{ task, name }`. " + IMAGES_RULES,
+    "Every use sends an open Proposal back to Draft and says so; hand it over again with `proposal move <id> open`. Without input it only returns an open Proposal to Draft, touching no file. `rebase` records again the starting version of each file the Proposal holds, so a stale Proposal is no longer stale, and marks the Draft refining until it is handed over again; only an ordinary change Proposal not attached to a Drift can be rebased. `label` writes or changes the short label. `edit` makes each path (a Model file, `specs.yaml`, a Requirement fragment such as `requirements/<area>/<fragment>.md`, a Task as `tasks/<slug>.md`, or an issue of a handoff as `issues/<slug>.md`) editable inside the Proposal and prints the path to write for each; a new Task or issue takes a new identity, unique among the Tasks and the issues, and one is rewritten by the full name printed. `delete` marks each path for deletion, an issue file as `issues/<identity>-<slug>.md`. The Manager's changes to the fields of an issue (`manager`) are never written by this command. `drifts` records or replaces the decisions of a resolution on open Drifts, and `removeDrifts` takes Drifts out of its list. `images` ties images to the Tasks of the Proposal, a list of `{ task, path }` (`path` is a local `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` or `.svg` file, absolute or relative to the project root), and `removeImages` takes them away, a list of `{ task, name }`. " + IMAGES_RULES,
   positionals: [{ name: "id", description: "The Proposal: its ID, a unique prefix or its short number." }],
   input: z.strictObject({
     label: z.string().optional().describe("The short label: 1 to 30 characters, one line."),
@@ -216,7 +217,7 @@ const move = defineCommand({
   mode: "immediate",
   summary: "Hand over, approve, reject or discard a Proposal.",
   description:
-    "`open` hands a valid Draft over to the developer: it checks the Model and Requirements with the Proposal applied and prints the warnings and `proposal show` of the Proposal; a setup Proposal on an empty Model is approved at once. `approved` accepts an open Proposal and applies it in this folder. `rejected` rejects an open Proposal. `discarded` discards a Draft. Approving and rejecting a Proposal attached to an open Drift is refused: the decision is on the Drift. `skillsDir` (with `approved`, and with `open` for a setup Proposal) adds the configured skills folder where the `trama-req-*` skills are regenerated. `feedback` (only with `rejected`) is the text for the agent. Approving, rejecting and discarding are the developer's decisions.",
+    "`open` hands a valid Draft over to the developer: it checks the Model and Requirements with the Proposal applied and prints the warnings and `proposal show` of the Proposal; a setup Proposal on an empty Model is approved at once. A handoff is also refused, naming each problem, when Team is not available, it has no issue, an issue has no title or an empty body, an assignee or a reviewer is not a member of the team (read from the editor, as `trama team show` does: when the editor does not answer the hand-over is refused with the reason) or both are the same person, an estimate is not a number of days from 0.5 in steps of 0.5, a dependency names an issue outside the handoff and the handoffs it requires or the dependencies make a cycle, a reference does not exist, the label is missing or over 30 characters, or it has `tasks/`; the coverage of what it changes and estimates over 3 days are only warnings. `approved` accepts an open Proposal and applies it in this folder; a handoff, only while Team is available and a GitHub Project is linked, creates its issue cards in `.trama/issues/` in the same step, and no Task. `rejected` rejects an open Proposal. `discarded` discards a Draft. Approving and rejecting a Proposal attached to an open Drift is refused: the decision is on the Drift. `skillsDir` (with `approved`, and with `open` for a setup Proposal) adds the configured skills folder where the `trama-req-*` skills are regenerated. `feedback` (only with `rejected`) is the text for the agent. Approving, rejecting and discarding are the developer's decisions.",
   positionals: [
     { name: "id", description: "The Proposal: its ID, a unique prefix or its short number." },
     { name: "state", description: "Where the Proposal goes.", choices: STATES },
@@ -225,10 +226,26 @@ const move = defineCommand({
     skillsDir: z.string().min(1).optional().describe("The configured skills folder to regenerate, besides the ones found. Only toward `approved` or `open`."),
     feedback: z.string().optional().describe("The reason for the agent. Only toward `rejected`."),
   }),
-  output: card.extend({ warnings: z.array(z.looseObject({})).optional(), show: z.string().optional().describe("Toward `open`: the text of `proposal show`."), resolved: z.array(z.looseObject({ drift: z.string() })).optional().describe("Toward `approved`: the Drifts a resolution decided.") }),
+  output: card.extend({
+    warnings: z.array(z.looseObject({})).optional(),
+    show: z.string().optional().describe("Toward `open`: the text of `proposal show`."),
+    resolved: z.array(z.looseObject({ drift: z.string() })).optional().describe("Toward `approved`: the Drifts a resolution decided."),
+    issues: z.array(z.string()).optional().describe("Toward `approved`: the identities of the issue cards a handoff created."),
+  }),
   example: { skillsDir: ".agents/skills" },
   exampleArgs: ["P3", "approved"],
   effects: { writes: true, activity: true, activityStates: ["open"], editor: true },
+  async beforeRun(ctx, _input, [id, state], runtime) {
+    if (state !== "open") return;
+    const project = ctx.project();
+    let handoff = false;
+    try {
+      handoff = getProposal(project, id as string, true).data.kind === "handoff";
+    } catch {
+      // A Proposal that cannot be read is refused by `run`, with its own message.
+    }
+    if (handoff) ctx.team = await askTeam(project, { env: runtime.env, ...(runtime.runtimeDir === undefined ? {} : { runtimeDir: runtime.runtimeDir }) });
+  },
   run(ctx, input, [id, state]) {
     const project = ctx.project();
     if (input.skillsDir !== undefined && state !== "approved" && state !== "open") throw new UsageError(`skillsDir applies only toward approved or open, not ${state}`);
@@ -236,7 +253,8 @@ const move = defineCommand({
     const proposalId = getProposal(project, id as string, true).id;
     const skillsDirs = input.skillsDir === undefined ? [] : [input.skillsDir];
     if (state === "open") {
-      const p = submitProposal(project, proposalId, skillsDirs);
+      const team = ctx.team === undefined ? undefined : ctx.team.ok ? rosterOf(ctx.team.members) : { reason: ctx.team.reason };
+      const p = submitProposal(project, proposalId, skillsDirs, team === undefined ? {} : { team });
       // Approve and Reject wait for the end of the turn of the agent that delivered the Proposal; a Proposal approved at hand-over has nothing to wait for.
       const filed = filingOrigin(ctx.origin);
       if (ctx.byAgent && filed.holder !== undefined && !p.approvedAtHandOver)
@@ -252,10 +270,13 @@ const move = defineCommand({
     }
     if (state === "approved") {
       requireNotAttached(project, proposalId);
-      const { id: approved, resolved } = approveProposal(project, proposalId, skillsDirs);
+      const { id: approved, resolved, issues } = approveProposal(project, proposalId, skillsDirs);
+      // The command line asks no agent to publish: the new cards would stay `publishing` with nobody to publish them, so they wait for Publish again.
+      stopPublishing(project, issues, "Publishing was not asked: use Publish again in the Issues tab.");
       const n = numbersOf(ctx);
       const lines = resolved.map((d) => `- Drift ${n.name("drift", d.drift)}: ${d.skipped ? "skipped, already resolved" : d.decision === "fix-code" ? `code to be fixed, Task ${d.task ? n.name("task", d.task) : ""} created` : d.decision === "proposal" ? "Model updated to match the code" : "dismissed"}`);
-      return text([`Approved Proposal ${n.name("proposal", approved)}`, ...lines].join("\n"), { id: approved, number: n.label("proposal", approved), status: "approved", resolved });
+      const created = issues.length === 0 ? [] : [`${issues.length} issue${issues.length === 1 ? "" : "s"} created in .trama/issues/, waiting to be published (Publish again in the Issues tab): ${issues.map((issue) => `\`${issue}\``).join(", ")}`];
+      return text([`Approved Proposal ${n.name("proposal", approved)}`, ...lines, ...created].join("\n"), { id: approved, number: n.label("proposal", approved), status: "approved", resolved, issues });
     }
     if (state === "rejected") {
       requireNotAttached(project, proposalId);

@@ -4,6 +4,19 @@ updated: 2026-10-24T13:10:23.182Z
 summary: La conversazione General di omp Chat mostra i limiti dell'abbonamento consumati, per finestra e fornitore, con un dialogo che li aggiorna.
 tasks:
   - vd26sg07
+cleared:
+  vd26sg07:
+    title: Uso abbonamento in General
+    proposal: 4skdkgez
+    tag: Uso abbonamento
+    finished: 2026-10-24T13:08:39.677Z
+    refs:
+      - omp-chat-general
+      - requirements/ui#omp-chat-general
+      - requirements/rules#omp-chat-general
+      - requirements/tech#omp-chat-general
+      - requirements/data#omp-chat-general
+      - requirements/quality#omp-chat-conversation
 ---
 # Uso abbonamento in General
 

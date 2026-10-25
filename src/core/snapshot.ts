@@ -19,6 +19,7 @@ import { attachedDrift, closedUnchanged, type Column, type Drift, type DriftOpti
 import { preparedFlag, preparedStatus } from "./prepared";
 import { type Specs, type SpecsChange, specsChange } from "./specs";
 import { type HistoryFault, readHistory } from "./history";
+import { type HandoffView, type IssueRowView, teamViews } from "./team-views";
 
 export interface ActorChange {
   id: string;
@@ -287,6 +288,10 @@ export interface Snapshot extends ModelView {
   tasksSinceScan: number;
   /** The announcements that still exist, in the order they were announced. */
   announcements: AnnouncementView[];
+  /** The open handoffs, in creation order, for the Decisions tab of the Team view: they are in no other list of the Snapshot. */
+  handoffs: HandoffView[];
+  /** The issues of the approved handoffs, for the Issues tab of the Team view. */
+  issues: IssueRowView[];
   /** The short numbers of this working copy's live cards: the panel writes `T3` where a card is live and its identity where it is closed. */
   numbers: CardNumbers;
   /** The project's Specs as read; every field empty when the file is absent. Its errors are in `diagnostics`. */
@@ -433,6 +438,7 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
   const tasks = listTasks(p);
   const taskById = new Map(tasks.map((t) => [t.id, t]));
   const history = readHistory(p);
+  const team = teamViews(p);
   const scanInstant = Date.parse(readLastScan(p));
   const tasksSinceScan = tasks.filter((t) => t.data.column === "done" && t.data.finished !== null && t.data.unchanged === null && Date.parse(t.data.finished) > scanInstant).length + clearedSince(p, scanInstant);
   const drifts = listDrifts(p);
@@ -447,12 +453,14 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
     const bound = live.find((a) => a.proposal === proposal.id);
     return bound === undefined ? null : { phase: announcementView(p, bound, undefined).phase, note: bound.notes.at(-1)?.text ?? null };
   };
-  const shownProposals = allProposals.filter((x) => x.data.status === "open" || (x.data.status === "draft" && x.data.refining)).map((proposal) => proposalView(p, project, proposal, writerOf(proposal)));
+  // A handoff never shows on the Board, in the Diagram's or the Requirements' Proposal selectors, or in any count of them (`rules#proposal/Draft`): the Team view has its own list.
+  const shownProposals = allProposals.filter((x) => x.data.kind !== "handoff" && (x.data.status === "open" || (x.data.status === "draft" && x.data.refining))).map((proposal) => proposalView(p, project, proposal, writerOf(proposal)));
   const proposalById = new Map(allProposals.map((x) => [x.id, x]));
   // The developer does not see attached Proposals, so the ghost of a Proposal whose Draft is attached to an open Drift is drawn nowhere.
   // The announcement of a refinement is bound to a Proposal that already has its card (Open, or a Draft left refining): its phase and notes show on that card, never as a ghost of its own.
+  // The ghost of a handoff has no column on the Board (it shows in the status bar), so an announcement bound to a handoff is no ghost of the Board.
   const carded = new Set(shownProposals.map((x) => x.id));
-  const announcements = live.filter((a) => !(a.kind === "proposal" && a.proposal !== null && (attachedDrift(p, a.proposal) || carded.has(a.proposal))));
+  const announcements = live.filter((a) => !(a.kind === "proposal" && a.proposal !== null && (attachedDrift(p, a.proposal) || carded.has(a.proposal) || proposalById.get(a.proposal)?.data.kind === "handoff")));
   const driftView = (d: Drift): DriftView => ({
     id: d.id,
     created: d.data.created,
@@ -483,7 +491,7 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
     specs: project.specs,
     specsPresent: project.specsPresent,
     // A History file that does not read is an error of the Snapshot, shown with the Model's errors; it is not a Model error, so approval does not see it.
-    diagnostics: [...project.diagnostics, ...history.faults.map((fault) => ({ file: fault.file, line: 0, message: fault.message }))],
+    diagnostics: [...project.diagnostics, ...history.faults.map((fault) => ({ file: fault.file, line: 0, message: fault.message })), ...team.faults],
     proposals: shownProposals.filter((v) => !attachedDrift(p, v.id)),
     resolutionDrifts: allProposals.filter((x) => x.data.kind === "resolution" && (x.data.status === "draft" || x.data.status === "open")).flatMap((x) => x.data.drifts.map((d) => d.drift)),
     finishingDrifts: [...finishingDrifts],
@@ -513,6 +521,8 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
       images: readTaskImages(p, t.id),
     })),
     announcements: announcements.map((a) => announcementView(p, a, a.proposal === null ? undefined : proposalById.get(a.proposal)?.title)),
+    handoffs: team.handoffs,
+    issues: team.issues,
     numbers,
     history: history.entries.map((e) => ({
       id: e.id,

@@ -88,6 +88,8 @@ export function snapshotOf(files: FileMap): Snapshot {
     unifiedDrifts: [],
     tasks: [],
     announcements: [],
+    handoffs: [],
+    issues: [],
     tasksSinceScan: 0,
     numbers: { proposal: {}, task: {}, drift: {} },
     specs: EMPTY_SPECS,

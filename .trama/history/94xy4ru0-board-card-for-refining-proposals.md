@@ -17,6 +17,13 @@ cleared:
       - requirements/ui#panel/Settings
       - requirements/ui#raffinamento
       - requirements/rules#setup-wizard
+  29oktgs5:
+    title: Link refinement ghost to its Proposal
+    finished: 2026-10-24T20:48:17.129Z
+    refs:
+      - raffinamento
+      - requirements/tech#raffinamento
+      - requirements/ui#raffinamento
 ---
 # Board card for refining Proposals
 

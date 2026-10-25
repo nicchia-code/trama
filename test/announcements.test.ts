@@ -23,7 +23,7 @@ import {
 } from "../src/core/announcements";
 import { ghostColumn } from "../src/core/ghost-column";
 import { cardName } from "../src/core/short-numbers";
-import { discardProposal, editInProposal, getProposal, newProposal, submitProposal } from "../src/core/proposals";
+import { discardProposal, editInProposal, getProposal, newProposal, rebaseInProposal, rejectProposal, submitProposal } from "../src/core/proposals";
 import { buildSnapshot } from "../src/core/snapshot";
 import { newDrift, resolveDrift } from "../src/core/work";
 import { run } from "../src/cli/main";
@@ -231,6 +231,60 @@ describe("a Draft and its announcement", () => {
     editInProposal(p, kept.id, "checkout/order.md");
     expect(getProposal(p, kept.id).data.status).toBe("draft");
     expect(listAnnouncements(p)).toHaveLength(0);
+  });
+
+  test("rejecting an Open Proposal withdraws only the announcement bound to it: no ghost in the Snapshot, no notice at the end of the job", () => {
+    const open = newProposal(p, "Rejected design", "", own);
+    submitProposal(p, open.id);
+    const bound = announce(p, { kind: "proposal", title: "Rework", source: "request", terminal: "ab12cd" });
+    bindDraft(p, { id: open.id, title: "Rejected design" }, bound.id, { terminal: "ab12cd" });
+    const other = newProposal(p, "Other design", "", own);
+    expect(getAnnouncement(p, bound.id)?.proposal).toBe(open.id);
+
+    rejectProposal(p, open.id, "Not like this");
+
+    expect(getProposal(p, open.id).data.status).toBe("rejected");
+    expect(getAnnouncement(p, bound.id)).toBeNull();
+    expect(listAnnouncements(p).map((a) => a.proposal)).toEqual([other.id]);
+    expect(buildSnapshot(p).announcements.some((a) => a.id === bound.id)).toBe(false);
+    expect(withdrawAll(p).map((a) => a.id)).not.toContain(bound.id);
+  });
+
+  describe("the announcement of a refinement, bound to the Proposal at launch", () => {
+    /** An Open Proposal with the request the host announces when it launches its refinement, bound to it. */
+    const refined = () => {
+      const open = newProposal(p, "Stale design", "", own);
+      submitProposal(p, open.id);
+      const launch = announce(p, { kind: "proposal", title: "Refining Stale design", proposal: open.id, source: "request", terminal: "ab12cd" });
+      expect(getAnnouncement(p, launch.id)?.proposal).toBe(open.id);
+      return { open, launch };
+    };
+    const ghosts = (id: string) => buildSnapshot(p).announcements.filter((a) => a.id === id);
+
+    test("no ghost while the Proposal is Open before the rebase, and none as a Draft with refining: true, whose card shows the writer", () => {
+      const { open, launch } = refined();
+      expect(ghosts(launch.id)).toEqual([]);
+      expect(buildSnapshot(p).proposals.find((x) => x.id === open.id)).toMatchObject({ refining: false, writer: null });
+
+      rebaseInProposal(p, open.id);
+      expect(getProposal(p, open.id)).toMatchObject({ data: { status: "draft", refining: true } });
+      expect(ghosts(launch.id)).toEqual([]);
+      const card = buildSnapshot(p).proposals.find((x) => x.id === open.id);
+      expect(card).toMatchObject({ refining: true, writer: { phase: "writing" } });
+
+      declareNote(p, { id: launch.id, text: "Asking the developer about the totals" });
+      expect(ghosts(launch.id)).toEqual([]);
+      expect(buildSnapshot(p).proposals.find((x) => x.id === open.id)?.writer?.note).toBe("Asking the developer about the totals");
+    });
+
+    test("Remove rejects the Proposal and withdraws the announcement in one step: no ghost, and nothing is left for the end of the job to withdraw", () => {
+      const { open, launch } = refined();
+      rejectProposal(p, open.id);
+      expect(getProposal(p, open.id).data.status).toBe("rejected");
+      expect(getAnnouncement(p, launch.id)).toBeNull();
+      expect(ghosts(launch.id)).toEqual([]);
+      expect(withdrawAll(p)).toEqual([]);
+    });
   });
 
   test("editing a Draft does not change announcement metadata", () => {

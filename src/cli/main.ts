@@ -123,6 +123,7 @@ export async function execute(argv: string[], cwd: string, options: ExecuteOptio
   const { command, ctx, args, common } = planned;
   try {
     const input = parseInput(command, common.input === "-" ? await runtime.stdin() : common.input);
+    await command.beforeRun?.(ctx, input as never, args, runtime);
     return rendered(command, await command.run(ctx, input as never, args, runtime), common.json);
   } catch (error) {
     if (command.failure) return command.failure(error);

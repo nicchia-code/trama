@@ -1,6 +1,10 @@
-/** The page the webview panel loads: one mount point and the bundled script, under a strict CSP. */
-export function webviewHtml(input: { cspSource: string; nonce: string; scriptUri: string }): string {
-  const { cspSource, nonce, scriptUri } = input;
+/**
+ * The page the webview panel loads: one mount point and the bundled script, under a strict CSP. `mermaidUri` is where the
+ * `mermaid.js` bundle can be loaded from (a webview URI, so from `cspSource`): the first diagram of the page adds a script
+ * with the page's nonce and that address (`mermaid-loader.ts`). The CSP does not change.
+ */
+export function webviewHtml(input: { cspSource: string; nonce: string; scriptUri: string; mermaidUri?: string }): string {
+  const { cspSource, nonce, scriptUri, mermaidUri } = input;
   // The webview injects its stylesheet and styles elements from script, which only `'unsafe-inline'` allows.
   const csp = [
     "default-src 'none'",
@@ -19,7 +23,7 @@ export function webviewHtml(input: { cspSource: string; nonce: string; scriptUri
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Trama</title>
 </head>
-<body>
+<body${mermaidUri === undefined ? "" : ` data-mermaid-src="${mermaidUri}"`}>
   <div id="app"></div>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>

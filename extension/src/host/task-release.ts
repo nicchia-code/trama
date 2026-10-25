@@ -1,6 +1,7 @@
 import { readAgentProcesses, removeAgentProcess } from "../../../src/core/agent-processes";
 import { listAnnouncements } from "../../../src/core/announcements";
 import { claimHolders, releaseTerminalClaims } from "../../../src/core/claims";
+import { goneIssues, publishingIssues, STOPPED_REASON, stopPublishing } from "../../../src/core/issues";
 import { askFollowedHolders, questionProjectId } from "../../../src/core/question-channel";
 import { cardName } from "../../../src/core/short-numbers";
 import { projectAt } from "../../../src/core/store";
@@ -42,6 +43,26 @@ export async function releaseUnfollowed(root: string, taskId?: string): Promise<
 }
 
 /**
+ * The execution check's stop of what nobody follows, for issues (`rules#issue`): an issue `publishing` goes to Not published, with the reason that the agent stopped
+ * before publishing it, when no open window of the project follows the terminal that publishes it and the process registered for it is gone, is not the same
+ * process any more or was never registered. An issue with no known publisher is left alone. Returns the identities of the issues this window stopped.
+ */
+export async function stopUnfollowedPublications(root: string): Promise<string[]> {
+  const project = projectAt(root);
+  const publishing = publishingIssues(project);
+  if (publishing.length === 0) return [];
+  const facts = await followFacts(root, publishing.map((issue) => issue.holder));
+  const gone = new Set(goneIssues(publishing, facts));
+  const stopped: string[] = [];
+  for (const issue of publishing) {
+    if (!gone.has(issue.id) || issue.holder === null) continue;
+    // An issue another publication took over by now is not stopped: `stopPublishing` reads it again as it writes.
+    for (const { id } of stopPublishing(project, [issue.id], STOPPED_REASON, issue.holder)) stopped.push(id);
+  }
+  return stopped;
+}
+
+/**
  * Drops from the registry of agent processes every terminal no Task holds as its `agent`, no announcement belongs to, no
  * claim names and no window follows (this one or, asked once, another of the project); an unreadable registry is left alone.
  * Returns the terminals dropped.
@@ -54,6 +75,7 @@ export async function pruneAgentProcesses(root: string): Promise<string[]> {
   const held = new Set([
     ...listTasks(project).filter((task) => task.data.agent && task.data.holder !== null).map((task) => task.data.holder),
     ...listAnnouncements(project).map((a) => a.terminal),
+    ...publishingIssues(project).map((issue) => issue.holder),
     ...claimHolders(root),
   ]);
   const candidates = Object.keys(processes).filter((terminal) => !held.has(terminal) && !followsHolder(terminal));

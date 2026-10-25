@@ -14,6 +14,7 @@ import { startNtfyToken } from "./ntfy-token";
 import { findProject } from "./project";
 import { QuestionSession } from "./question-session";
 import { EditorQuestions } from "./questions";
+import { People } from "./team/people";
 import { CONVERSATIONS_KEY, readSavedConversations } from "../../../src/core/omp-chat-conversation";
 import { OmpClient } from "./omp-chat/client";
 import { OmpChatView } from "./omp-chat/view";
@@ -42,14 +43,16 @@ function guarded<A extends unknown[]>(action: (...args: A) => Promise<void>): (.
 
 export function activate(context: vscode.ExtensionContext): void {
   const session = new QuestionSession(() => trama.revealForQuestions(), agentTabName, { opened: roundOpened, closed: roundClosed });
-  const questions = new EditorQuestions(() => findProject(), session, ownsAgentTerminal);
+  // The Manager's people live only in this window's global state, never synchronised: `setKeysForSync` is never called for `trama.team`.
+  const people = new People(context.globalState);
+  const questions = new EditorQuestions(() => findProject(), session, ownsAgentTerminal, people, (project) => trama.issueStates(project));
   // One watcher of `.trama/` for the extension's whole life: the panel follows it while open, the design requests always.
   setOverlayStorage(context.globalStorageUri);
   setUpdateStore(context.globalState);
   setYoloNoticeStore(context.globalState);
   const tramaFiles = vscode.workspace.createFileSystemWatcher("**/.trama/**");
   const requests = new DesignRequests(context.workspaceState, tramaFiles, undefined, undefined, () => trama.launch({ kind: "implement-all" }));
-  const trama = new Controller(context.extensionUri, session, tramaFiles, requests, context.workspaceState);
+  const trama = new Controller(context.extensionUri, session, tramaFiles, requests, context.workspaceState, people);
   controller = trama;
   // The item of the ghosts with no Board column lives with the extension, so it shows with the panel closed too.
   const activities = new ActivitiesItem(() => findProject()?.root, tramaFiles, (announcement) => trama.openGhostDetails(announcement));

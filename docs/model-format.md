@@ -28,9 +28,14 @@ Everything Trama stores lives in `.trama/` at the root of the user's repository,
   solo/                        # only while Solo mode is on, never versioned
     .gitignore                 # `*`
     mode.json                  # { "exclusions": "folders" | "files" }
+  manager/                     # only while Manager mode is on, never versioned
+    .gitignore                 # `*`
+    mode.json                  # {}
 ```
 
 `solo/mode.json` records Solo mode of the working copy, not of the project: its folder has a `.gitignore` containing `*`, so the file stays local even where `.trama/` is tracked. It is absent when Solo mode is off; a file that is not valid JSON, or whose `exclusions` is neither `folders` nor `files`, counts as on with `folders`. Trama writes it together with a block between `# trama solo mode` and `# end trama solo mode` in `.git/info/exclude` that keeps `.trama/`, the skills and `.omp/` out of git (`folders`) or only the files Trama writes (`files`); the README describes both kinds.
+
+`manager/mode.json` records Manager mode of the working copy, not of the project: its folder has a `.gitignore` containing `*`, so the file stays local even where `.trama/` is tracked, and it is never committed, with Solo mode on or off. It is `{}` with a final newline, present only while Manager mode is on; a file that is not valid JSON counts as on, and the next write replaces it. Turning Manager mode off deletes only this file.
 
 ## IDs
 
@@ -179,7 +184,7 @@ A list item directly under a State (before any sub-State heading) that **starts 
 ```markdown
 ---
 status: draft           # draft | open | approved | rejected | discarded; absent means open
-kind: import            # optional: import (written by trama-import); absent means an ordinary change
+kind: import            # optional: import (trama-import), handoff (trama-handoff: issues for the team in `issues/` instead of Tasks), resolution or setup; absent means an ordinary change
 requires:               # optional: draft, open or approved Proposals this one is written on top of
   - "0006"
 base:

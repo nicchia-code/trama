@@ -6,6 +6,41 @@ tasks:
   - g3i6bga0
   - v3rfz129
   - 4o4s4vjw
+cleared:
+  4o4s4vjw:
+    title: Chiave Cursor nel wizard
+    proposal: nrtibou1
+    tag: Cursor API key
+    finished: 2026-10-25T02:46:00.743Z
+    refs:
+      - setup-wizard/omp
+  v3rfz129:
+    title: Chiave API nella riga Cursor
+    proposal: nrtibou1
+    tag: Cursor API key
+    finished: 2026-10-25T02:43:53.259Z
+    refs:
+      - panel/Settings
+      - requirements/ui#developer.SET_CURSOR_API_KEY
+      - requirements/ui#developer.LOG_IN_PROVIDER
+  g3i6bga0:
+    title: Chiave Cursor passata a omp
+    proposal: nrtibou1
+    tag: Cursor API key
+    finished: 2026-10-25T02:40:55.806Z
+    refs:
+      - agent-launching
+      - developer.SET_CURSOR_API_KEY
+      - developer.REMOVE_CURSOR_API_KEY
+      - editor.CURSOR_API_KEY_CHANGED
+      - requirements/rules#developer.SET_CURSOR_API_KEY
+      - requirements/rules#developer.REMOVE_CURSOR_API_KEY
+      - requirements/rules#editor.CURSOR_API_KEY_CHANGED
+      - requirements/rules#developer.LOG_IN_PROVIDER
+      - requirements/tech#developer.SET_CURSOR_API_KEY
+      - requirements/tech#developer.LOG_IN_PROVIDER
+      - requirements/quality#developer.SET_CURSOR_API_KEY
+      - requirements/quality#developer.LOG_IN_PROVIDER
 ---
 # Cursor API key
 

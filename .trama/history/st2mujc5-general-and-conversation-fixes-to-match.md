@@ -5,6 +5,34 @@ summary: "Code realigned with the Model: General keeps its turn and conversation
 tasks:
   - 6zjrngnq
   - 6fc59szq
+cleared:
+  6zjrngnq:
+    title: "Fix code to match the Model: Twelve code-Model differences"
+    finished: 2026-10-24T20:53:17.044Z
+    refs:
+      - requirements/rules#omp-chat-general
+      - requirements/tech#omp-chat-general
+      - requirements/ui#omp-chat-general
+      - omp-chat-general/Kept after switch-off
+      - requirements/data#omp-chat-general
+      - drift-resolution/Free
+      - drift-resolution/Answering a prepared question
+      - drift-resolution/Resolving
+      - requirements/rules#drift-resolution
+      - omp-chat-conversation/Agent running
+      - omp-chat-conversation/Closed
+      - omp-chat-conversation/Waiting for the window
+      - requirements/rules#omp-chat-conversation
+      - task/Done
+      - setup-wizard/omp
+      - requirements/rules#setup-wizard
+      - requirements/ui#agent-launching
+      - requirements/data#General
+  6fc59szq:
+    title: "Fix code to match the Model: General clears on re-enable"
+    finished: 2026-10-24T20:47:04.634Z
+    refs:
+      - omp-chat-general/Kept after switch-off
 ---
 # General and conversation fixes to match the Model
 

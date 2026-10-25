@@ -73,6 +73,11 @@ cleared:
       - task
       - requirements/rules#agent-launching
       - requirements/tech#task
+  vd3lxgx4:
+    title: "Fix code to match the Requirements: ast_edit skips bracketed file paths"
+    finished: 2026-10-24T20:46:11.022Z
+    refs:
+      - requirements/rules#prenotazione-file
 ---
 # Esecuzione in parallelo
 

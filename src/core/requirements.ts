@@ -330,6 +330,17 @@ export function resolveProjectRef(project: ProjectModel, ref: string): ProjectEl
   return { kind: "requirement", ref, area, section };
 }
 
+/** Whether a Model, Requirement or Specs reference resolves in the project. */
+export function resolves(project: ProjectModel, ref: string): boolean {
+  try {
+    resolveProjectRef(project, ref);
+    return true;
+  } catch (error) {
+    if (error instanceof TramaError) return false;
+    throw error;
+  }
+}
+
 /** The Model elements that contain `element` (itself first): a State's parent States, its Machine and Feature. */
 export function lineageRefs(model: Model, element: Element): string[] {
   const machineChain = (machine: Machine, state: State | null): string[] => {

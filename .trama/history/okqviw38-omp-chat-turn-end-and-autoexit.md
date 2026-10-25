@@ -5,6 +5,25 @@ summary: Conversations with Trama's hook end their work at omp's answer, and aut
 tasks:
   - jrhf90vk
   - waksk8py
+cleared:
+  waksk8py:
+    title: autoExit solo dall'utente
+    proposal: ijuvpwzo
+    tag: omp Chat auto exit
+    finished: 2026-10-24T18:32:06.584Z
+    refs:
+      - requirements/quality#agent-launching
+      - requirements/tech#agent-launching
+  jrhf90vk:
+    title: Fine turno in omp Chat
+    proposal: ijuvpwzo
+    tag: omp Chat auto exit
+    finished: 2026-10-24T18:29:47.060Z
+    refs:
+      - omp-chat-conversation
+      - omp-acp.TURN_ENDED
+      - requirements/tech#omp-acp.TURN_ENDED
+      - requirements/tech#omp-chat-conversation/Waiting for the window
 ---
 # omp Chat turn end and autoExit
 

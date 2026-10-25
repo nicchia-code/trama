@@ -42,3 +42,11 @@ The primitives under the shadcn/ui components (`@radix-ui/react-slot`, `-tabs`, 
 - `clsx`: MIT License, Copyright Luke Edwards. https://github.com/lukeed/clsx
 - `tailwind-merge`: MIT License, Copyright Dany Castillo. https://github.com/dcastil/tailwind-merge
 - `cmdk`: MIT License, Copyright Paco Coursey. https://github.com/dip/cmdk
+
+## mermaid
+
+The diagrams of ` ```mermaid ` blocks in the panel and in omp Chat are drawn by `mermaid` 12, bundled with its own dependencies in `dist/mermaid.js`, a separate file the first diagram of a page loads on demand (it is not part of `dist/webview.js`, `dist/omp-chat.js` or `dist/menu.js`).
+
+- Source: https://github.com/mermaid-js/mermaid
+- License: MIT License, https://github.com/mermaid-js/mermaid/blob/develop/LICENSE
+- Copyright: Knut Sveidqvist. The libraries bundled with it keep their own licences, listed in their packages.

@@ -13,8 +13,9 @@ import type { Slot, View, ViewContext } from "../types";
 import { Wizard } from "../wizard";
 import { WizardController } from "../wizard/controller";
 import { SettingField } from "./field";
-import { type CertificatesState, groupSettings, type OmpStatus, ompStatusLine, SKILLS_DIR_KEY, type SoloState, SYSTEM_CERTIFICATES_KEY, type TestNotificationState, testNotificationBlock, THEME_KEY, themeSetting } from "./logic";
+import { type CertificatesState, groupSettings, type ManagerState, type OmpStatus, ompStatusLine, SKILLS_DIR_KEY, type SoloState, SYSTEM_CERTIFICATES_KEY, type TestNotificationState, testNotificationBlock, THEME_KEY, themeSetting } from "./logic";
 import { NOTIFICATIONS_SUBGROUP, NotificationsControls } from "./notifications";
+import { ManagerModeSetting } from "./manager-mode";
 import { SoloModeSetting } from "./solo-mode";
 
 type SettingsMessage = Extract<ToWebview, { type: "settings" }>;
@@ -50,6 +51,8 @@ export interface SettingsView extends View {
   receiveNtfyToken(message: Extract<ToWebview, { type: "ntfyToken" }>): void;
   /** Solo mode of the project, from the host's `soloMode`: the kind, the tracked files of Trama and whether the folder is in a git repository. */
   receiveSoloMode(message: Extract<ToWebview, { type: "soloMode" }>): void;
+  /** Manager mode of the project, from the host's `managerMode`: whether it is recorded and the repository of origin, with the reason when there is none. */
+  receiveManagerMode(message: Extract<ToWebview, { type: "managerMode" }>): void;
   /** How the test notification is going, from the host's `testNotification`. */
   receiveTestNotification(message: Extract<ToWebview, { type: "testNotification" }>): void;
 }
@@ -87,13 +90,17 @@ export interface SettingsPageProps {
   solo?: SoloState | null;
   /** How many times the host has told Solo mode: a value the developer chose gives way to the real one when a new message arrives. */
   soloChanges?: number;
+  /** Manager mode of the project, from the host's `managerMode`; null until the first message and outside a project, where the `Manager Mode` row is not shown. */
+  manager?: ManagerState | null;
+  /** How many times the host has told Manager mode: a value the developer chose gives way to the real one when a new message arrives. */
+  managerChanges?: number;
 }
 
 /**
  * The page: a title, with «Guided setup» in a project, and then every setting the manifest declares, in the groups and subgroups of the setup
  * wizard, in one column. Each setting is saved to the user settings when the developer confirms it.
  */
-export function SettingsPage({ schema, values, generation, models, listError, omp = null, providers = null, cursorKey = { saved: false, changes: 0 }, ntfyToken = { saved: false, changes: 0 }, testNotification = null, loggingOut = [], certificates = null, instructionFiles = null, solo = null, soloChanges = 0, post, openLink, onGuidedSetup, wizard }: SettingsPageProps) {
+export function SettingsPage({ schema, values, generation, models, listError, omp = null, providers = null, cursorKey = { saved: false, changes: 0 }, ntfyToken = { saved: false, changes: 0 }, testNotification = null, loggingOut = [], certificates = null, instructionFiles = null, solo = null, soloChanges = 0, manager = null, managerChanges = 0, post, openLink, onGuidedSetup, wizard }: SettingsPageProps) {
   const send = (key: string, value: SettingValue) => post({ type: "setSetting", key, value });
   if (wizard !== undefined) return <>{wizard}</>;
   const field = (setting: SettingSchema) => (
@@ -139,7 +146,11 @@ export function SettingsPage({ schema, values, generation, models, listError, om
               {group.title === "omp" && providers !== null ? <Providers connected={providers.connected} onLogin={(provider) => post({ type: "ompLogin", provider })} onLogout={(provider) => post({ type: "ompLogout", provider })} loggingOut={loggingOut} apiKey={{ ...cursorKey, onSet: () => post({ type: "setCursorApiKey" }), onRemove: () => post({ type: "removeCursorApiKey" }) }} /> : null}
               {group.settings.length > 0 ? (
                 <div className="grid gap-5">
-                  {group.settings.flatMap((setting) => [field(setting), ...(setting.key === SKILLS_DIR_KEY && solo !== null ? [<SoloModeSetting key="solo-mode" state={solo} generation={soloChanges} post={post} openLink={openLink} />] : [])])}
+                  {group.settings.flatMap((setting) => [
+                    field(setting),
+                    ...(setting.key === SKILLS_DIR_KEY && solo !== null ? [<SoloModeSetting key="solo-mode" state={solo} generation={soloChanges} post={post} openLink={openLink} />] : []),
+                    ...(setting.key === SKILLS_DIR_KEY && manager !== null ? [<ManagerModeSetting key="manager-mode" state={manager} generation={managerChanges} post={post} />] : []),
+                  ])}
                 </div>
               ) : null}
               {group.subgroups.length > 0 ? (
@@ -175,7 +186,7 @@ export function SettingsPage({ schema, values, generation, models, listError, om
 
 /** Mounts the Settings tab in `slot`; the panel's theme follows `trama.theme` as the host sends it, also while the tab is hidden. */
 export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeController): SettingsView => {
-  let page: SettingsPageProps = { schema: [], values: {}, generation: 0, models: [], listError: null, omp: null, providers: null, cursorKey: { saved: false, changes: 0 }, ntfyToken: { saved: false, changes: 0 }, testNotification: null, loggingOut: [], certificates: null, instructionFiles: null, solo: null, soloChanges: 0, post: context.post, openLink: context.openLink };
+  let page: SettingsPageProps = { schema: [], values: {}, generation: 0, models: [], listError: null, omp: null, providers: null, cursorKey: { saved: false, changes: 0 }, ntfyToken: { saved: false, changes: 0 }, testNotification: null, loggingOut: [], certificates: null, instructionFiles: null, solo: null, soloChanges: 0, manager: null, managerChanges: 0, post: context.post, openLink: context.openLink };
   let hasProject = false;
   let visible = false;
   const wizard = new WizardController({
@@ -249,6 +260,12 @@ export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeCont
       wizard.receiveSoloMode(message);
       render();
     },
+    receiveManagerMode(message) {
+      const { type: _type, ...state } = message;
+      page = { ...page, manager: state, managerChanges: (page.managerChanges ?? 0) + 1 };
+      wizard.receiveManagerMode(message);
+      render();
+    },
     receiveTestNotification(message) {
       const { type: _type, ...state } = message;
       page = { ...page, testNotification: state };
@@ -271,7 +288,7 @@ export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeCont
       hasProject = present;
       if (!present) {
         wizard.close();
-        page = { ...page, instructionFiles: null, solo: null };
+        page = { ...page, instructionFiles: null, solo: null, manager: null };
       }
       render();
       if (appeared && visible) askInstructionFiles();

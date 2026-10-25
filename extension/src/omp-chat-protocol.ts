@@ -69,6 +69,8 @@ export type ToChatWebview =
   /** The webview starts again from what follows: it forgets every conversation. */
   | { type: "reset" }
   | { type: "theme"; setting: ThemeSetting }
+  /** The project's GitHub repository (`owner/repo`), or none: with one, `#123` and `@handle` in a message are links. */
+  | { type: "githubRepo"; repo: string | null }
   /** The tabs, in order of opening, and the one in view. */
   | { type: "conversations"; items: ConversationItem[]; selected?: string }
   /** A conversation's start: `first` is Trama's instruction, `notice` a line before it (a resumed conversation), `focus` asks the message field to take the focus. */

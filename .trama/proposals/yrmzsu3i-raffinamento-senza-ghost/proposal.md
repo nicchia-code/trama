@@ -1,5 +1,5 @@
 ---
-status: open
+status: approved
 base:
   work/announcement.md: 2bdaac8a55585cc6126c9171160f9d182fa42c1f18b469c3f10a59c9a90ec00c
   agent-launching/raffinamento.md: 59751790cb167c2c581ca51b00084286320544c2aeba660d0fbb635289605a57

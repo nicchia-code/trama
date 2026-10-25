@@ -25,6 +25,11 @@ cleared:
     refs:
       - voce-history
       - requirements/ui#voce-history
+  5xjjz3fm:
+    title: "Fix code to match the Requirements: History modal focus skips Close"
+    finished: 2026-10-24T20:46:14.476Z
+    refs:
+      - requirements/ui#voce-history
 ---
 # Modale della voce di History
 

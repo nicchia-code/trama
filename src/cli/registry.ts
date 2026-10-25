@@ -14,11 +14,11 @@ import type { Result } from "./result";
  */
 
 /** The objects of the command line, in the order `trama --help` lists them. */
-export const OBJECTS = ["model", "proposal", "task", "drift", "history", "announcement", "comparison", "question", "advisor", "project", "timing", "hook"] as const;
+export const OBJECTS = ["model", "proposal", "task", "drift", "issue", "team", "history", "announcement", "comparison", "question", "advisor", "project", "timing", "hook"] as const;
 export type CommandObject = (typeof OBJECTS)[number];
 
-/** The seven verbs every object shares, which mean the same for each; `delete` exists only for `task`, and `review` only for `advisor`. `hook` is the only object that does not follow them (requirements/cli#General). */
-export const VERBS = ["show", "list", "new", "edit", "move", "check", "delete", "review"] as const;
+/** The verbs of the objects: seven mean the same for every object that has them; `delete` exists only for `task`, `review` only for `advisor` and `fields` only for `issue`. `hook` is the only object that does not follow them (requirements/cli#General). */
+export const VERBS = ["show", "list", "new", "edit", "move", "check", "delete", "review", "fields"] as const;
 
 /** A positional argument: the identity of a card, the reference of a Model element, or the state `move` brings a card to. */
 export interface Positional {
@@ -88,6 +88,11 @@ interface Declaration<I extends z.ZodObject, O extends z.ZodType> {
 
 export interface ImmediateDeclaration<I extends z.ZodObject, O extends z.ZodType> extends Declaration<I, O> {
   mode: "immediate";
+  /**
+   * What the executable (not `run`, the synchronous way in of the extension and the tests) gathers from the editor before `run`, which then answers at once: it puts it in the
+   * context. `proposal move` reads the team there for the hand-over of a handoff.
+   */
+  beforeRun?(ctx: Context, input: z.output<I>, args: string[], runtime: Runtime): Promise<void>;
   run(ctx: Context, input: z.output<I>, args: string[]): Result;
 }
 
@@ -111,6 +116,7 @@ export interface Command {
   hidden: boolean;
   stdin?: string;
   failure?: (error: unknown) => { out: string; exit: number };
+  beforeRun?(ctx: Context, input: never, args: string[], runtime: Runtime): Promise<void>;
   mode: Mode;
   run(ctx: Context, input: never, args: string[], runtime: Runtime): Result | Promise<Result>;
 }
@@ -132,6 +138,7 @@ export function defineCommand<I extends z.ZodObject, O extends z.ZodType>(declar
     stdin: declaration.stdin,
     failure: declaration.failure,
     mode: declaration.mode,
+    ...(declaration.mode === "immediate" && declaration.beforeRun !== undefined ? { beforeRun: declaration.beforeRun as NonNullable<Command["beforeRun"]> } : {}),
     run: declaration.run as Command["run"],
   };
 }

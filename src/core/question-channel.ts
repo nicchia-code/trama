@@ -61,6 +61,10 @@ interface ServerOptions {
   onCoordinatorMessage?: (message: CoordinatorMessage) => boolean | void | Promise<boolean | void>;
   /** `trama task check`: runs this window's execution check for the Task `task` (its permanent identity) and says who holds it or why it was released. Without it the window answers that it cannot verify. */
   onCheckTask?: (task: string) => TaskCheckReply | Promise<TaskCheckReply>;
+  /** `trama team show`: the members of the project's team, or why they cannot be read (Team not available). Without it the window does not answer `team`. */
+  onTeam?: () => TeamAnswer | Promise<TeamAnswer>;
+  /** The briefing of a comparison (`tech#issue/Published`): where the published issues are, from the last read of GitHub. Without it the window answers none, and the briefing says the state of publication. */
+  onIssueStates?: () => readonly IssueStateRead[] | Promise<readonly IssueStateRead[]>;
   onClose?: () => void;
 }
 
@@ -588,6 +592,124 @@ export async function checkTaskInEditor(project: Project, task: string, options:
   }
 }
 
+/** A member of the team as the editor answers it: the name and the GitHub handle, and the rest of the person's fields as stored. */
+export interface TeamMember {
+  name: string;
+  handle: string;
+  [field: string]: unknown;
+}
+
+/** What a window gives for `team`: its members (at least their name and handle; the rest is as stored), or the reason Team is not available. */
+export type TeamAnswer = { members: readonly { name: string; handle: string }[] } | { error: string };
+
+/** What the editor answers to `team` (`cli#team`): the members of the project's team, or why they cannot be read. */
+export type TeamReply = { ok: true; members: TeamMember[] } | { ok: false; reason: string };
+
+/** Where one published issue is, as the last read of GitHub found it: its GitHub number and its state (`IssueStatus`). */
+export interface IssueStateRead {
+  number: number;
+  status: string;
+}
+
+/** How long the editor has to answer `issue-states`: a briefing does not wait for GitHub, only for the editor's memory of it. */
+const ISSUE_STATES_WAIT_MS = 3_000;
+
+/**
+ * Asks the editor window that launched this agent where the published issues were at its last read of GitHub (`issue-states`), through the endpoint and the secret of
+ * `trama question new`. Null when there is no such editor, it does not answer in 3 seconds or it has nothing: the briefing then says the state of publication. Never throws.
+ */
+export async function askIssueStates(project: Project, options: { env?: Record<string, string | undefined>; runtimeDir?: string; timeoutMs?: number } = {}): Promise<IssueStateRead[] | null> {
+  const env = options.env ?? process.env;
+  const endpoint = env[QUESTION_ENDPOINT_ENV];
+  const terminal = terminalFromEnv(env);
+  if (endpoint === undefined || terminal === undefined) return null;
+  const controller = new AbortController();
+  const sockets = new Set<Socket>();
+  const timer = setTimeout(() => { controller.abort(); for (const socket of sockets) socket.destroy(); }, options.timeoutMs ?? ISSUE_STATES_WAIT_MS);
+  try {
+    const editor = await connectEndpoint(runtimeDirectory(options.runtimeDir), questionProjectId(project), endpoint, controller.signal, sockets);
+    if (!editor || controller.signal.aborted) return null;
+    const { promise, resolve } = Promise.withResolvers<IssueStateRead[] | null>();
+    const { socket } = editor;
+    const stop = lines(socket, (line) => {
+      stop();
+      try {
+        const reply: unknown = JSON.parse(line);
+        const states = typeof reply === "object" && reply !== null && (reply as Record<string, unknown>).type === "issue-states" ? (reply as Record<string, unknown>).states : undefined;
+        resolve(Array.isArray(states) ? states.filter((s): s is IssueStateRead => typeof s === "object" && s !== null && Number.isInteger((s as IssueStateRead).number) && typeof (s as IssueStateRead).status === "string") : null);
+      } catch {
+        resolve(null);
+      }
+    });
+    socket.once("close", () => resolve(null));
+    socket.once("error", () => resolve(null));
+    socket.write(requestLine(editor.record, { type: "issue-states", projectId: questionProjectId(project), root: project.root, terminal }));
+    return await promise;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+    for (const socket of sockets) socket.destroy();
+  }
+}
+
+/** Why the team cannot be read from outside an agent started by Trama. */
+export const TEAM_NEEDS_EDITOR = "trama team show needs the editor: only an agent started by Trama can read the team.";
+/** Why the team cannot be read when the editor stays silent. */
+export const TEAM_NO_ANSWER = "The editor did not answer: open the project in the editor with Trama.";
+/** How long the editor has to answer `team`. */
+const TEAM_WAIT_MS = 10_000;
+
+function teamReply(value: unknown): TeamReply | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const reply = value as Record<string, unknown>;
+  if (reply.type !== "team") return null;
+  if (typeof reply.error === "string" && reply.error !== "") return { ok: false, reason: reply.error };
+  if (!Array.isArray(reply.members)) return null;
+  const members = reply.members.filter((m): m is TeamMember => typeof m === "object" && m !== null && typeof (m as TeamMember).handle === "string" && typeof (m as TeamMember).name === "string");
+  return members.length === reply.members.length ? { ok: true, members } : null;
+}
+
+/**
+ * Asks the editor window that launched this agent for the members of the project's team, through the endpoint and the secret of `trama question new`, with the
+ * `team` request (`tech#team`). Without `TRAMA_QUESTION_ENDPOINT` and a recognised `TRAMA_TERMINAL` it is `TEAM_NEEDS_EDITOR`; without an answer in 10 seconds,
+ * `TEAM_NO_ANSWER`; an editor that answers with an error (Team not available) gives that reason. Never throws.
+ */
+export async function askTeam(project: Project, options: { env?: Record<string, string | undefined>; runtimeDir?: string; timeoutMs?: number } = {}): Promise<TeamReply> {
+  const env = options.env ?? process.env;
+  const endpoint = env[QUESTION_ENDPOINT_ENV];
+  const terminal = terminalFromEnv(env);
+  if (endpoint === undefined || terminal === undefined) return { ok: false, reason: TEAM_NEEDS_EDITOR };
+  const controller = new AbortController();
+  const sockets = new Set<Socket>();
+  const timer = setTimeout(() => { controller.abort(); for (const socket of sockets) socket.destroy(); }, options.timeoutMs ?? TEAM_WAIT_MS);
+  const silent: TeamReply = { ok: false, reason: TEAM_NO_ANSWER };
+  try {
+    const projectId = questionProjectId(project);
+    const editor = await connectEndpoint(runtimeDirectory(options.runtimeDir), projectId, endpoint, controller.signal, sockets);
+    if (!editor || controller.signal.aborted) return silent;
+    const { promise, resolve } = Promise.withResolvers<TeamReply>();
+    const { socket } = editor;
+    const stop = lines(socket, (line) => {
+      stop();
+      try {
+        resolve(teamReply(JSON.parse(line)) ?? silent);
+      } catch {
+        resolve(silent);
+      }
+    });
+    socket.once("close", () => resolve(silent));
+    socket.once("error", () => resolve(silent));
+    socket.write(requestLine(editor.record, { type: "team", projectId, root: project.root, terminal }));
+    return await promise;
+  } catch {
+    return silent;
+  } finally {
+    clearTimeout(timer);
+    for (const socket of sockets) socket.destroy();
+  }
+}
+
 
 
 
@@ -715,6 +837,31 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
           void Promise.resolve().then(() => options.onCheckTask?.(task) ?? { result: "unavailable" as const }).then(
             (reply) => finish({ type: "task-checked", ...reply }),
             () => finish({ type: "task-checked", result: "unavailable" }),
+          );
+          return;
+        }
+        if (phase === "ready" && message.type === "team") {
+          // Only a terminal or conversation this window opened reads the team; any other asker is told it is not an agent started by Trama.
+          const asking = typeof message.terminal === "string" && message.terminal !== "" ? message.terminal : undefined;
+          if (asking === undefined || options.ownsTerminal?.(asking, options.project.root) === false) { finish({ type: "team", error: TEAM_NEEDS_EDITOR }); return; }
+          const onTeam = options.onTeam;
+          if (onTeam === undefined) { finish({ type: "team", error: TEAM_NO_ANSWER }); return; }
+          phase = "waiting";
+          void Promise.resolve().then(onTeam).then(
+            (answer) => finish({ type: "team", ...answer }),
+            () => finish({ type: "team", error: TEAM_NO_ANSWER }),
+          );
+          return;
+        }
+        if (phase === "ready" && message.type === "issue-states") {
+          // As for `team`: only a terminal or conversation this window opened asks; any other asker gets nothing, and its briefing says the state of publication.
+          const asking = typeof message.terminal === "string" && message.terminal !== "" ? message.terminal : undefined;
+          const onIssueStates = options.onIssueStates;
+          if (asking === undefined || options.ownsTerminal?.(asking, options.project.root) === false || onIssueStates === undefined) { finish({ type: "issue-states", states: [] }); return; }
+          phase = "waiting";
+          void Promise.resolve().then(onIssueStates).then(
+            (states) => finish({ type: "issue-states", states }),
+            () => finish({ type: "issue-states", states: [] }),
           );
           return;
         }

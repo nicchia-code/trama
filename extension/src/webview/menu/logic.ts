@@ -1,5 +1,5 @@
 // Pure logic of the side menu: no DOM. The names and order of its entries.
-import { MERGE_REASONS, type MergeMenuState, type MenuViewName } from "../../menu-protocol";
+import { MERGE_REASONS, type MergeMenuState, type MenuState, type MenuViewName } from "../../menu-protocol";
 import { VIEW_LABELS } from "../../view-labels";
 
 /** The text of the entry of each view: the names the editor tab of the panel carries too. */
@@ -8,9 +8,17 @@ export const ENTRY_LABELS: Record<MenuViewName, string> = VIEW_LABELS;
 /** The entries of a Trama project, from the top; Scan System and Settings stand together at the foot, Settings last. */
 export const PROJECT_ENTRIES = ["board", "diagram", "requirements", "specs", "history"] as const satisfies readonly MenuViewName[];
 
-/** The accessible name of an entry: its text, and for Board the number of cards awaiting a decision when there are some. */
-export function entryName(view: MenuViewName, decisions: number): string {
-  return view === "board" && decisions > 0 ? `Board, ${decisions} awaiting a decision` : ENTRY_LABELS[view];
+/** The entries of a project's menu, from the top: `Team` joins them, right after History, only while Team is available (`ui#menu-laterale`). */
+export const projectEntries = (state: Pick<MenuState, "manager">): MenuViewName[] => (state.manager === true ? [...PROJECT_ENTRIES, "team"] : [...PROJECT_ENTRIES]);
+
+/**
+ * The accessible name of an entry: its text, and for Board the number of cards awaiting a decision when there are some; for Team the number of open handoffs when there
+ * are some (`Team, 2 handoffs wait for a decision`, `Team, 1 handoff waits for a decision`).
+ */
+export function entryName(view: MenuViewName, decisions: number, handoffs = 0): string {
+  if (view === "board" && decisions > 0) return `Board, ${decisions} awaiting a decision`;
+  if (view === "team" && handoffs > 0) return `Team, ${handoffs} ${handoffs === 1 ? "handoff waits" : "handoffs wait"} for a decision`;
+  return ENTRY_LABELS[view];
 }
 
 /** The warning line of Merge while some of Trama's files are tracked by git (`ui#solo-merge`). */

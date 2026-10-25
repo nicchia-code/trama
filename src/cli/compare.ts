@@ -28,6 +28,13 @@ export function preflightCompared(p: Project, refs: string[]): { remaining: stri
   });
 }
 
+/** The published issues of a briefing and the instruction for the Drifts on their references (`rules#issue/Published`). */
+function issuesBlock(b: Briefing): string {
+  const lines = b.issues.map((issue) => `- #${issue.number} ${issue.title} (${issue.status}): ${issue.refs.map((ref) => `\`${ref}\``).join(", ")}`);
+  const rule = "A Drift on one of these references names the issue (`#<n>`) in its title or in what happens, and its first Fix option is to fix the code to what the Model says: the issue was published from this text.";
+  return `${lines.join("\n")}\n\n${rule}`;
+}
+
 /** The briefing of a comparison: references, what concerns them, and the analysis. */
 export function briefingView(p: Project, b: Briefing, announcement: string): Result {
   const n = syncShortNumbers(p);
@@ -52,6 +59,7 @@ export function briefingView(p: Project, b: Briefing, announcement: string): Res
     drifts.join("\n") || "_None._",
     "### Resolved or dismissed Drifts on the same references",
     closed.join("\n") || "_None._",
+    ...(b.issues.length === 0 ? [] : ["## Published issues", issuesBlock(b)]),
   ].join("\n\n");
   return {
     md,
@@ -63,6 +71,7 @@ export function briefingView(p: Project, b: Briefing, announcement: string): Res
       openTasks: b.openTasks.map((t) => ({ ...cardLine("task", t), column: t.data.column })),
       openDrifts: b.openDrifts.map((d) => ({ ...cardLine("drift", d), refs: d.data.refs })),
       closedDrifts: b.closedDrifts.map((d) => ({ ...cardLine("drift", d), resolution: d.data.resolution, note: d.data.note })),
+      publishedIssues: b.issues,
     },
   };
 }

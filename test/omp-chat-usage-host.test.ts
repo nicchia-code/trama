@@ -253,7 +253,7 @@ class FakeUsage implements UsageSource {
 }
 
 function surfaceOf(posted: ToChatWebview[]): ChatSurface {
-  return { post: (message) => void posted.push(message), setVisible() {}, reveal() {}, theme: () => "auto", readText: () => undefined, openLink() {} };
+  return { post: (message) => void posted.push(message), setVisible() {}, reveal() {}, theme: () => "auto", githubRepo: () => null, readText: () => undefined, openLink() {} };
 }
 
 function setupView() {

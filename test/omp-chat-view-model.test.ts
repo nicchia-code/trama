@@ -103,16 +103,18 @@ interface Fake {
   visible: boolean[];
   reveals: boolean[];
   links: string[];
+  githubRepo: string | null;
 }
 
 function setup(options: { inUse?: boolean; pending?: string[]; folder?: boolean; sendModes?: SendModeStore } = {}) {
-  const fake: Fake = { posted: [], visible: [], reveals: [], links: [] };
+  const fake: Fake = { posted: [], visible: [], reveals: [], links: [], githubRepo: null };
   const state = { inUse: options.inUse ?? true, pending: options.pending ?? [], folder: options.folder ?? true };
   const surface: ChatSurface = {
     post: (message) => void fake.posted.push(message),
     setVisible: (visible) => void fake.visible.push(visible),
     reveal: (preserveFocus) => void fake.reveals.push(preserveFocus),
     theme: () => "auto",
+    githubRepo: () => fake.githubRepo,
     readText: (path) => (path === "/tmp/attached.md" ? "attached text" : undefined),
     openLink: (url) => void fake.links.push(url),
   };
@@ -283,6 +285,15 @@ describe("the webview", () => {
     expect(fake.posted).toEqual([]);
     model.receive({ type: "ready" });
     expect(fake.posted.map((message) => message.type)).toEqual(["reset", "theme", "sendMode", "conversations", "conversationStart", "conversationUpdate"]);
+  });
+
+  test("the project's GitHub repository goes to the webview with the theme, only when there is one", () => {
+    const { model, fake } = setup();
+    model.receive({ type: "ready" });
+    expect(fake.posted.some((message) => message.type === "githubRepo")).toBe(false);
+    fake.githubRepo = "acme/shop";
+    model.receive({ type: "ready" });
+    expect(fake.posted.filter((message) => message.type === "githubRepo")).toEqual([{ type: "githubRepo", repo: "acme/shop" }]);
   });
 
   test("a second ready replays the history again over a reset, without listening twice", () => {

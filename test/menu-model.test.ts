@@ -3,11 +3,11 @@ import type { MenuSituation, MergeMenuState, ToMenuWebview } from "../extension/
 import type { ViewName } from "../extension/src/protocol";
 import { badgeTooltip, MenuModel, type MenuSurface, menuBadge, parseMenuMessage } from "../extension/src/host/menu/model";
 
-function setup(init: { situation?: MenuSituation; facts?: { decisions: number; tasksSinceScan: number } | undefined; panel?: ViewName; merge?: MergeMenuState } = {}) {
+function setup(init: { situation?: MenuSituation; facts?: { decisions: number; tasksSinceScan: number; handoffs: number } | undefined; panel?: ViewName; merge?: MergeMenuState; manager?: boolean } = {}) {
   const posted: ToMenuWebview[] = [];
   const badges: ({ value: number; tooltip: string } | undefined)[] = [];
   const calls: string[] = [];
-  const env = { situation: init.situation ?? "project", facts: "facts" in init ? init.facts : { decisions: 2, tasksSinceScan: 3 }, panel: init.panel, merge: init.merge };
+  const env = { situation: init.situation ?? "project", facts: "facts" in init ? init.facts : { decisions: 2, tasksSinceScan: 3, handoffs: 0 }, panel: init.panel, merge: init.merge, manager: init.manager ?? false };
   const surface: MenuSurface = {
     post: (message) => void posted.push(message),
     setBadge: (badge) => void badges.push(badge),
@@ -19,6 +19,7 @@ function setup(init: { situation?: MenuSituation; facts?: { decisions: number; t
     scan: () => void calls.push("scan"),
     openFolder: () => void calls.push("openFolder"),
     mergeState: () => env.merge,
+    manager: () => env.manager,
     startMerge: () => void calls.push("merge"),
     openMergeEditor: () => void calls.push("openMergeEditor"),
     reconcileMerge: () => void calls.push("reconcileMerge"),
@@ -70,7 +71,7 @@ describe("the state the menu is sent", () => {
   test("a new change of the numbers or of the panel's view is sent again", () => {
     const { model, posted, env } = setup({ panel: "board" });
     model.refresh();
-    env.facts = { decisions: 0, tasksSinceScan: 0 };
+    env.facts = { decisions: 0, tasksSinceScan: 0, handoffs: 0 };
     env.panel = "specs";
     model.refresh();
     expect(posted[1]).toMatchObject({ decisions: 0, tasksSinceScan: 0, panelView: "specs" });
@@ -98,6 +99,34 @@ describe("Merge of Solo mode in the state", () => {
   });
 });
 
+describe("Team in the state", () => {
+  test("a project with Team available carries manager: true, and one without it carries none", () => {
+    expect(setup({ manager: true }).model.state().manager).toBe(true);
+    expect("manager" in setup().model.state()).toBe(false);
+  });
+
+  test("outside a project there is no Team, whatever the working copy says", () => {
+    expect("manager" in setup({ situation: "notProject", manager: true }).model.state()).toBe(false);
+    expect("manager" in setup({ situation: "noFolder", manager: true }).model.state()).toBe(false);
+    expect("handoffs" in setup({ situation: "notProject", manager: true, facts: { decisions: 2, tasksSinceScan: 3, handoffs: 3 } }).model.state()).toBe(false);
+  });
+
+  test("the open handoffs show as handoffs, only with Team available and more than none, and never in the number of the Board or the badge of the icon", () => {
+    const { model, badges } = setup({ manager: true, facts: { decisions: 2, tasksSinceScan: 3, handoffs: 3 } });
+    expect(model.state()).toMatchObject({ decisions: 2, manager: true, handoffs: 3 });
+    model.refresh();
+    expect(badges.at(-1)).toEqual({ value: 2, tooltip: "2 cards await a decision" });
+    expect("handoffs" in setup({ manager: true, facts: { decisions: 2, tasksSinceScan: 3, handoffs: 0 } }).model.state()).toBe(false);
+    expect("handoffs" in setup({ facts: { decisions: 2, tasksSinceScan: 3, handoffs: 3 } }).model.state()).toBe(false);
+  });
+
+  test("show team is carried out", () => {
+    const { model, calls } = setup({ manager: true });
+    model.receive({ type: "show", view: "team" });
+    expect(calls).toEqual(["show team"]);
+  });
+});
+
 describe("the badge of the icon", () => {
   test("shows the number with N cards awaiting a decision in a project, and a singular for one", () => {
     expect(menuBadge({ situation: "project", decisions: 3 })).toEqual({ value: 3, tooltip: "3 cards await a decision" });
@@ -114,7 +143,7 @@ describe("the badge of the icon", () => {
   test("is set at every refresh, also with the menu hidden", () => {
     const { model, badges, env } = setup();
     model.refresh();
-    env.facts = { decisions: 0, tasksSinceScan: 0 };
+    env.facts = { decisions: 0, tasksSinceScan: 0, handoffs: 0 };
     model.refresh();
     expect(badges).toEqual([{ value: 2, tooltip: "2 cards await a decision" }, undefined]);
   });

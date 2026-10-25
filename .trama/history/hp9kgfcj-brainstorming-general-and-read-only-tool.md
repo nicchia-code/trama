@@ -5,6 +5,24 @@ summary: General is an instruction-led brainstorming chat, and omp Chat tool cal
 tasks:
   - b15fwq9d
   - x9nzooyj
+cleared:
+  x9nzooyj:
+    title: Chiamate non cliccabili
+    proposal: mm4ym4ea
+    tag: Chiamate fisse
+    finished: 2026-10-24T13:58:50.508Z
+    refs:
+      - omp-chat-conversation
+      - requirements/ui#omp-chat-conversation
+      - requirements/tech#omp-chat-conversation
+  b15fwq9d:
+    title: General per il brainstorming
+    proposal: yqjkm55b
+    tag: General brainstorming
+    finished: 2026-10-24T13:47:19.804Z
+    refs:
+      - omp-chat-general
+      - requirements/rules#omp-chat-general
 ---
 # Brainstorming General and read-only tool calls
 

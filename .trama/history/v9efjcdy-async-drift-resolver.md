@@ -54,6 +54,12 @@ cleared:
     refs:
       - panel/Settings
       - requirements/ui#panel/Settings
+  kga0yvre:
+    title: Label prepared question rounds
+    finished: 2026-10-24T20:46:17.929Z
+    refs:
+      - requirements/ui#drift-resolution
+      - drift-resolution/Answering a prepared question
 ---
 # Async Drift Resolver
 

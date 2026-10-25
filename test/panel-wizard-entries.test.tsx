@@ -15,7 +15,8 @@ import type { ViewContext } from "../extension/src/webview/types";
 
 const manifest: ManifestPackage = JSON.parse(readFileSync(join(import.meta.dir, "../extension/package.json"), "utf8"));
 const schema = settingsSchema(manifest);
-const FOLDER = { name: "app", root: "/work/app", hasFiles: true, inGit: false };
+const NO_ORIGIN = { repository: null, reason: "No origin remote" };
+const FOLDER = { name: "app", root: "/work/app", hasFiles: true, inGit: false, origin: NO_ORIGIN };
 
 // Radix and cmdk use browser APIs that happy-dom does not have.
 beforeAll(() => {
@@ -44,7 +45,7 @@ const OMP_OK = { type: "agentCheck", ompPath: "", state: "done", ok: true, missi
 
 function panel(hasProject: boolean) {
   const posted: ToHost[] = [];
-  const store = createShellStore({ view: hasProject ? "board" : "getstarted", hasProject, error: null, diagnostics: [], views: {} as never, questions: null });
+  const store = createShellStore({ view: hasProject ? "board" : "getstarted", hasProject, error: null, diagnostics: [], views: {} as never, questions: null, githubRepo: null, teamAvailable: false });
   const slotOf = (view: ViewName) => (node: ReactNode) => store.set({ views: { ...store.get().views, [view]: node } });
   const navigate = (view: ViewName) => store.set({ view });
   const context: ViewContext = { post: (message) => posted.push(message), navigate, openLink: () => {} };

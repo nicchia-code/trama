@@ -2,19 +2,27 @@
 // without a browser page; `Markdown` and `InlineMarkdown` turn that tree into React elements with the text as
 // children, never `dangerouslySetInnerHTML` or `innerHTML`, so a text from a file cannot inject markup or script.
 //
-// Supported: paragraphs, headings, bold, italic, inline code, fenced code blocks, bulleted and numbered lists (nested
-// too), block quotes, links and pipe tables. Images and raw HTML are not interpreted: they show as written. Anything that
-// cannot be read as Markdown (an unclosed `*`, a stray backtick) also shows as written.
+// Supported: paragraphs, headings, bold, italic, strikethrough, inline code, fenced code blocks (`mermaid` ones are drawn
+// as diagrams by `mermaid-diagram.tsx`), bulleted and numbered lists (nested too), task lists, block quotes, links, bare
+// http and https addresses, GitHub references (`#123`, `@handle`, links only when the host sent the project's repository)
+// and pipe tables. Images and raw HTML are not interpreted: they show as written. Anything that cannot be read as
+// Markdown (an unclosed `*`, a stray backtick) also shows as written.
 
-import type { ReactNode } from "react";
+import { createContext, type ReactNode, useContext } from "react";
 import { safeLink } from "../../../src/core/links";
+import { MermaidDiagram } from "./mermaid-diagram";
 
 export type Inline =
   | { t: "text"; text: string }
   | { t: "code"; text: string }
   | { t: "em"; c: Inline[] }
   | { t: "strong"; c: Inline[] }
+  | { t: "del"; c: Inline[] }
   | { t: "link"; href: string; c: Inline[] }
+  /** `#123`: a link to issue or pull request `n` of the project's repository, when the host sent one; text otherwise. */
+  | { t: "issue"; n: number }
+  /** `@handle`: a link to that GitHub user's page, when the host sent a repository; text otherwise. */
+  | { t: "user"; name: string }
   | { t: "br" };
 
 export type Block =
@@ -22,6 +30,8 @@ export type Block =
   | { t: "h"; level: number; c: Inline[] }
   | { t: "code"; lang: string; text: string }
   | { t: "quote"; c: Block[] }
+  /** An item of a task list starts with this block (`- [ ]`, `- [x]`): the read-only checkbox before its text. Never elsewhere. */
+  | { t: "task"; checked: boolean }
   | { t: "list"; ordered: boolean; start: number; items: Block[][] }
   | { t: "table"; align: Align[]; head: Inline[][]; rows: Inline[][][] };
 
@@ -144,7 +154,7 @@ function emphasis(toks: Tok[]): Inline[] {
     const n = opener.count >= 2 && closer.count >= 2 ? 2 : 1;
     opener.count -= n;
     closer.count -= n;
-    toks.splice(o + 1, c - o - 1, { t: n === 2 ? "strong" : "em", c: plain(toks.slice(o + 1, c)) });
+    toks.splice(o + 1, c - o - 1, { t: closer.ch === "~" ? "del" : n === 2 ? "strong" : "em", c: plain(toks.slice(o + 1, c)) });
     c = o + 2;
     if (opener.count === 0) {
       toks.splice(o, 1);
@@ -240,9 +250,35 @@ export function parseInline(s: string): Inline[] {
       }
     }
 
-    if (ch === "*" || ch === "_") {
+    if ((ch === "h" || ch === "H") && !isWord(s[i - 1])) {
+      const address = bareAddress(s, i);
+      if (address !== null) {
+        flush();
+        toks.push({ t: "link", href: address.href, c: [{ t: "text", text: address.text }] });
+        i += address.text.length;
+        continue;
+      }
+    }
+
+    if (ch === "#" || ch === "@") {
+      const ref = githubReference(s, i);
+      if (ref !== null) {
+        flush();
+        toks.push(ref.node);
+        i = ref.end;
+        continue;
+      }
+    }
+
+    if (ch === "*" || ch === "_" || ch === "~") {
       let run = 0;
       while (s[i + run] === ch) run++;
+      // Strikethrough is a run of exactly two tildes; any other run of tildes is text.
+      if (ch === "~" && run !== 2) {
+        text += ch.repeat(run);
+        i += run;
+        continue;
+      }
       const before = s[i - 1];
       const after = s[i + run];
       flush();
@@ -251,8 +287,8 @@ export function parseInline(s: string): Inline[] {
         ch,
         count: run,
         orig: run,
-        open: !isSpace(after) && (ch === "*" || !isWord(before)),
-        close: !isSpace(before) && (ch === "*" || !isWord(after)),
+        open: !isSpace(after) && (ch !== "_" || !isWord(before)),
+        close: !isSpace(before) && (ch !== "_" || !isWord(after)),
       });
       i += run;
       continue;
@@ -265,13 +301,60 @@ export function parseInline(s: string): Inline[] {
   return emphasis(toks);
 }
 
-/** A link inside a link label is not a link: its text stays. */
+/** A link inside a link label is not a link: its text stays, and so does a GitHub reference's. Texts that end up side by side join. */
 function stripLinks(nodes: Inline[]): Inline[] {
-  return nodes.flatMap((n): Inline[] => {
+  const out: Inline[] = [];
+  for (const n of nodes.flatMap((n): Inline[] => {
     if (n.t === "link") return stripLinks(n.c);
-    if (n.t === "em" || n.t === "strong") return [{ ...n, c: stripLinks(n.c) }];
+    if (n.t === "issue") return [{ t: "text", text: `#${n.n}` }];
+    if (n.t === "user") return [{ t: "text", text: `@${n.name}` }];
+    if (n.t === "em" || n.t === "strong" || n.t === "del") return [{ ...n, c: stripLinks(n.c) }];
     return [n];
-  });
+  })) {
+    const last = out.at(-1);
+    if (n.t === "text" && last?.t === "text") out[out.length - 1] = { t: "text", text: last.text + n.text };
+    else out.push(n);
+  }
+  return out;
+}
+
+const BARE_ADDRESS = /https?:\/\/[^\s<>]+/iy;
+
+/** The bare http or https address at `at`, as the link's text and its normalised target; null when there is none. A trailing
+ *  `.`, `,`, `:`, `;`, `!`, `?` (and the `*`, `_`, `~` of emphasis around it) or a `)` without its `(` stays outside the link. */
+function bareAddress(s: string, at: number): { text: string; href: string } | null {
+  BARE_ADDRESS.lastIndex = at;
+  let text = BARE_ADDRESS.exec(s)?.[0];
+  if (text === undefined) return null;
+  for (;;) {
+    const last = text.at(-1);
+    if (last !== undefined && ".,:;!?*_~".includes(last)) text = text.slice(0, -1);
+    else if (last === ")" && text.split(")").length > text.split("(").length) text = text.slice(0, -1);
+    else break;
+  }
+  const href = safeLink(text);
+  return href === null ? null : { text, href };
+}
+
+/** What can stand before a GitHub reference: the start of a word. */
+const REFERENCE_PREFIX = "([{\"'*_~,;:";
+/** A `#123` or an `@handle` at `at`, with the index after it; null when it is not at the start of a word or not shaped like one. */
+function githubReference(s: string, at: number): { node: Inline; end: number } | null {
+  const before = s[at - 1];
+  if (before !== undefined && !/\s/.test(before) && !REFERENCE_PREFIX.includes(before)) return null;
+  if (s[at] === "#") {
+    const number = /^[1-9]\d{0,8}/.exec(s.slice(at + 1, at + 10))?.[0];
+    if (number === undefined) return null;
+    const end = at + 1 + number.length;
+    return isWord(s[end]) || s[end] === "_" ? null : { node: { t: "issue", n: Number.parseInt(number, 10) }, end };
+  }
+  // A user name: 1 to 39 letters, digits or single hyphens, never starting or ending with a hyphen.
+  const name = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*/.exec(s.slice(at + 1, at + 42))?.[0];
+  if (name === undefined || name.length > 39) return null;
+  const end = at + 1 + name.length;
+  const next = s[end];
+  if (isWord(next) || next === "_" || (next === "-" && s[end + 1] === "-")) return null;
+  return { node: { t: "user", name }, end };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -397,7 +480,11 @@ function parseBlocks(lines: string[]): Block[] {
           else break;
           i++;
         }
-        items.push(parseBlocks(content));
+        // A task list item: `[ ]` or `[x]` and a space before the text; the checkbox leads the item's blocks.
+        const task = /^\[([ xX])\][ \t]+(?=\S)/.exec(content[0] as string);
+        if (task) content[0] = (content[0] as string).slice(task[0].length);
+        const blocks = parseBlocks(content);
+        items.push(task ? [{ t: "task", checked: task[1] !== " " }, ...blocks] : blocks);
         // Blank lines between items do not end the list.
         let j = i;
         while (j < lines.length && BLANK.test(lines[j] as string)) j++;
@@ -445,7 +532,34 @@ function parseBlocks(lines: string[]): Block[] {
 
 export type OpenLink = (url: string) => void;
 
-function inlineNodes(nodes: Inline[], openLink: OpenLink): ReactNode[] {
+/** The GitHub repository of the project (`owner/repo`) the host sent with the picture; null when it has none. With it `#123` and `@handle` are links. */
+export const GithubRepoContext = createContext<string | null>(null);
+
+/** What rendering needs besides the tree: where a followed link goes, and the repository GitHub references point to. */
+interface Env {
+  openLink: OpenLink;
+  repo: string | null;
+}
+
+function anchor(key: number, href: string, env: Env, children: ReactNode) {
+  return (
+    <a
+      key={key}
+      href={href}
+      title={href}
+      rel="noreferrer noopener"
+      // The webview never navigates: the editor host opens the address in the system browser.
+      onClick={(event) => {
+        event.preventDefault();
+        env.openLink(href);
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
+function inlineNodes(nodes: Inline[], env: Env): ReactNode[] {
   return nodes.map((n, key): ReactNode => {
     switch (n.t) {
       case "text":
@@ -455,51 +569,60 @@ function inlineNodes(nodes: Inline[], openLink: OpenLink): ReactNode[] {
       case "code":
         return <code key={key}>{n.text}</code>;
       case "em":
-        return <em key={key}>{inlineNodes(n.c, openLink)}</em>;
+        return <em key={key}>{inlineNodes(n.c, env)}</em>;
       case "strong":
-        return <strong key={key}>{inlineNodes(n.c, openLink)}</strong>;
+        return <strong key={key}>{inlineNodes(n.c, env)}</strong>;
+      case "del":
+        return <del key={key}>{inlineNodes(n.c, env)}</del>;
       case "link":
-        return (
-          <a
-            key={key}
-            href={n.href}
-            title={n.href}
-            rel="noreferrer noopener"
-            // The webview never navigates: the editor host opens the address in the system browser.
-            onClick={(event) => {
-              event.preventDefault();
-              openLink(n.href);
-            }}
-          >
-            {inlineNodes(n.c, openLink)}
-          </a>
-        );
+        return anchor(key, n.href, env, inlineNodes(n.c, env));
+      case "issue":
+        return env.repo === null ? `#${n.n}` : anchor(key, `https://github.com/${env.repo}/issues/${n.n}`, env, `#${n.n}`);
+      case "user":
+        return env.repo === null ? `@${n.name}` : anchor(key, `https://github.com/${n.name}`, env, `@${n.name}`);
     }
   });
 }
 
-function blockNodes(blocks: Block[], openLink: OpenLink): ReactNode[] {
+function blockNodes(blocks: Block[], env: Env): ReactNode[] {
   return blocks.map((b, key): ReactNode => {
     switch (b.t) {
       case "p":
-        return <p key={key}>{inlineNodes(b.c, openLink)}</p>;
+        return <p key={key}>{inlineNodes(b.c, env)}</p>;
       case "h":
         // Never larger than the heading of the place that holds the text: the style only bolds it. It is announced as a heading below the panel's own.
         return (
           <div key={key} className={`md-heading md-h${b.level}`} role="heading" aria-level={Math.min(6, b.level + 3)}>
-            {inlineNodes(b.c, openLink)}
+            {inlineNodes(b.c, env)}
           </div>
         );
       case "code":
-        return (
+        // A `mermaid` block is drawn as a diagram; while it cannot be, or when it fails, the block shows as the code it is.
+        return b.lang === "mermaid" && b.text.trim() !== "" ? (
+          <MermaidDiagram key={key} source={b.text} />
+        ) : (
           <pre key={key}>
             <code>{b.text}</code>
           </pre>
         );
       case "quote":
-        return <blockquote key={key}>{blockNodes(b.c, openLink)}</blockquote>;
+        return <blockquote key={key}>{blockNodes(b.c, env)}</blockquote>;
+      case "task":
+        // Only ever the first block of a list item, which `list` draws.
+        return null;
       case "list": {
-        const items = b.items.map((item, at) => <li key={at}>{blockNodes(item, openLink)}</li>);
+        const items = b.items.map((item, at) => {
+          const lead = item[0];
+          return lead?.t === "task" ? (
+            <li key={at} className="md-task">
+              {/* Read-only: a click changes nothing. */}
+              <input type="checkbox" checked={lead.checked} readOnly onClick={(event) => event.preventDefault()} />
+              <div>{blockNodes(item.slice(1), env)}</div>
+            </li>
+          ) : (
+            <li key={at}>{blockNodes(item, env)}</li>
+          );
+        });
         return b.ordered ? (
           <ol key={key} start={b.start !== 1 ? b.start : undefined}>
             {items}
@@ -517,7 +640,7 @@ function blockNodes(blocks: Block[], openLink: OpenLink): ReactNode[] {
                 <tr>
                   {b.head.map((cell, at) => (
                     <th key={at} style={{ textAlign: b.align[at] }}>
-                      {inlineNodes(cell, openLink)}
+                      {inlineNodes(cell, env)}
                     </th>
                   ))}
                 </tr>
@@ -527,7 +650,7 @@ function blockNodes(blocks: Block[], openLink: OpenLink): ReactNode[] {
                   <tr key={at}>
                     {row.map((cell, col) => (
                       <td key={col} style={{ textAlign: b.align[col] }}>
-                        {inlineNodes(cell, openLink)}
+                        {inlineNodes(cell, env)}
                       </td>
                     ))}
                   </tr>
@@ -542,10 +665,12 @@ function blockNodes(blocks: Block[], openLink: OpenLink): ReactNode[] {
 
 /** Markdown text as a `div.md`. `openLink` receives the address of a followed http or https link. */
 export function Markdown({ source, openLink }: { source: string; openLink: OpenLink }) {
-  return <div className="md">{blockNodes(parseMarkdown(source), openLink)}</div>;
+  const repo = useContext(GithubRepoContext);
+  return <div className="md">{blockNodes(parseMarkdown(source), { openLink, repo })}</div>;
 }
 
 /** Only inline formatting, for one-line list entries: block syntax shows as written. A `span.md-inline`. */
 export function InlineMarkdown({ source, openLink }: { source: string; openLink: OpenLink }) {
-  return <span className="md-inline">{inlineNodes(parseInline(source.replace(/\s*\n\s*/g, " ").trim()), openLink)}</span>;
+  const repo = useContext(GithubRepoContext);
+  return <span className="md-inline">{inlineNodes(parseInline(source.replace(/\s*\n\s*/g, " ").trim()), { openLink, repo })}</span>;
 }

@@ -7,14 +7,14 @@ import { TramaError, UsageError } from "../../../src/core/errors";
 import { clearDoneTasks } from "../../../src/core/clear-done";
 import { deleteTask } from "../../../src/core/delete-task";
 import { findInstructionFiles } from "../../../src/core/instruction-files";
-import { type ApprovalBlock, approvalBlock, approveProposal, getProposal, health, listProposals, type Proposal, rejectProposal, requiredProposals, resolutionHolding, stillBeingWritten, touchedFiles } from "../../../src/core/proposals";
+import { type ApprovalBlock, approvalBlock, approveProposal, getProposal, health, listProposals, type Proposal, rejectProposal, requiredProposals, resolutionHolding, setIssueField, stillBeingWritten, touchedFiles } from "../../../src/core/proposals";
 import { type PreparedQuestion, preparedOutcome, preparedStatus } from "../../../src/core/prepared";
 import { reworkProposalBlocker, reworkProposalDrifts, resolveDriftBlocker, resolveDriftsBlocker, runWindowBlocker, unifiableDrifts, unifyDriftsBlockers, writePreparedResolution } from "../../../src/core/resolution";
 import type { QuestionAnswer } from "../../../src/core/questions";
 import { buildSnapshot } from "../../../src/core/snapshot";
 import { loadModel, modelDir, type Project, REQUIREMENTS_PREFIX, requirementsDir } from "../../../src/core/store";
 import { namerOf } from "../../../src/core/card-names";
-import { runBlocker } from "../../../src/core/design";
+import { RUN_IN_PROGRESS, runBlocker } from "../../../src/core/design";
 import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
 import { attachedDrift, blockedTasks, dismissDrift, getDrift, getTask, getTaskOrNull, listDrifts, listTasks, originDesign, requireNotAttached } from "../../../src/core/work";
 import type { AgentAction, NavigateOptions, RefinementView, RunEstimateView, SetupChoice, ToHost, ToWebview, ViewName, WorkspaceFolderView } from "../protocol";
@@ -22,7 +22,7 @@ import type { MenuViewName } from "../menu-protocol";
 import { VIEW_LABELS } from "../view-labels";
 import { type Announcement, listAnnouncements } from "../../../src/core/announcements";
 import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
-import { configuredAsyncDriftResolver, configuredAutoUpdateStaleProposals, configuredMaxParallelAgents, configuredModels, configuredNtfyTarget, configuredOmpPath, configuredParallelExecution, configuredSkillsDir, configuredSystemCertificates, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, installOmp, launchAgent, type LogoutOutcome, launched, loginOmp, logoutOmp, openAskMore, settings, startHeldJob } from "./agent";
+import { configuredAsyncDriftResolver, configuredAutoUpdateStaleProposals, configuredMaxParallelAgents, configuredModels, configuredNtfyTarget, configuredOmpPath, configuredParallelExecution, configuredSkillsDir, configuredSystemCertificates, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, installOmp, launchAgent, type LogoutOutcome, launched, loginGitHub, loginOmp, logoutOmp, openAskMore, settings, startHeldJob } from "./agent";
 import { bundledUnifyInstructions } from "./bundled";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
 import { driftWork, driftsFinishing, localProjectJobs, onAgentStopped, onDriftResolutionChange, onProposalDelivered, onStoppedFollowing, proposalsFinishing, receiveNotice, releaseFiledWork, type RunAll, tasksFinishing, unifyingDrifts } from "./drift-resolution";
@@ -79,6 +79,14 @@ import { resolveMarkdownFile } from "./paths";
 import type { SoloKind } from "../../../src/core/solo-mode";
 import { checkSkills, fileFolders, findProject, initializeProject, NO_PROJECT_WARNING, updateSkills } from "./project";
 import { inGitRepository, soloModeMessage, writeSoloMode } from "./solo-mode";
+import { managerModeMessage, writeManagerMode } from "./manager-mode";
+import { managerStatus, readOrigin, teamUnavailableReason } from "../../../src/core/manager-mode";
+import { type GitHubTarget, githubTarget, linkChosenProject, TeamGitHub } from "./team/github";
+import { findGh, localToday, unlinkGithubProject } from "../../../src/core/github";
+import { People, type SaveOutcome, type WriteOutcome } from "./team/people";
+import { appliedFields, beginPublishing, findIssue, issuesOfHandoff, listIssues, publishAgainBlock, referenceTexts, splitIssueBlock, stopPublishing } from "../../../src/core/issues";
+import { fieldRulesOf, publishedIssues } from "../../../src/core/team-views";
+import { type IssueActions, type IssueOnGitHub, issueActions, issueJobs, issueSignals, type IssueSignals, scanBlock, SCANNING_REASON, scanningTitle, UPDATING_REASON, updateBlock, updatingTitle } from "../../../src/core/timeline";
 import { folderChildren, folderInside, gitIgnored, type RawEntry } from "./folder-tree";
 import { askMoreTarget } from "./question-state";
 import type { QuestionSession } from "./question-session";
@@ -146,6 +154,12 @@ async function askNtfyToken(): Promise<string | undefined> {
 
 const notBlank = (message: string) => (value: string) => (value.trim() === "" ? message : undefined);
 
+/** The GitHub repository whose team the Team view shows, or null while Team is not available (Manager mode off, or origin not on GitHub). */
+function teamRepository(project: Project): string | null {
+  const status = managerStatus(project);
+  return status.available ? status.repository : null;
+}
+
 /** Whether the Model has no Feature and no Actor: the Drifts, open or not, do not count. */
 function modelIsEmpty(project: Project): boolean {
   const model = loadModel(project);
@@ -201,7 +215,16 @@ export class Controller implements vscode.Disposable {
     private readonly designRequests?: DesignRequests,
     /** The workspace state, where the models chosen for Proposals are kept. */
     private readonly modelMemory?: ModelMemory,
-  ) {}
+    /** The Manager's people, kept in the editor's global state; without it the Team view has nothing to read or write. */
+    private readonly people?: People,
+  ) {
+    this.github = modelMemory === undefined ? undefined : new TeamGitHub(modelMemory);
+  }
+
+  /** The Team view's reads of GitHub (`rules#github-project`); without the workspace state there is nowhere to keep them and the view has nothing to read. */
+  private readonly github: TeamGitHub | undefined;
+  /** The channel `Show details` opens: everything `gh` said about the last failed read. Created at the first use. */
+  private githubOutput: vscode.OutputChannel | undefined;
 
   /**
    * Opens the panel in front on the Settings view, or brings it forward and puts it there, also in a window without folders (the panel then
@@ -258,7 +281,7 @@ export class Controller implements vscode.Disposable {
       } catch {
         // A folder that cannot be read counts as empty.
       }
-      return { name: folder.name, root, hasFiles, inGit: inGitRepository(root) };
+      return { name: folder.name, root, hasFiles, inGit: inGitRepository(root), origin: readOrigin(root) };
     });
   }
 
@@ -300,6 +323,11 @@ export class Controller implements vscode.Disposable {
    */
   async show(view: MenuViewName): Promise<void> {
     if (view !== "settings" && view !== "getstarted" && findProject() === undefined) return this.open();
+    // Team exists only in a project with Manager mode on and origin on GitHub; otherwise the command is the ordinary opening.
+    if (view === "team") {
+      const project = findProject();
+      if (project === undefined || teamRepository(project) === null) return this.open();
+    }
     if (view !== "settings" && !vscode.workspace.workspaceFolders?.length) {
       void vscode.window.showInformationMessage("Trama: open a folder to use Trama.");
       return;
@@ -388,11 +416,14 @@ export class Controller implements vscode.Disposable {
           finish("The folder to initialize is not in the workspace any more.");
           return;
         }
-        project = await initializeProject(root, message.solo);
-        if (project === undefined) {
+        const initialized = await initializeProject(root, { ...(message.solo === undefined ? {} : { solo: message.solo }), ...(message.manager === true ? { manager: true } : {}) });
+        if (initialized === undefined) {
           finish(null);
           return;
         }
+        project = initialized.project;
+        // Manager mode is written after the project's files; when that fails the project stays, Manager mode stays off and the reason is shown.
+        if (initialized.managerError !== null) void vscode.window.showErrorMessage(`Trama: could not save Manager Mode: ${initialized.managerError.replace(/\.$/, "")}.`);
         this.refresh();
         this.postSolo();
       } else {
@@ -411,6 +442,16 @@ export class Controller implements vscode.Disposable {
             return;
           }
           this.postSolo();
+        }
+        if (project !== undefined && message.manager !== undefined) {
+          try {
+            writeManagerMode(project, message.manager, true);
+          } catch (error) {
+            this.postManager();
+            finish(`Could not save Manager Mode: ${describeError(error).replace(/\.$/, "")}.`);
+            return;
+          }
+          this.postManager();
         }
       }
     } catch (err) {
@@ -834,6 +875,221 @@ export class Controller implements vscode.Disposable {
     this.postSolo();
   }
 
+  /** Sends the `Manager Mode` row the project's Manager mode and origin as they are now; nothing without a project. */
+  private postManager(): void {
+    const project = findProject();
+    if (project === undefined) return;
+    try {
+      const message = managerModeMessage(project);
+      this.post(message);
+      // Team went away (Manager mode off, or origin no longer on GitHub) while the panel showed it: the panel passes to the Board.
+      if (!message.available && this.panelView === "team") this.post({ type: "navigate", view: "board" });
+    } catch (err) {
+      this.post({ type: "error", message: describeError(err) });
+    }
+  }
+
+  /** Sends the Team view the people as the editor knows them now; nothing unless Team is available. */
+  private postTeam(): void {
+    const project = findProject();
+    if (this.people === undefined || project === undefined) return;
+    const repository = teamRepository(project);
+    if (repository === null) return;
+    this.post(this.people.view(repository));
+  }
+
+  /** Sends the Team view what Trama knows of GitHub now, with where each published issue of the project is; nothing unless Team is available. */
+  private postGitHub(): void {
+    const project = findProject();
+    const target = this.teamTarget();
+    if (project === undefined || target === null || this.github === undefined) return;
+    this.post(this.github.message(target.repository, target.linked, publishedIssues(project), this.teamExtras(project, target)));
+  }
+
+  /**
+   * The signals of the open published issues, from the last read of GitHub, the cards and the Model as they are now (`rules#issue/Published`), and why Comment update and Scan
+   * are not available for each published issue: its own job runs (an announcement of the job is live) or a Run of this window is in progress. Nothing when the cards cannot be read.
+   */
+  private teamExtras(project: Project, target: GitHubTarget): { signals: IssueSignals; actions: Record<number, IssueActions> } {
+    if (this.github === undefined) return { signals: {}, actions: {} };
+    try {
+      const cards = listIssues(project);
+      const published = publishedIssues(project);
+      const roster = this.people?.members(target.repository);
+      const jobs = issueJobs(listAnnouncements(project));
+      const running = ownWindowRuns(project.root);
+      const signals = issueSignals({
+        issues: cards.map((card) => ({ id: card.id, title: card.title, number: card.data.state === "published" ? card.data.number : null, refs: card.data.refs, texts: card.data.texts, dependsOn: card.data.dependsOn, sprint: card.data.sprint, assignee: card.data.assignee })),
+        github: this.github.issues(published, target.linked),
+        loads: this.github.loads(published, target.linked),
+        members: roster !== undefined && "members" in roster ? roster.members : [],
+        iterations: this.github.iterations(target.linked),
+        current: referenceTexts(project, [...new Set(cards.flatMap((card) => card.data.refs))]),
+        today: localToday(),
+      });
+      const actions: Record<number, IssueActions> = {};
+      for (const issue of published) actions[issue.number] = issueActions(issue.number, jobs, running);
+      return { signals, actions };
+    } catch {
+      return { signals: {}, actions: {} };
+    }
+  }
+
+  /**
+   * `developer.ASK_ISSUE_UPDATE` and `developer.SCAN_ISSUE`: the Manager pressed Comment update or Scan on the issue `id`. The host checks again what the view showed (Team, the
+   * issue published, open and stale, or closed, and no job of its own or Run in progress) and asks the agent; when it cannot, or the instruction does not leave, nothing
+   * changes and the Team view hears why, as a notice.
+   */
+  private async issueAction(project: Project, id: string, kind: "update" | "scan"): Promise<void> {
+    const target = this.teamTarget();
+    let name = id;
+    const fail = (reason: string) => this.post({ type: "notice", text: `Trama could not ${kind === "update" ? "ask the agent to comment on" : "scan"} issue ${name}: ${reason.replace(/\.$/, "")}.` });
+    try {
+      const card = findIssue(project, id);
+      if (card.kind !== "card") throw new TramaError("the issue is not published");
+      const number = card.issue.data.state === "published" ? card.issue.data.number : null;
+      if (number !== null) name = `#${number}`;
+      const extras = target === null || this.github === undefined ? null : this.teamExtras(project, target);
+      const status = number === null ? null : (this.github?.issues(publishedIssues(project), target?.linked ?? null).find((issue) => issue.number === number)?.status ?? "Open");
+      const facts = { team: teamUnavailableReason(project), status, stale: number !== null && (extras?.signals[number] ?? []).some((signal) => signal.kind === "stale"), actions: (number === null ? undefined : extras?.actions[number]) ?? { update: null, scan: null } };
+      const blocked = kind === "update" ? updateBlock(facts) : scanBlock(facts);
+      if (blocked !== null) return fail(blocked);
+      if (number === null) return;
+      await this.launchAction(project, kind === "update" ? { kind: "update-issue", issue: card.issue.id, number } : { kind: "scan-issue", issue: card.issue.id, number, refs: card.issue.data.refs });
+    } catch (err) {
+      fail(describeError(err));
+    }
+    this.refresh();
+  }
+
+  /**
+   * What the editor answers to the agent that asks where the published issues are (`tech#issue/Published`, the briefing of a comparison): the states of the last read of
+   * GitHub, or none when nothing was read, no Project is linked or Team is not available; the agent then says the state of publication.
+   */
+  issueStates(project: Project): IssueOnGitHub[] {
+    const target = teamRepository(project) === null ? null : githubTarget(project);
+    return target === null || this.github === undefined ? [] : this.github.issues(publishedIssues(project), target.linked);
+  }
+
+  /** The repository and linked Project of the project, only while Team is available. */
+  private teamTarget(): GitHubTarget | null {
+    const project = findProject();
+    if (project === undefined || teamRepository(project) === null) return null;
+    return githubTarget(project);
+  }
+
+  /**
+   * `developer.REFRESH_TEAM` and the opening of the Team view: reads GitHub once at a time (a request for the same thing joins the read that runs) and tells the view when the
+   * read starts and when it ends. The view keeps what it shows meanwhile.
+   */
+  private async readGitHub(): Promise<void> {
+    const target = this.teamTarget();
+    if (target === null || this.github === undefined) return;
+    const done = this.github.read(target.repository, target.linked);
+    this.postGitHub();
+    await done;
+    this.postGitHub();
+  }
+
+  /** The Team view became visible: the people and what is known of GitHub now, then a read. */
+  private openedTeam(): void {
+    this.postTeam();
+    this.postGitHub();
+    void this.readGitHub();
+  }
+
+  /** `developer.LINK_GITHUB_PROJECT`: a failed write changes nothing and the Manager hears why as a notice. */
+  private async linkGitHubProject(project: Project, owner: string, number: number): Promise<void> {
+    if (this.github === undefined || teamRepository(project) === null) return;
+    try {
+      linkChosenProject(project, this.github, owner, number);
+    } catch (err) {
+      this.post({ type: "notice", text: `Trama could not link the GitHub Project: ${describeError(err).replace(/\.$/, "")}.` });
+      return;
+    }
+    await this.github.forgetProject();
+    this.refresh();
+    await this.readGitHub();
+  }
+
+  /** `developer.UNLINK_GITHUB_PROJECT`: deletes only the local record; nothing changes on GitHub. */
+  private async unlinkGitHubProject(project: Project): Promise<void> {
+    if (this.github === undefined || teamRepository(project) === null) return;
+    try {
+      unlinkGithubProject(project);
+    } catch (err) {
+      this.post({ type: "notice", text: `Trama could not unlink the GitHub Project: ${describeError(err).replace(/\.$/, "")}.` });
+      return;
+    }
+    await this.github.forgetProject();
+    this.refresh();
+    await this.readGitHub();
+  }
+
+  /** `developer.LOG_IN_GITHUB`: a visible terminal logs `gh` in, or gives it access to Projects when it is logged in without it; when its command ends the view reads again. */
+  private logInGitHub(): void {
+    if (this.github === undefined || this.teamTarget() === null) return;
+    const program = findGh();
+    if (program === null) {
+      this.post({ type: "notice", text: "Trama could not find the GitHub CLI: install it from https://cli.github.com, then select Refresh." });
+      return;
+    }
+    loginGitHub(program, this.github.problem() === "no-project-access", () => void this.readGitHub());
+  }
+
+  /** `Show details`: the output channel of Trama shows everything `gh` said about the last failure. */
+  private showGitHubDetails(): void {
+    this.githubOutput ??= vscode.window.createOutputChannel("Trama");
+    this.githubOutput.clear();
+    this.githubOutput.appendLine(this.github?.details() ?? "");
+    this.githubOutput.show(true);
+  }
+
+  /**
+   * A write of the People tab: only while Team is available. A person refused by `rules#person` goes back to the dialog as `personRejected`, nothing written; every other
+   * outcome sends the Team view the people as they are now (with the sentence of a failed write) and the Manager Mode row the state it has now.
+   */
+  private async changeTeam(project: Project, change: (people: People, repository: string) => Promise<SaveOutcome | WriteOutcome>): Promise<void> {
+    const repository = teamRepository(project);
+    if (this.people === undefined || repository === null) {
+      this.postManager();
+      return;
+    }
+    const outcome = await change(this.people, repository);
+    if (!outcome.ok && "errors" in outcome) {
+      this.post({ type: "personRejected", errors: outcome.errors });
+      return;
+    }
+    this.post(this.people.view(repository, "error" in outcome ? outcome.error : null));
+    this.postManager();
+  }
+
+  /** `Delete person`: a modal dialog of the editor asks first; cancelling changes nothing and leaves the person's dialog open. */
+  private async deletePersonAfterConfirm(project: Project, id: string): Promise<void> {
+    const person = this.people?.find(id);
+    if (person === undefined) {
+      await this.changeTeam(project, async (people) => people.delete(id));
+      return;
+    }
+    const choice = await vscode.window.showWarningMessage(
+      `Delete ${person.name}?`,
+      { modal: true, detail: "They leave every project's team. Issues already assigned to them on GitHub stay assigned." },
+      "Delete",
+    );
+    if (choice !== "Delete") return;
+    await this.changeTeam(project, async (people) => people.delete(id));
+  }
+
+  /** The `Manager Mode` row changed: writes it into the project; a failed write is an editor error with the reason. The row is told the real value either way. */
+  private setManager(project: Project, on: boolean): void {
+    try {
+      writeManagerMode(project, on);
+    } catch (err) {
+      void vscode.window.showErrorMessage(`Trama: could not save Manager Mode: ${describeError(err).replace(/\.$/, "")}.`);
+    }
+    this.postManager();
+  }
+
   /** Carries out a Settings plan. A refused plan saves nothing. The Settings tab is sent again either way, so its controls show the values that really hold. */
   private async applyPlan(plan: SettingPlan): Promise<void> {
     if (!plan.ok) {
@@ -855,6 +1111,7 @@ export class Controller implements vscode.Disposable {
     this.disposed = true;
     this.panel?.dispose();
     this.shownViewListeners.clear();
+    this.githubOutput?.dispose();
     clearTimeout(this.timer);
     this.stopEstimateTimer();
   }
@@ -881,6 +1138,7 @@ export class Controller implements vscode.Disposable {
       cspSource: panel.webview.cspSource,
       nonce: randomBytes(16).toString("base64"),
       scriptUri: panel.webview.asWebviewUri(vscode.Uri.joinPath(dist, "webview.js")).toString(),
+      mermaidUri: panel.webview.asWebviewUri(vscode.Uri.joinPath(dist, "mermaid.js")).toString(),
     });
     panel.webview.onDidReceiveMessage((raw: unknown) => void this.handle(raw));
 
@@ -968,6 +1226,8 @@ export class Controller implements vscode.Disposable {
       this.post({ type: "workspaceFolders", folders: this.workspaceFolderViews() });
       return;
     }
+    // Team's availability depends on origin, which can change under an open panel: it is read again with every picture, and told even when the files of the picture cannot be read.
+    this.postManager();
     // The Proposals that waited for a Run of this window are settled once that Run has ended.
     if (this.refinement.waiting.length > 0 && !ownWindowRuns(project.root)) this.releaseWaiting(project);
     try {
@@ -989,7 +1249,10 @@ export class Controller implements vscode.Disposable {
       this.lastRunEstimate = JSON.stringify(runEstimate);
       if (runEstimate === null) this.stopEstimateTimer();
       else this.startEstimateTimer(project);
-      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker({ resolving: work.resolving, running: ownWindowRuns(project.root) }), running: ownWindowRuns(project.root), drifts, resolving }, unify: { blockers: unifyDriftsBlockers(project, work, driftsFinishing(project.root)), unifying: unifyingDrifts(project.root) }, models, refinement: this.refinementPicture(project), runEstimate });
+      const repo = readOrigin(project.root).repository;
+      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker({ resolving: work.resolving, running: ownWindowRuns(project.root) }), running: ownWindowRuns(project.root), drifts, resolving }, unify: { blockers: unifyDriftsBlockers(project, work, driftsFinishing(project.root)), unifying: unifyingDrifts(project.root) }, models, refinement: this.refinementPicture(project), runEstimate, ...(repo === null ? {} : { githubRepo: repo }) });
+      // The states of the published issues come from the last read of GitHub and from the cards: a new picture of the cards moves them without a new read.
+      if (this.panelView === "team") this.postGitHub();
     } catch (err) {
       this.post({ type: "error", message: describeError(err) });
     }
@@ -1081,6 +1344,7 @@ export class Controller implements vscode.Disposable {
       this.postCursorApiKey();
       this.postNtfyToken();
       this.postSolo();
+      this.postManager();
       this.postSystemCertificates();
       await this.refreshOmp();
       return;
@@ -1149,12 +1413,15 @@ export class Controller implements vscode.Disposable {
     }
     if (message.type === "viewChanged") {
       this.setPanelView(message.view);
+      if (message.view === "team") this.openedTeam();
       return;
     }
     if (message.type === "ready") {
       this.refresh();
       this.postSettings();
       this.postSolo();
+      this.postTeam();
+      this.postGitHub();
       this.postCursorApiKey();
       this.postNtfyToken();
       this.postSystemCertificates();
@@ -1180,8 +1447,29 @@ export class Controller implements vscode.Disposable {
       if (soloProject !== undefined) this.setSolo(soloProject, message.solo);
       return;
     }
+    if (message.type === "setManagerMode") {
+      const managerProject = findProject();
+      if (managerProject !== undefined) this.setManager(managerProject, message.on);
+      return;
+    }
     if (message.type === "writeDesignRequest") {
       await this.designRequests?.write();
+      return;
+    }
+    if (message.type === "writeHandoffRequest") {
+      await this.designRequests?.writeHandoff();
+      return;
+    }
+    if (message.type === "refreshTeam") {
+      await this.readGitHub();
+      return;
+    }
+    if (message.type === "logInGitHub") {
+      this.logInGitHub();
+      return;
+    }
+    if (message.type === "showGitHubDetails") {
+      this.showGitHubDetails();
       return;
     }
     const project = findProject();
@@ -1226,13 +1514,19 @@ export class Controller implements vscode.Disposable {
       }
       case "approveProposal":
         requireNotAttached(project, message.id);
+        if (this.refuseHandoffOutsideTeam(project, message.id, "Approve")) return;
         if (this.refuseWhileFinishing(project, message.id, "Approve") || this.refuseWhileRunning(project)) return;
         // With the setting on, a refinable Proposal is not approved: it joins the refinement queue, and the agent refines it.
         if (configuredAutoUpdateStaleProposals() && this.refinableNow(project, message.id)) {
           this.queueRefinement(project, message.id);
           return;
         }
-        this.approving(() => approveProposal(project, message.id, [configuredSkillsDir()]));
+        {
+          const handoff = getProposal(project, message.id).data.kind === "handoff";
+          this.approving(() => approveProposal(project, message.id, [configuredSkillsDir()]));
+          // Approving a handoff creates its issues in the same step; then the agent is asked to publish them (`rules#issue`).
+          if (handoff) await this.publishAfterApproval(project, message.id);
+        }
         return;
       case "setProposalModel": {
         if (!this.modelMemory) throw new TramaError("Trama cannot keep the model of a Proposal: the workspace state is not available.");
@@ -1242,6 +1536,7 @@ export class Controller implements vscode.Disposable {
       }
       case "rejectProposal": {
         requireNotAttached(project, message.id);
+        if (this.refuseHandoffOutsideTeam(project, message.id, "Reject")) return;
         if (this.refuseWhileFinishing(project, message.id, "Reject")) return;
         rejectProposal(project, message.id);
         this.refinement = withdraw(this.refinement, message.id);
@@ -1251,6 +1546,25 @@ export class Controller implements vscode.Disposable {
       }
       case "clearDone":
         this.clearDone(project, message.tasks);
+        return;
+      case "savePerson":
+        await this.changeTeam(project, (people, repository) => people.save(repository, message.person));
+        return;
+      case "addToTeam":
+      case "undoRemoveFromTeam":
+        await this.changeTeam(project, (people, repository) => people.addToTeam(repository, message.id));
+        return;
+      case "removeFromTeam":
+        await this.changeTeam(project, (people, repository) => people.removeFromTeam(repository, message.id));
+        return;
+      case "deletePerson":
+        await this.deletePersonAfterConfirm(project, message.id);
+        return;
+      case "linkGitHubProject":
+        await this.linkGitHubProject(project, message.owner, message.number);
+        return;
+      case "unlinkGitHubProject":
+        await this.unlinkGitHubProject(project);
         return;
       case "deleteTask":
         await this.deleteTaskAfterConfirm(project, message.task);
@@ -1262,7 +1576,23 @@ export class Controller implements vscode.Disposable {
         await this.reworkDriftWithFeedback(project, message.drift);
         return;
       case "reworkProposal":
+        if (this.refuseHandoffOutsideTeam(project, message.proposal, "Rework")) return;
         await this.reworkProposalWithFeedback(project, message.proposal);
+        return;
+      case "publishAgain":
+        await this.publishAgain(project, message.handoff);
+        return;
+      case "setIssueField":
+        this.changeIssueField(project, message);
+        return;
+      case "splitIssue":
+        await this.splitIssue(project, message.handoff, message.issue);
+        return;
+      case "askIssueUpdate":
+        await this.issueAction(project, message.issue, "update");
+        return;
+      case "scanIssue":
+        await this.issueAction(project, message.issue, "scan");
         return;
       case "cancelRefinement":
         // Only a Proposal waiting in the queue is taken out; one being refined is not cancellable. The Proposals that waited for it leave the queue too.
@@ -1794,12 +2124,108 @@ export class Controller implements vscode.Disposable {
       await this.launchAction(project, { kind: "rework-resolution", proposal: id, drifts });
       return;
     }
-    const skill = proposal.data.kind === "import" ? "import" : proposal.data.kind === "setup" && modelIsEmpty(project) ? "setup" : "design";
+    const skill = proposal.data.kind === "handoff" ? "handoff" : proposal.data.kind === "import" ? "import" : proposal.data.kind === "setup" && modelIsEmpty(project) ? "setup" : "design";
     await this.launchAction(project, { kind: "rework", proposal: id, skill });
   }
 
+  /**
+   * After the approval of a handoff: asks the agent to publish its issues. When the instruction does not leave, the approval stands, the issues are Not published and the
+   * Issues tab offers Publish again; the Manager hears why as a notice.
+   */
+  private async publishAfterApproval(project: Project, handoff: string): Promise<void> {
+    const failure = await this.publishIssues(project, getProposal(project, handoff).id);
+    if (failure !== null) this.post({ type: "notice", text: `Trama approved the handoff but could not ask the agent to publish its issues: ${failure}. Publish them again from the Issues tab.` });
+    this.refresh();
+  }
+
+  /**
+   * `developer.SPLIT_ISSUE`: asks the agent to split the issue `issue` of the open handoff `handoff` into issues that each fit a sprint, on the same handoff. Refused with the first
+   * reason of `splitIssueBlock`; when the instruction does not leave nothing changes and the Team view hears why, as a notice.
+   */
+  private async splitIssue(project: Project, handoff: string, issue: string): Promise<void> {
+    const proposal = getProposal(project, handoff);
+    const file = proposal.issues.find((i) => i.id === issue);
+    if (proposal.data.kind !== "handoff" || file === undefined) throw new TramaError(`Proposal ${cardName(project, "proposal", proposal.id)} has no issue ${issue}`);
+    const blocked = splitIssueBlock({
+      status: proposal.data.status,
+      estimate: appliedFields(file.data).estimate,
+      finishing: proposalsFinishing(project.root).includes(proposal.id),
+      writing: writtenNow(proposal.id, this.refinement.running, listAnnouncements(project)),
+      running: ownWindowRuns(project.root),
+    });
+    if (blocked !== null) {
+      this.post({ type: "notice", text: `Trama could not split the issue: ${blocked}.` });
+      return;
+    }
+    try {
+      await this.launchAction(project, { kind: "split-issue", handoff: proposal.id, issue: file.id });
+    } catch (err) {
+      this.post({ type: "notice", text: `Trama could not split the issue: ${describeError(err).replace(/\.$/, "")}.` });
+    }
+  }
+
+  /**
+   * Approving, rejecting and reworking a handoff are the Team view's: from any other view the host refuses with a notice (`ui#proposal/Open`). The decision itself is the
+   * one of every Proposal.
+   */
+  private refuseHandoffOutsideTeam(project: Project, id: string, action: string): boolean {
+    if (getProposal(project, id).data.kind !== "handoff" || this.panelView === "team") return false;
+    this.post({ type: "notice", text: `Trama could not ${action.toLowerCase()} the handoff: decide it in the Team view.` });
+    return true;
+  }
+
+  /**
+   * `developer.CHANGE_ISSUE_FIELD`: records the Manager's value for a field of an issue of an open handoff, checked against the team and the linked Project as the editor
+   * read them. A refused value changes nothing and reaches the preview as `issueFieldRejected`; a fresh picture follows either way.
+   */
+  private changeIssueField(project: Project, message: Extract<ToHost, { type: "setIssueField" }>): void {
+    const target = this.teamTarget();
+    try {
+      if (target === null || this.github === undefined) throw new TramaError("Team is not available.");
+      const roster = this.people?.members(target.repository);
+      const members = roster !== undefined && "members" in roster ? roster.members.map((member) => member.handle) : null;
+      const rules = fieldRulesOf(members, this.github.message(target.repository, target.linked).project, localToday());
+      setIssueField(project, message.handoff, message.issue, message.key, message.value, rules);
+    } catch (err) {
+      this.post({ type: "issueFieldRejected", handoff: message.handoff, issue: message.issue, key: message.key, message: describeError(err) });
+    }
+    this.refresh();
+  }
+
+  /**
+   * `developer.PUBLISH_AGAIN`: asks the agent to publish the handoff's issues that are not published, only while Team is available and a GitHub Project is linked.
+   * When the instruction does not leave nothing changes and the Issues tab hears why, as a notice.
+   */
+  private async publishAgain(project: Project, handoff: string): Promise<void> {
+    const id = getProposal(project, handoff).id;
+    const blocked = publishAgainBlock(project, id);
+    if (blocked !== null) {
+      this.post({ type: "notice", text: `Trama could not publish again: ${blocked}.` });
+      return;
+    }
+    const failure = await this.publishIssues(project, id);
+    if (failure !== null) this.post({ type: "notice", text: `Trama could not publish again: ${failure}.` });
+    this.refresh();
+  }
+
+  /**
+   * Asks the agent to publish the issues of the approved handoff `handoff` that are not published (`rules#issue`): after the approval and with Publish again.
+   * Returns null when the instruction left, otherwise why it did not. An instruction that does not leave changes no issue; one that fails after its terminal was
+   * known sends its issues, still publishing, to Not published.
+   */
+  async publishIssues(project: Project, handoff: string): Promise<string | null> {
+    try {
+      await this.launchAction(project, { kind: "publish-issues", handoff });
+      return null;
+    } catch (err) {
+      const waiting = issuesOfHandoff(project, handoff).filter((issue) => issue.data.state === "publishing");
+      stopPublishing(project, waiting.map((issue) => issue.id), "The agent did not start.");
+      return describeError(err).replace(/\.$/, "");
+    }
+  }
+
   /** `feedback` is set only by Rework: the Drift's prepared question is never used and the instruction carries the feedback. */
-  private async launchAction(project: Project, action: AgentAction | Extract<ResolvedAction, { kind: "rework" | "rework-resolution" | "refine" }>, answered?: { selected: string[]; text?: string }, feedback?: string): Promise<void> {
+  private async launchAction(project: Project, action: AgentAction | Extract<ResolvedAction, { kind: "rework" | "rework-resolution" | "refine" | "publish-issues" | "split-issue" | "update-issue" | "scan-issue" }>, answered?: { selected: string[]; text?: string }, feedback?: string): Promise<void> {
     // Resolve Drifts and Runs are checked from current state at the request and at each delivery checkpoint.
     const refusal = (): string | null => {
       if (action.kind === "resolve-drifts" && driftsFinishing(project.root).includes(action.drift)) return "Resolve this Drift is unavailable: the agent is still finishing.";
@@ -1822,6 +2248,11 @@ export class Controller implements vscode.Disposable {
         return reasons.length === 0 ? null : `Unify Drifts is unavailable: ${reasons.join(". ")}.`;
       }
       if (action.kind === "refine") return this.refinementRefusal(project, action.proposal);
+      if (action.kind === "update-issue" || action.kind === "scan-issue") {
+        const jobs = issueJobs(listAnnouncements(project));
+        if ((action.kind === "update-issue" ? jobs.updating : jobs.scanning).includes(action.number)) return action.kind === "update-issue" ? UPDATING_REASON : SCANNING_REASON;
+        return ownWindowRuns(project.root) ? RUN_IN_PROGRESS : null;
+      }
       const isRun = action.kind === "implement" || action.kind === "implement-all";
       const runBlock = isRun ? runWindowBlocker({ resolving: driftWork(project.root).resolving, running: ownWindowRuns(project.root) }) : null;
       if (runBlock !== null) return `A run cannot start: ${runBlock}.`;
@@ -1835,7 +2266,7 @@ export class Controller implements vscode.Disposable {
       let refused: string | null = null;
       const canSend = () => (refused = refusal() ?? checkSend()) === null;
       const rememberScan = resolved.kind === "scan" || resolved.kind === "mergeScan" ? (startedAt: number) => rememberDeliveredScan(project, startedAt) : undefined;
-      const result = await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, canSend, resolved.kind === "implement" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" || resolved.kind === "rework-resolution" ? "resolve" : resolved.kind === "unify-drifts" ? "unify" : resolved.kind === "scan" || resolved.kind === "mergeScan" ? "scan" : resolved.kind === "refine" ? "refine" : undefined, rememberScan, { filesDrifts: mayFileDrifts(resolved), severalTasks: resolved.kind === "implement-all", model, ...(resolved.kind === "implement" ? { task: resolved.task } : {}), ...(resolved.kind === "reconcileMerge" ? { subAgents: false } : {}), ...extra });
+      const result = await launchAgent(project.root, instruction, terminalName(resolved, (kind, id) => cardName(project, kind, id)), announceProposal, canSend, resolved.kind === "implement" || resolved.kind === "implement-all" ? "run" : resolved.kind === "resolve-drifts" || resolved.kind === "rework-resolution" ? "resolve" : resolved.kind === "unify-drifts" ? "unify" : resolved.kind === "scan" || resolved.kind === "mergeScan" || resolved.kind === "scan-issue" ? "scan" : resolved.kind === "refine" ? "refine" : undefined, rememberScan, { filesDrifts: mayFileDrifts(resolved), severalTasks: resolved.kind === "implement-all", model, ...(resolved.kind === "implement" ? { task: resolved.task } : {}), ...(resolved.kind === "reconcileMerge" ? { subAgents: false } : {}), ...extra });
       if (refused !== null) throw new TramaError(refused);
       return result;
     };
@@ -1870,9 +2301,12 @@ export class Controller implements vscode.Disposable {
         await send({ kind: "unify-drifts", drifts: [] }, { kind: "unify", drifts: () => gathered }, () => buildPrompt({ kind: "unify-drifts", drifts: gather() }), undefined, undefined, { role: "analysis", attachment: { file, text }, drifts: () => gathered });
         return;
       }
-      case "rework":
-        await send(action, getProposal(project, action.proposal).title);
+      case "rework": {
+        const { title } = getProposal(project, action.proposal);
+        // The ghost of a handoff has no column on the Board: it is a work, shown in the status bar.
+        await send(action, action.skill === "handoff" ? { kind: "work", title } : title);
         return;
+      }
       case "refine": {
         const { proposal, job, seats } = action;
         const result = await send(action, { kind: "refine", proposal, title: getProposal(project, proposal).title }, undefined, undefined, undefined, { role: "analysis", id: job, limit: seats, onEnd: () => this.endRefinement(project, proposal, job) });
@@ -1925,6 +2359,36 @@ export class Controller implements vscode.Disposable {
       case "import":
         await send(action, { kind: "work", title: "Importing from code" });
         return;
+      case "publish-issues": {
+        // The terminal is known once the launch is sure to go on: from then on the issues of the handoff that are not published are publishing, held by it (`rules#issue`).
+        const { handoff } = action;
+        const result = await send(action, { kind: "work", title: "Publishing issues" }, undefined, undefined, undefined, {
+          subAgents: false,
+          onStarted: (terminal) => {
+            beginPublishing(project, handoff, terminal);
+          },
+        });
+        if (!launched(result)) throw new TramaError("the agent did not start");
+        return;
+      }
+      case "update-issue": {
+        // The agent comments on GitHub in the job's own terminal; its ghost is how the issue's `Updating…` is known while it runs.
+        const result = await send(action, { kind: "work", title: updatingTitle(action.number) });
+        if (!launched(result)) throw new TramaError("the agent did not start");
+        return;
+      }
+      case "scan-issue": {
+        // Like the scan of the System, with the issue's references alone, and without the memory of the last scan of the System.
+        const result = await send(action, { kind: "check", title: scanningTitle(action.number) });
+        if (!launched(result)) throw new TramaError("the agent did not start");
+        return;
+      }
+      case "split-issue": {
+        // The handoff stays Open until the agent changes its first file; the instruction runs on the analysis role and files no Drift.
+        const result = await send(action, { kind: "work", title: "Splitting an issue" });
+        if (!launched(result)) throw new TramaError("the agent did not start");
+        return;
+      }
     }
   }
 }

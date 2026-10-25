@@ -1,10 +1,10 @@
-import { Bot, FolderOpen, GitCompare, GitMerge, History, ListChecks, type LucideIcon, Network, Package, Rocket, Search, Settings, SquareKanban, X } from "lucide-react";
+import { Bot, FolderOpen, GitCompare, GitMerge, History, ListChecks, type LucideIcon, Network, Package, Rocket, Search, Settings, SquareKanban, Users, X } from "lucide-react";
 import type { MenuState, MenuViewName, MergeMenuState, ToMenuHost } from "../../menu-protocol";
 import { cn } from "../lib/utils";
 import { scanButtonLabel } from "../scan-label";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { ENTRY_LABELS, entryName, mergeLines, mergeName, PROJECT_ENTRIES } from "./logic";
+import { ENTRY_LABELS, entryName, mergeLines, mergeName, projectEntries } from "./logic";
 
 const ICONS: Record<MenuViewName, LucideIcon> = {
   board: SquareKanban,
@@ -12,6 +12,7 @@ const ICONS: Record<MenuViewName, LucideIcon> = {
   requirements: ListChecks,
   specs: Package,
   history: History,
+  team: Users,
   settings: Settings,
   getstarted: Rocket,
 };
@@ -20,11 +21,11 @@ const ICONS: Record<MenuViewName, LucideIcon> = {
 function Entry({ view, state, post }: { view: MenuViewName; state: MenuState; post: (message: ToMenuHost) => void }) {
   const Icon = ICONS[view];
   const shown = state.panelView === view;
-  const awaiting = view === "board" ? state.decisions : 0;
+  const awaiting = view === "board" ? state.decisions : view === "team" ? (state.handoffs ?? 0) : 0;
   return (
     <Button
       variant="ghost"
-      aria-label={entryName(view, state.decisions)}
+      aria-label={entryName(view, state.decisions, state.handoffs ?? 0)}
       aria-current={shown ? "page" : undefined}
       className={cn("w-full justify-start @max-[56px]:justify-center aria-[current=page]:bg-accent aria-[current=page]:text-accent-foreground")}
       onClick={() => post({ type: "show", view })}
@@ -117,7 +118,7 @@ export function MenuApp({ state, post }: { state: MenuState | null; post: (messa
       ) : state.situation === "notProject" ? (
         <Entry view="getstarted" state={state} post={post} />
       ) : (
-        PROJECT_ENTRIES.map((view) => <Entry key={view} view={view} state={state} post={post} />)
+        projectEntries(state).map((view) => <Entry key={view} view={view} state={state} post={post} />)
       )}
       <Bottom state={state} post={post} />
     </nav>

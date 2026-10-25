@@ -1,8 +1,11 @@
 import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import type { launchAgent } from "../extension/src/host/agent";
 import { requestsDir } from "../src/core/design-requests";
+import { setManagerMode } from "../src/core/manager-mode";
 import { type Project, projectAt } from "../src/core/store";
 import { listProposals, newProposal, save } from "../src/core/proposals";
 
@@ -202,7 +205,7 @@ mock.module("vscode", () => ({
   extensions: { getExtension: () => undefined },
 }));
 
-const { DesignRequests, SAVE_DELAY_MS, SENT_KEY, SETUP_KEY } = await import("../extension/src/host/design-requests");
+const { DesignRequests, HANDOFF_KEY, SAVE_DELAY_MS, SENT_KEY, SETUP_KEY } = await import("../extension/src/host/design-requests");
 const { NO_PROJECT_WARNING } = await import("../extension/src/host/project");
 type Launch = Awaited<ReturnType<typeof import("../extension/src/host/agent").launchAgent>>;
 
@@ -218,9 +221,10 @@ class FakeMemento {
 }
 
 /** Every instruction sent, with its terminal's name and the title announced; `outcome` is how the next ones leave. */
-const launches: Array<{ root: string; instruction: string; name: string; title: string | { title: string; drift: string } | undefined }> = [];
+type Announcement = Parameters<typeof launchAgent>[3];
+const launches: Array<{ root: string; instruction: string; name: string; title: Announcement }> = [];
 let outcome: Launch = "terminal";
-const launch = async (root: string, instruction: string, name: string, title?: string | { title: string; drift: string }): Promise<Launch> => {
+const launch = async (root: string, instruction: string, name: string, title?: Announcement, _canSend?: () => boolean): Promise<Launch> => {
   launches.push({ root, instruction, name, title });
   return outcome;
 };
@@ -906,5 +910,67 @@ describe("the ghost text of a request never sent", () => {
     const other = join(dir, "notes.md");
     reopen(other);
     expect(ghostOf(other)).toBeUndefined();
+  });
+});
+
+const HANDOFF_GHOST = "Describe the work to give your team: what should change, for whom, any deadline or constraint. Close this tab or press Send to agent when you are done.";
+
+describe("New handoff: the handoff request", () => {
+  /** The folder is a git repository whose origin is on GitHub, so Team can be turned on. */
+  const git = (...args: string[]) => spawnSync("git", args, { cwd: dir, encoding: "utf8", timeout: 30_000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+  beforeAll(() => {
+    git("init", "-q");
+    git("remote", "add", "origin", "https://github.com/acme/web");
+  });
+  afterEach(() => setManagerMode(p, false));
+
+  test("without Team it opens nothing, remembers nothing and says why", async () => {
+    await requests.writeHandoff();
+    expect(shown).toEqual([]);
+    expect(state.get<string[]>(HANDOFF_KEY, [])).toEqual([]);
+    expect(warnings).toEqual(["Trama: Manager Mode is off in this working copy."]);
+    expect(existsSync(requestsDir(p)) ? readdirSync(requestsDir(p)) : []).toEqual([]);
+  });
+
+  test("with Team it is opened as Add Work Item… does, joins the handoff list and shows its own ghost text", async () => {
+    setManagerMode(p, true);
+    await requests.writeHandoff();
+    const document = active as FakeDocument;
+    expect(shown.at(-1)?.preview).toBe(false);
+    expect(state.get<string[]>(HANDOFF_KEY, [])).toEqual([idOf(document)]);
+    expect(state.get<string[]>(SETUP_KEY, [])).toEqual([]);
+    expect(ghostOf(document.uri.fsPath)).toEqual({ text: HANDOFF_GHOST, color: "disabledForeground" });
+    type(document, "A");
+    expect(ghostOf(document.uri.fsPath)).toBeUndefined();
+    erase(document);
+    expect(ghostOf(document.uri.fsPath)).toEqual({ text: HANDOFF_GHOST, color: "disabledForeground" });
+  });
+
+  test("sending it starts the trama-handoff skill in the Handoff terminal, announces a work (no Board column) and marks it sent", async () => {
+    setManagerMode(p, true);
+    await requests.writeHandoff();
+    const document = active as FakeDocument;
+    type(document, "# Cancel an order\n\nLet customers cancel.\n");
+    await requests.send();
+    expect(launches).toHaveLength(1);
+    expect(launches[0]?.instruction).toStartWith("Use the trama-handoff skill on the handoff request in");
+    expect(launches[0]?.instruction).toContain(`.trama/requests/${idOf(document)}.md`);
+    expect(launches[0]?.instruction).toContain("Bind the first handoff you open to it with the `request` field.");
+    expect(launches[0]?.name).toBe("Handoff");
+    expect(launches[0]?.title).toEqual({ kind: "work", title: "Cancel an order" } as never);
+    expect(state.get<string[]>(SENT_KEY, [])).toEqual([idOf(document)]);
+  });
+
+  test("a handoff request whose file is gone leaves the handoff list, and the list survives a restart while the file is there", async () => {
+    setManagerMode(p, true);
+    await requests.writeHandoff();
+    const document = active as FakeDocument;
+    type(document, "# Cancel an order\n");
+    requests.dispose();
+    requests = new DesignRequests(state as never, tramaFiles as never, () => p, launch);
+    expect(state.get<string[]>(HANDOFF_KEY, [])).toEqual([idOf(document)]);
+    deleteFile(document);
+    await sleep(10);
+    expect(state.get<string[]>(HANDOFF_KEY, [])).toEqual([]);
   });
 });

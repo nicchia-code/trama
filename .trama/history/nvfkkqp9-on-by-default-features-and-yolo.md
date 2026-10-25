@@ -5,6 +5,46 @@ summary: Advisor Scanner, Parallel Execution, Async Drift Resolver, Sub-agents C
 tasks:
   - zgejeg40
   - zt07elkd
+cleared:
+  zt07elkd:
+    title: Optional features on by default
+    proposal: uw6vjpry
+    tag: Advanced defaults
+    finished: 2026-10-25T07:08:57.218Z
+    refs:
+      - agent-launching
+      - task
+      - drift
+      - drift-resolution
+      - raffinamento
+      - proposal
+      - panel/Settings
+      - requirements/tech#panel/Settings
+      - requirements/ui#panel/Settings
+      - requirements/ui#agent-launching
+      - requirements/rules#agent-launching
+      - requirements/quality#agent-launching
+      - requirements/rules#work
+      - requirements/rules#drift-resolution
+      - requirements/tech#drift-resolution
+      - requirements/ui#drift-resolution
+      - requirements/quality#drift-resolution
+      - requirements/rules#raffinamento
+      - requirements/tech#raffinamento
+      - requirements/ui#raffinamento
+      - requirements/tech#developer.CHANGE_SETTING
+  zgejeg40:
+    title: yolo default with notice
+    proposal: uw6vjpry
+    tag: Advanced defaults
+    finished: 2026-10-25T06:45:15.275Z
+    refs:
+      - omp-chat-conversation
+      - requirements/rules#omp-chat-conversation
+      - requirements/ui#omp-chat-conversation
+      - requirements/quality#omp-chat-conversation
+      - requirements/tech#omp-chat
+      - requirements/tech#omp-chat-conversation/Agent running
 ---
 # On-by-default features and yolo
 

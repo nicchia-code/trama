@@ -26,6 +26,7 @@ The technologies this project is built, tested and released with, from the devel
 - cmdk: the Command list under the shadcn/ui Combobox of the model fields
 - cytoscape: draws the Diagram on a canvas, hosted in a React component
 - elkjs: lays out the Diagram
+- mermaid 12: draws the `mermaid` blocks of the panel's Markdown, from its own bundle loaded on demand (chosen by the agent: the reference renderer of `mermaid` blocks, the one GitHub uses for issues)
 - yaml: front matter and settings files
 - zod 4: input schemas of the command line
 - Agent Client Protocol SDK: `@agentclientprotocol/sdk`, the client side of ACP that omp Chat uses to talk to `omp acp`, bundled into the extension host
@@ -47,3 +48,4 @@ The technologies this project is built, tested and released with, from the devel
 ## Infrastructure as code
 
 - omp: the only coding agent Trama runs and the only source of model names; required, installed with its official installer (`https://omp.sh/install`, `install.ps1` on Windows) when missing and updated with `omp update` before Trama launches it
+- GitHub CLI: `gh`, needed only with Manager mode: Trama runs it only to read the GitHub Project, the agent runs it to publish issues; installed and logged in by the Manager, never by Trama
