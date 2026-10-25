@@ -47,6 +47,12 @@ test("an empty file, a file of blanks, a folder and an unreadable name do not co
   put(join(project, "CLAUDE.md"), " \n\t\r\n  ");
   mkdirSync(join(project, ".cursorrules"));
   put(join(project, ".omp", "AGENTS.md"), `${" ".repeat(10_000)}x`);
+  expect((await findInstructionFiles(project, home)).map((f) => f.label)).toEqual([".omp/AGENTS.md"]);
+});
+
+// Skipped on Windows: creating a symlink needs developer mode or administrator rights there, so the fixture cannot be built.
+(process.platform === "win32" ? test.skip : test)("an instruction file that is a symlink to a missing target does not count", async () => {
+  put(join(project, ".omp", "AGENTS.md"));
   symlinkSync(join(base, "missing"), join(project, ".omp", "RULES.md"));
   expect((await findInstructionFiles(project, home)).map((f) => f.label)).toEqual([".omp/AGENTS.md"]);
 });

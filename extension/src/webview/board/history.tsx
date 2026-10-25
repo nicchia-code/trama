@@ -117,6 +117,11 @@ export function HistoryEntryView({ entry, now = new Date() }: { entry: HistoryVi
       <DialogContent
         className="sm:max-w-[640px]"
         aria-describedby={undefined}
+        onOpenAutoFocus={(event) => {
+          // The Close button comes last in the window: without this the focus goes to the first chip or link.
+          event.preventDefault();
+          (event.target as HTMLElement).querySelector<HTMLElement>('[data-slot="dialog-close"]')?.focus();
+        }}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           titleButton.current?.focus();

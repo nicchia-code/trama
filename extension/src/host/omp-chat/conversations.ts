@@ -1,5 +1,6 @@
 import {
   CONVERSATIONS_KEY,
+  closeDialog,
   closeNeedsConfirmation,
   type ConversationEffect,
   type ConversationEvent,
@@ -71,6 +72,8 @@ interface Conversation extends ConversationInfo {
   openedAt: string;
   exitListener?: Disposable;
   turnListener?: Disposable;
+  /** An Ask more that has not had its first message: nothing of it is saved, and a window that closes ends it at once. */
+  empty?: true;
 }
 
 /** Ask more's instruction, held for the first message of its conversation: the placeholder of the empty field, the prompt that message goes as (`compose`), and
@@ -188,6 +191,7 @@ export class OmpConversations {
       env: savedEnv(spec.launch.env),
       hook: spec.hook,
       openedAt: new Date().toISOString(),
+      empty: true,
     };
     this.conversations.set(spec.id, conversation);
     const instruction: PendingInstruction = {
@@ -220,6 +224,7 @@ export class OmpConversations {
   private heldSent(conversation: Conversation, announce: () => void): void {
     if (this.conversations.get(conversation.id) !== conversation) return;
     conversation.state = "running";
+    delete conversation.empty;
     this.persist(conversation);
     this.view.setWorking(conversation.id, true);
     announce();
@@ -243,7 +248,8 @@ export class OmpConversations {
     const conversation = this.conversations.get(id);
     if (conversation === undefined || (conversation.state !== "running" && conversation.state !== "idle")) return;
     if (closeNeedsConfirmation(conversation.session?.inTurn === true)) {
-      const confirmed = await this.hooks.confirm(`Close ${conversation.name} and stop its agent?`, "The conversation and its agent end; Trama stops following its job.", "Close");
+      const dialog = closeDialog(conversation.name);
+      const confirmed = await this.hooks.confirm(dialog.message, dialog.detail, dialog.button);
       if (!confirmed) return;
     }
     if (this.conversations.get(id) !== conversation) return;
@@ -257,7 +263,8 @@ export class OmpConversations {
   async windowClosed(): Promise<void> {
     const stopped: Promise<void>[] = [];
     for (const conversation of [...this.conversations.values()]) {
-      if (conversation.state === "running" && !conversation.hook) this.persist(conversation, conversation.session?.inTurn === true ? "running" : "idle");
+      // Ask more (no hook, no job) saves whether its agent was in a turn as its state, and reopens at rest either way; a job's conversation keeps its own state, with or without the hook.
+      if (conversation.state === "running" && !conversation.hook && conversation.job === undefined) this.persist(conversation, conversation.session?.inTurn === true ? "running" : "idle");
       const stops = this.step(conversation, { type: "editor.WINDOW_CLOSED" });
       stopped.push(...stops);
     }
@@ -359,7 +366,7 @@ export class OmpConversations {
   /** Applies an Event: moves the conversation and carries out the effects the Machine names. Returns the stops of processes it started. */
   private step(conversation: Conversation, event: ConversationEvent): Promise<void>[] {
     const before = conversation.state;
-    const next = conversationStep(before, event, this.hooks.autoExit());
+    const next = conversationStep(before, event, this.hooks.autoExit(), conversation.empty === true);
     conversation.state = next.state;
     // The conversation closes or its process exits: the rounds its agent asked end with it, as they do when the developer stops its turn.
     if ((before === "running" || before === "idle") && (event.type === "developer.CLOSE_CHAT_CONVERSATION" || event.type === "omp-acp.EXITED")) this.hooks.interruptQuestions(conversation);

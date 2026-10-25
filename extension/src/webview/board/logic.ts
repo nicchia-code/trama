@@ -100,16 +100,6 @@ export interface ChangeSummary {
   more: number;
 }
 
-/** A Task a Drift leaves free, as the Board names it: its short number or identity, and the reason it gives. */
-export interface NotBlockingItem {
-  name: CardName;
-  reason: string;
-}
-
-/** The Tasks a Drift leaves free that still exist, named as the Board names Tasks; a Task that no longer exists is left out. */
-export const notBlockingItems = (freed: DriftView["notBlocking"], numbers: CardNumbers): NotBlockingItem[] =>
-  freed.flatMap((f) => (f.title === null ? [] : [{ name: cardNameOf(numbers, "task", f.task), reason: f.reason }]));
-
 /** Which of the two View buttons a card has. */
 export interface FocusViews {
   diagram: boolean;
@@ -136,8 +126,6 @@ export interface ResolvedRow {
   decision: string;
   /** The Tasks this Drift blocks, shown under its row. */
   blocked: TaskCard[];
-  /** The Tasks this Drift leaves free, with the reason, shown under the Tasks it blocks. */
-  notBlocking: NotBlockingItem[];
 }
 
 /** How a followed Drift was decided, in words, for the list of a recurring Drift's details. */
@@ -213,8 +201,6 @@ export interface DriftCard {
   resolveBlocker: string | null;
   /** The Tasks this open Drift blocks, shown under its card. */
   blocked: TaskCard[];
-  /** The Tasks this open Drift leaves free, with the reason, shown under the Tasks it blocks. */
-  notBlocking: NotBlockingItem[];
 }
 
 export interface TaskCard {
@@ -320,7 +306,7 @@ function ownApproveBlocker(p: Pick<ProposalView, "stale" | "unbased" | "errors" 
 }
 
 /** The refinement of the Proposals is off: the Board and the diagram draw them as before. */
-export const REFINEMENT_OFF: RefinementView = { enabled: false, running: [], queued: [], note: null, runInProgress: false, waiting: [], refineAll: { mode: "refine", count: 0, blockers: ["Turn on Auto-update Stale Proposals in Settings", "No Proposal to refine"] } };
+export const REFINEMENT_OFF: RefinementView = { enabled: false, running: [], queued: [], notes: {}, runInProgress: false, waiting: [], refineAll: { mode: "refine", count: 0, blockers: ["Turn on Auto-update Stale Proposals in Settings", "No Proposal to refine"] } };
 
 /** The wait after the click on Refine All before Cancel Refine All can be chosen. */
 export const CANCEL_REFINE_ALL_DELAY_MS = 2000;
@@ -426,10 +412,9 @@ export function refineApproveBlocker(status: RefineStatus, p: Pick<ProposalView,
   return approveBlocker({ requires: p.requires, stale: [], unbased: [], errors: [], unfixable: [] }, numbers, refinement.runInProgress);
 }
 
-export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "unfixable" | "requires" | "kind" | "nonBlocking">, numbers: CardNumbers = noNumbers): Badge[] {
+export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "errors" | "unfixable" | "requires" | "kind">, numbers: CardNumbers = noNumbers): Badge[] {
   const badges: Badge[] = [];
   if (p.kind === "import") badges.push({ label: "import", tone: "info", tooltip: "Describes existing code; approving it starts no Scan" });
-  if (p.nonBlocking) badges.push({ label: "blocks nothing", tone: "info", tooltip: "Filed by the Drift Blocker: these Drifts block no Task. Approve or reject it like any resolution." });
   for (const r of p.requires)
     badges.push({ label: `requires ${namerOf(numbers)("proposal", r.id)}`, tone: appliesUnder(r.status) ? "info" : "error", tooltip: requiredReasons([r], (id) => namerOf(numbers)("proposal", id)).join(""), card: { kind: "proposal", id: r.id } });
   if (p.stale.length > 0) badges.push({ label: "stale", tone: "warning", tooltip: `The Model changed since the Proposal touched:\n${listed(p.stale)}` });
@@ -441,7 +426,7 @@ export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "erro
 
 /** The rows of a resolution's `Resolves Drifts` block, in the order the snapshot carries them; none for any other Proposal. */
 export const resolvedRows = (p: Pick<ProposalView, "resolves">, numbers: CardNumbers = noNumbers, blocked: Map<string, TaskCard[]> = new Map()): ResolvedRow[] =>
-  p.resolves.map((r) => ({ drift: r.drift, name: cardNameOf(numbers, "drift", r.drift), title: r.title, previous: r.previous, unifies: r.unifies, decision: r.note === null ? r.decision : `${r.decision} · ${r.note}`, blocked: blocked.get(r.drift) ?? [], notBlocking: notBlockingItems(r.notBlocking, numbers) }));
+  p.resolves.map((r) => ({ drift: r.drift, name: cardNameOf(numbers, "drift", r.drift), title: r.title, previous: r.previous, unifies: r.unifies, decision: r.note === null ? r.decision : `${r.decision} · ${r.note}`, blocked: blocked.get(r.drift) ?? [] }));
 
 /** `Creates 1 Task` / `Creates N Tasks`, counting removals too; null for zero. */
 export function createsText(n: number): string | null {
@@ -487,7 +472,7 @@ export function proposalCard(p: ProposalView, numbers: CardNumbers = noNumbers, 
     approveHint: refine === "to-refine" ? "Refine it on the current Model, then approve it" : null,
     refine,
     refinePhase: refine === "running" ? (asking ? "Waiting for your answers" : "Refining") : null,
-    refineNote: refine === "running" ? refinement.note : null,
+    refineNote: refine === "running" ? refinement.notes[p.id] ?? null : null,
     rejectBlocker,
     reworkBlocker: joinReasons([rejectBlocker, p.kind === "resolution" ? resolveReason : null]),
     views,
@@ -532,7 +517,6 @@ export function driftCard(d: DriftView, numbers: CardNumbers = noNumbers, dismis
     unifying: resolve.unifying === true,
     resolveBlocker: resolve.blocker,
     blocked,
-    notBlocking: notBlockingItems(d.notBlocking, numbers),
   };
 }
 

@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli/main";
 import { TramaError } from "../src/core/errors";
-import { getProposal, listProposals } from "../src/core/proposals";
+import { getProposal, listProposals, validateProposal } from "../src/core/proposals";
+import { buildSnapshot } from "../src/core/snapshot";
 import { type Project, projectAt } from "../src/core/store";
 import { getDrift, getTask, listDrifts, listTasks } from "../src/core/work";
 
@@ -104,12 +105,23 @@ describe("malformed Proposal files", () => {
 
   test("missing optional fields fall back to an open Proposal that touches nothing", () => {
     proposal("status: open");
-    expect(getProposal(p, "1").data).toEqual({ status: "open", kind: "change", nonBlocking: false, prepared: false, drifts: [], requires: [], base: {}, delete: [], request: null, created: null, scanScope: null, label: null, reworks: null, reworkRequested: false, refining: false });
+    expect(getProposal(p, "1").data).toEqual({ status: "open", kind: "change", prepared: false, drifts: [], requires: [], base: {}, delete: [], request: null, created: null, scanScope: null, label: null, reworks: null, reworkRequested: false, refining: false });
   });
 
   test("an old automatic field is read without error and ignored", () => {
     proposal("status: open\nkind: resolution\nautomatic: true");
     expect(getProposal(p, "1").data).not.toHaveProperty("automatic");
+  });
+
+  test("an old nonBlocking field is read without error and never shown", () => {
+    proposal("status: open\nkind: resolution\nnonBlocking: true");
+    expect(getProposal(p, "1").data).not.toHaveProperty("nonBlocking");
+    expect(validateProposal(p, getProposal(p, "1")).map((d) => d.message).join("\n")).not.toContain("nonBlocking");
+    const shown = buildSnapshot(p).proposals.find((v) => v.title === "P");
+    expect(shown).toBeDefined();
+    expect(shown).not.toHaveProperty("nonBlocking");
+    proposal("status: open\nkind: change\nnonBlocking: [not, a, boolean]");
+    expect(() => getProposal(p, "1")).not.toThrow();
   });
 });
 

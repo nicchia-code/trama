@@ -1,6 +1,6 @@
 ---
 created: 2026-10-21T09:39:06.027Z
-updated: 2026-10-21T09:39:06.027Z
+updated: 2026-10-24T20:56:01.390Z
 summary: Un Drift può conservare una domanda pronta; Resolve la apre subito senza agente e la risposta diventa una risoluzione `prepared` che non ferma le altre.
 tasks:
   - 52cbkqx7
@@ -8,6 +8,7 @@ tasks:
   - gya21o2b
   - jemjruvm
   - qk569ldq
+  - kga0yvre
 cleared:
   qk569ldq:
     title: Resolve istantaneo

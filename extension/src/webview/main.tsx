@@ -127,6 +127,18 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
   else if (message.type === "guidedSetup") settings.openGuidedSetup(message);
   else if (message.type === "guidedSetupResult") settings.receiveResult(message);
   else if (message.type === "ompStatus") settings.receiveOmpStatus(message);
+  else if (message.type === "cursorApiKey") {
+    settings.receiveCursorApiKey(message);
+    getStarted.receiveCursorApiKey(message);
+  }
+  else if (message.type === "systemCertificates") {
+    settings.receiveSystemCertificates(message);
+    getStarted.receiveSystemCertificates(message);
+  }
+  else if (message.type === "ompLogoutState") {
+    settings.receiveOmpLogoutState(message);
+    getStarted.receiveOmpLogoutState(message);
+  }
   else if (message.type === "agentCheck") {
     settings.receiveAgentCheck(message);
     getStarted.receiveAgentCheck(message);

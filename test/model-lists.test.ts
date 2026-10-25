@@ -1,8 +1,10 @@
 import { expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
+import { certificateErrorText } from "../extension/src/certificate-errors";
 import { bunBinDir, ompModels, ompPathVariable, parseOmpList, parseOmpModels } from "../extension/src/host/model-lists";
+import { bundlePath, CERTIFICATE_VARIABLES, setSystemCertificatesSetting } from "../extension/src/host/system-certificates";
 
 test("omp suggests each model's selector, labelled by its name only when they differ", () => {
   const output = JSON.stringify({
@@ -138,6 +140,99 @@ posix("omp models has no providers when its list is in error, which leaves every
     expect(failed).not.toHaveProperty("providers");
     const garbage = fakeOmp(root, "echo not-json");
     expect(await ompModels(garbage)).not.toHaveProperty("providers");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/** Runs `body` with the developer's home and cache folders in a temporary folder, so `bundlePath()` points inside it. */
+async function withHome(body: (home: string) => Promise<void>): Promise<void> {
+  const home = mkdtempSync(join(tmpdir(), "trama-home-"));
+  const saved = { HOME: process.env["HOME"], XDG_CACHE_HOME: process.env["XDG_CACHE_HOME"] };
+  process.env["HOME"] = home;
+  delete process.env["XDG_CACHE_HOME"];
+  try {
+    await body(home);
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+const ENV_JSON = (names: string[]) => `printf '{"models":[%s]}' "${names.map((name) => `{\\"selector\\":\\"${name}=$${name}\\"}`).join(",")}"`;
+
+posix("omp models receives the bundle's path in the nine variables with System Certificates on and a bundle on disk, over what the editor inherited", async () => {
+  await withHome(async () => {
+    const path = bundlePath();
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, "bundle\n");
+    const root = mkdtempSync(join(tmpdir(), "trama-omp-"));
+    try {
+      const program = fakeOmp(root, ENV_JSON([...CERTIFICATE_VARIABLES]));
+      const inherited = { PATH: process.env["PATH"] ?? "", NODE_EXTRA_CA_CERTS: "/corporate/old.pem", SSL_CERT_FILE: "/corporate/old.pem" };
+      const on = await ompModels(program, 15_000, inherited, true);
+      expect(on.models.map((model) => model.value)).toEqual(CERTIFICATE_VARIABLES.map((name) => `${name}=${path}`));
+      // Off: the editor's own values reach omp, untouched.
+      const first = fakeOmp(root, ENV_JSON(["NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE"]));
+      const off = await ompModels(first, 15_000, inherited, false);
+      expect(off.models.map((model) => model.value)).toEqual(["NODE_EXTRA_CA_CERTS=/corporate/old.pem", "SSL_CERT_FILE=/corporate/old.pem"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+posix("omp models gets no variable with System Certificates on and no bundle, or off with a bundle", async () => {
+  await withHome(async () => {
+    const root = mkdtempSync(join(tmpdir(), "trama-omp-"));
+    try {
+      const program = fakeOmp(root, `printf '{"models":[{"selector":"%s"}]}' "\${NODE_EXTRA_CA_CERTS:-none}"`);
+      const clean = { PATH: process.env["PATH"] ?? "" };
+      expect((await ompModels(program, 15_000, clean, true)).models[0]?.value).toBe("none");
+      const path = bundlePath();
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, "bundle\n");
+      expect((await ompModels(program, 15_000, clean, false)).models[0]?.value).toBe("none");
+      expect((await ompModels(program, 15_000, clean, true)).models[0]?.value).toBe(path);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+posix("omp models takes the saved mode when none is given", async () => {
+  await withHome(async () => {
+    const path = bundlePath();
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, "bundle\n");
+    const root = mkdtempSync(join(tmpdir(), "trama-omp-"));
+    try {
+      const program = fakeOmp(root, `printf '{"models":[{"selector":"%s"}]}' "\${NODE_EXTRA_CA_CERTS:-none}"`);
+      setSystemCertificatesSetting(() => true);
+      expect((await ompModels(program, 15_000, { PATH: process.env["PATH"] ?? "" })).models[0]?.value).toBe(path);
+      setSystemCertificatesSetting(() => false);
+      expect((await ompModels(program, 15_000, { PATH: process.env["PATH"] ?? "" })).models[0]?.value).toBe("none");
+    } finally {
+      setSystemCertificatesSetting(() => false);
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+posix("omp models names a certificate error in plain words, from the error output of a failed run, with the mode on or off", async () => {
+  const root = mkdtempSync(join(tmpdir(), "trama-omp-"));
+  try {
+    const program = fakeOmp(root, "echo 'Error: unable to verify: SELF_SIGNED_CERT_IN_CHAIN' >&2\nexit 1");
+    expect(await ompModels(program, 15_000, process.env, false)).toEqual({ models: [], error: certificateErrorText(false) });
+    expect(await ompModels(program, 15_000, process.env, true)).toEqual({ models: [], error: certificateErrorText(true) });
+    // A failure that is not a certificate error keeps its own reason, and so does a certificate marker in the standard output.
+    const other = fakeOmp(root, "echo 'segmentation fault' >&2\nexit 1");
+    expect(await ompModels(other, 15_000, process.env, true)).toEqual({ models: [], error: "omp exited with code 1" });
+    const stdoutOnly = fakeOmp(root, "echo 'CERT_HAS_EXPIRED'\nexit 1");
+    expect(await ompModels(stdoutOnly, 15_000, process.env, true)).toEqual({ models: [], error: "omp exited with code 1" });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

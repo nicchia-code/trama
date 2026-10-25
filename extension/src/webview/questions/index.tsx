@@ -509,10 +509,10 @@ export function QuestionOverlay({ round, post, openLink }: { round: QuestionRoun
           <div className="flex items-center gap-1.5 border-b py-2 pr-2.5 pl-3.5">
             <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2.5 gap-y-1">
               <DialogTitle>Questions from the agent</DialogTitle>
-              {round.name !== null ? (
+              {round.prepared || round.name !== null ? (
                 <>
                   <span aria-hidden="true" className="text-muted-foreground">·</span>
-                  <span className="text-muted-foreground">{round.name}</span>
+                  <span className="text-muted-foreground">{round.prepared ? "Prepared question" : round.name}</span>
                 </>
               ) : null}
               <span className="text-muted-foreground">{stepTitle(state)}</span>

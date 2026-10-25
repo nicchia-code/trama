@@ -145,19 +145,18 @@ describe("a unified Drift", () => {
 });
 
 describe("what a unified Drift blocks and what fixing it does", () => {
-  test("blocks each origin and every Task about the same thing, except those left free", () => {
+  test("blocks each origin and every Task about the same thing", () => {
     const t1 = task("One", ["cart"]);
     const t2 = task("Two", ["cart"]);
     const other = task("Other", ["order/Shipped"]);
     const third = task("Third", ["order/Shipped"]);
     const a = drift("A", { origin: t1, refs: ["cart"] });
     const b = drift("B", { origin: t2, refs: ["cart"] });
-    const { drift: merged } = newUnifiedDrift(p, unifyInput([a.id, b.id], { refs: ["order/Shipped"], notBlocking: [{ task: other, reason: "Unrelated." }] }));
+    const { drift: merged } = newUnifiedDrift(p, unifyInput([a.id, b.id], { refs: ["order/Shipped"] }));
     const blocked = blockedTasks(p);
-    expect([...blocked.keys()].sort()).toEqual([t1, t2, third].sort());
+    expect([...blocked.keys()].sort()).toEqual([t1, t2, other, third].sort());
     expect(blocked.get(t1)?.[0]).toMatchObject({ kind: "drift", drift: merged.id });
-    expect(blocked.has(other)).toBe(false);
-    expect(() => newUnifiedDrift(p, unifyInput([drift("X").id, drift("Y").id], { notBlocking: [{ task: t1, reason: "No." }] }))).toThrow(/would not block/);
+    expect(blocked.get(other)?.[0]).toMatchObject({ kind: "drift", drift: merged.id });
   });
 
   test("fixing its code sends every origin not Done back to To do, waiting for the fix Task; accepting leaves them", () => {

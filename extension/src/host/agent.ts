@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { execFile, type ExecFileException } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -23,14 +24,19 @@ import { agentCommandLine, isSupportedShell, programName, quote, quoteProgram, t
 import type { OmpLoginProvider } from "../omp-login";
 import { interruptTerminalRounds, ownWindowId, questionEndpoint } from "./questions";
 import { pruneAgentProcesses, releaseUnfollowed } from "./task-release";
-import { ASK_DEVELOPER_SENTENCE, AUTO_EXIT_SENTENCE, instructedMessage, languageSentence, PARALLEL_EXECUTION_SENTENCE, withAsyncDriftResolver, withContextSharing, withDriftBlocker, withLanguage } from "./prompts";
+import { ASK_DEVELOPER_SENTENCE, AUTO_EXIT_SENTENCE, instructedMessage, languageSentence, PARALLEL_EXECUTION_SENTENCE, withAsyncDriftResolver, withContextSharing, withLanguage } from "./prompts";
 import { agentTemplate, askMoreCommandLine, askMoreOptions, canScan, launchOverlay, type Models, ompArguments, ompOptions, type Role, roleOf, type RunModel, terminalEnv } from "./terminal-agent";
+import { cursorKeyEnv } from "./cursor-api-key";
+import { certificateReason } from "../certificate-errors";
+import { systemCertificatesEnv } from "./system-certificates";
+import { showYoloNoticeOnce } from "./yolo-notice";
 import { ompPathVariable } from "./model-lists";
-import { checkedOmp, ompBeforeLaunch } from "./omp-launch";
+import { ompBeforeLaunch } from "./omp-launch";
 import { type ConversationInfo, type ConversationStore, type OpenConversation, OmpConversations } from "./omp-chat/conversations";
 import type { ChatViewPort, OmpClientPort, OmpLaunch } from "./omp-chat/ports";
 import { GeneralConversation, type GeneralDeps } from "./omp-chat/general";
-import { findConfiguredOmp } from "./omp-update";
+import { findConfiguredOmp, ompVersionOnly } from "./omp-update";
+import { findProject } from "./project";
 
 export const settings = () => vscode.workspace.getConfiguration("trama");
 
@@ -39,20 +45,20 @@ export const configuredSkillsDir = (): string => settings().get<string>("skillsD
 
 /** The language the agent writes in (`trama.language`), trimmed, as typed; empty when none is chosen. Read at every launch. */
 export const configuredLanguage = (): string => settings().get<string>("language", "").trim();
-/** Whether `trama.driftBlocker` is on, from user settings only: a workspace value does not turn it on. Read at every launch. */
-export const configuredDriftBlocker = (): boolean => settings().inspect<unknown>("driftBlocker")?.globalValue === true;
-/** Whether the Advisor Scanner is on (`trama.advisorScanner`), from user settings only. Read at every launch of a Run: no other job uses it. */
-export const configuredAdvisorScanner = (): boolean => settings().inspect<unknown>("advisorScanner")?.globalValue === true;
-/** Whether `trama.parallelExecution` is on, from user settings only: a workspace value or a non-boolean does not turn it on. Read when a run over several Tasks is about to start. */
-export const configuredParallelExecution = (): boolean => settings().inspect<unknown>("parallelExecution")?.globalValue === true;
-/** Whether `trama.asyncDriftResolver` is on, from user settings only: a workspace value or a non-boolean does not turn it on. Read when a job is about to start. */
-export const configuredAsyncDriftResolver = (): boolean => settings().inspect<unknown>("asyncDriftResolver")?.globalValue === true;
-/** Whether `trama.subagentsContextSharing` is on, from user settings only: a workspace value or a non-boolean does not turn it on. */
-export const configuredSubagentsContextSharing = (): boolean => settings().inspect<unknown>("subagentsContextSharing")?.globalValue === true;
+/** Whether the Advisor Scanner is on (`trama.advisorScanner`), from user settings only: on unless the user value is `false`, so a workspace value (or none, or a value equal to the default that the settings store drops) never changes the result. Read at every launch of a Run: no other job uses it. */
+export const configuredAdvisorScanner = (): boolean => settings().inspect<unknown>("advisorScanner")?.globalValue !== false;
+/** Whether `trama.parallelExecution` is on, from user settings only: on unless the user value is `false`, so a workspace value (or none) never changes the result. Read when a run over several Tasks is about to start. */
+export const configuredParallelExecution = (): boolean => settings().inspect<unknown>("parallelExecution")?.globalValue !== false;
+/** Whether `trama.asyncDriftResolver` is on, from user settings only: on unless the user value is `false`, so a workspace value (or none) never changes the result. Read when a job is about to start. */
+export const configuredAsyncDriftResolver = (): boolean => settings().inspect<unknown>("asyncDriftResolver")?.globalValue !== false;
+/** Whether `trama.subagentsContextSharing` is on, from user settings only: on unless the user value is `false`, so a workspace value (or none) never changes the result. */
+export const configuredSubagentsContextSharing = (): boolean => settings().inspect<unknown>("subagentsContextSharing")?.globalValue !== false;
+/** Whether System Certificates (`trama.systemCertificates`) is on, from user settings only: on only with the user value `true`, so a workspace value or a non-boolean never turns it on. Read when a process is about to start. */
+export const configuredSystemCertificates = (): boolean => settings().inspect<unknown>("systemCertificates")?.globalValue === true;
 /** Whether `trama.autoExit` is on, from user settings only: on unless the user value is `false`, so a workspace value (or none) never turns it off. Read at each end of work. */
 export const configuredAutoExit = (): boolean => settings().inspect<unknown>("autoExit")?.globalValue !== false;
-/** Whether `trama.autoUpdateStaleProposals` is on, from user settings only: a workspace value or a non-boolean does not turn it on. Read at each refresh and each approval. */
-export const configuredAutoUpdateStaleProposals = (): boolean => settings().inspect<unknown>("autoUpdateStaleProposals")?.globalValue === true;
+/** Whether `trama.autoUpdateStaleProposals` is on, from user settings only: on unless the user value is `false`, so a workspace value (or none) never changes the result. Read at each refresh and each approval. */
+export const configuredAutoUpdateStaleProposals = (): boolean => settings().inspect<unknown>("autoUpdateStaleProposals")?.globalValue !== false;
 /** Whether `trama.ignoreInstructionFiles` is on, from user settings only: a workspace value or a non-boolean does not turn it on. */
 export const configuredIgnoreInstructionFiles = (): boolean => settings().inspect<unknown>("ignoreInstructionFiles")?.globalValue === true;
 /** The configured concurrent sub-agent limit, from user settings only; invalid values use the default. */
@@ -69,8 +75,15 @@ export const configuredOmpPath = (): string => {
   return typeof value === "string" ? value.trim() : "";
 };
 
-/** The PATH of an omp terminal: the folder of the omp program and the folder of bun in front of the editor's. */
-const ompPathEnv = (omp: string): Record<string, string> => ({ [process.platform === "win32" ? "Path" : "PATH"]: ompPathVariable(omp) });
+/**
+ * The environment of an omp terminal: the PATH with the folder of the omp program and the folder of bun in front of the editor's, the Cursor API key Trama saved, if any, and,
+ * with System Certificates on and a bundle on disk, the variables of the bundle: both win over the editor's own. `systemCertificates` is the saved setting unless the wizard's step says otherwise.
+ */
+const ompTerminalEnv = (omp: string, systemCertificates = configuredSystemCertificates()): Record<string, string> => ({
+  [process.platform === "win32" ? "Path" : "PATH"]: ompPathVariable(omp),
+  ...cursorKeyEnv(),
+  ...systemCertificatesEnv(systemCertificates),
+});
 
 /** Whether this window has already been told its default shell is replaced; the flag lives as long as the window's extension host. */
 let shellWarned = false;
@@ -111,10 +124,13 @@ const conversationPath = (): Record<string, string> => (bundledCliDir === undefi
 
 /**
  * The process of a conversation: the terminal's environment with the PATH `trama` is found on, and the arguments of its options and its approval. The approval is
- * `trama.ompChatApproval` from the user settings only, read when the conversation opens: `yolo` is yolo, any other value or none is `ask`.
+ * `trama.ompChatApproval` from the user settings only, read when the conversation opens: `ask` is ask, any other value or none is `yolo`. With no user value at all
+ * the developer never chose, and the one-time notice is shown (not waited for): a resumed conversation never comes here.
  */
 function conversationLaunch(root: string, options: string[][], endpoint: string, terminalId: string, jobId?: string, advisor = false, run = false, task?: string, parallel = false): OmpLaunch {
-  const approval = settings().inspect<unknown>("ompChatApproval")?.globalValue === "yolo" ? "yolo" : "ask";
+  const chosen = settings().inspect<unknown>("ompChatApproval")?.globalValue;
+  const approval = chosen === "ask" ? "ask" : "yolo";
+  if (chosen === undefined) showYoloNoticeOnce();
   // Intent Tracing is off only when `trama.ompChatIntentTracing` is `false` in the user settings, read when the conversation opens.
   const intentTracing = settings().inspect<unknown>("ompChatIntentTracing")?.globalValue === false ? "0" : "1";
   return { args: ompArguments(options, approval), env: { ...terminalEnv(endpoint, terminalId, jobId, advisor, run, task, parallel), ...conversationPath(), TRAMA_ACP: "1", PI_INTENT_TRACING: intentTracing }, cwd: root };
@@ -124,7 +140,11 @@ function conversationLaunch(root: string, options: string[][], endpoint: string,
 async function openConversation(spec: OpenConversation): Promise<boolean> {
   const opened = await chatConversations?.open(spec);
   if (opened?.opened === true) return true;
-  void vscode.window.showWarningMessage(startFailureNotice(opened === undefined ? "omp Chat is not available" : opened.reason, opened === undefined || opened.opened ? undefined : opened.details));
+  void vscode.window.showWarningMessage(
+    opened === undefined
+      ? startFailureNotice("omp Chat is not available")
+      : startFailureNotice(certificateReason(opened.reason, [opened.reason, opened.details], configuredSystemCertificates()), opened.details),
+  );
   return false;
 }
 
@@ -138,8 +158,9 @@ export function setOmpChat(ports: { client: OmpClientPort; view: ChatViewPort },
   chatConversations = new OmpConversations(ports.client, ports.view, store, {
     autoExit: configuredAutoExit,
     endWork: (conversation, abnormal) => endAgentWork(endInfo(conversation), abnormal),
-    reportStopped: reportStoppedFollowing,
-    reportAgentStopped,
+    // A certificate error in the reason or in omp's lines is told in plain words; omp's lines stay behind `Show details`.
+    reportStopped: (name, reason, details) => reportStoppedFollowing(name, certificateReason(reason, [reason, details], configuredSystemCertificates()), details),
+    reportAgentStopped: (job, reason) => reportAgentStopped(job, certificateReason(reason, [reason], configuredSystemCertificates())),
     registerProcess: (conversation, pid) => void writeAgentProcess(questionProjectId(projectAt(conversation.root)), conversation.id, pid, ownWindowId(conversation.root)),
     unregisterProcess: (conversation) => removeAgentProcess(questionProjectId(projectAt(conversation.root)), conversation.id),
     interruptQuestions: (conversation) => interruptTerminalRounds(conversation.id),
@@ -187,17 +208,22 @@ export function generalInstructions(storage: vscode.Uri | undefined = overlaySto
   return copy;
 }
 
+/** The folder General works in: the one the panel uses, the Trama project folder when one is open, otherwise the first folder of the window. */
+export function generalFolder(): string | undefined {
+  return findProject()?.root ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
 /** The deps of General: the folder the window has open, the settings read at each start, and the launches as the conversations make them. */
 function generalDeps(ports: { client: OmpClientPort; view: ChatViewPort }, store: ConversationStore): GeneralDeps {
   return {
     client: ports.client,
     view: ports.view,
     store,
-    folder: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+    folder: generalFolder,
     usable: configuredOmpChat,
     ompPath: configuredOmpPath,
     findOmp: findConfiguredOmp,
-    checkOmp: checkedOmp,
+    checkOmp: (program) => ompVersionOnly(program),
     instructions: generalInstructions,
     launch: async (root, terminalId) => {
       const endpoint = await questionEndpoint(root);
@@ -379,7 +405,7 @@ export function ownsAgentTerminal(terminal: string, root: string): boolean {
   }
   const conversation = chatConversations?.named(terminal);
   if (conversation !== undefined) return conversation.root === root;
-  return general?.owns(terminal) === true && vscode.workspace.workspaceFolders?.[0]?.uri.fsPath === root;
+  return general?.owns(terminal) === true && generalFolder() === root;
 }
 
 /** The name on the tab of the terminal or conversation `terminal` (`Design`, a Task's tab name, `General`), or undefined when this window has none by that identity. */
@@ -461,10 +487,11 @@ function isTypedCommand(terminal: vscode.Terminal, commandLine: string | undefin
 
 /** What a design request announces: its title. */
 export type DesignAnnouncement = string;
-/** A card a launch announces: a Resolve Drifts, which names the Drifts it resolves (read once the instruction is sent, when they are known), a manual scan, an import (`work`), or Unify Drifts, a Drift titled by the number of Drifts it unites. */
+/** A card a launch announces: a Resolve Drifts, which names the Drifts it resolves (read once the instruction is sent, when they are known), the refinement of a Proposal (bound to it), a manual scan, an import (`work`), or Unify Drifts, a Drift titled by the number of Drifts it unites. */
 export type LaunchAnnouncement =
   | { kind: "resolve"; drifts: () => readonly string[] }
   | { kind: "unify"; drifts: () => readonly string[] }
+  | { kind: "refine"; proposal: string; title: string }
   | { kind: "work" | "check"; title: string };
 
 /** Announces the card of a launch and returns its ID, or undefined when no card is announced. */
@@ -482,6 +509,8 @@ function announceLaunch(root: string, announcement: DesignAnnouncement | LaunchA
       if (drifts.length === 0) return undefined;
       return announce(projectAt(root), { kind: "proposal", title: "Resolve Drifts", drifts, source: "request", ...origin }).id;
     }
+    // A refinement announces the Proposal it refines: bound to it from the start, with its title, so it is no card of its own.
+    if (announcement.kind === "refine") return announce(projectAt(root), { kind: "proposal", title: announcement.title, proposal: announcement.proposal, source: "request", ...origin }).id;
     const phase = announcement.kind === "check" ? { kind: "check" as const, phase: "scanning" as const } : { kind: "work" as const };
     return announce(projectAt(root), { ...phase, title: announcement.title, source: "request", ...origin }).id;
   } catch (err) {
@@ -520,18 +549,17 @@ function inSendTurn<T>(step: () => Promise<T>): Promise<T> {
 }
 
 /**
- * The instruction with its limit, sub-agent, parallel execution, advisor, Drift blocker, Async Drift Resolver, context sharing, ask, auto-exit and language sentences.
+ * The instruction with its limit, sub-agent, parallel execution, advisor, Async Drift Resolver, context sharing, ask, auto-exit and language sentences.
  * The parallel execution sentence goes right after the sub-agent sentence (or the limit one, when there is none), only to a run over several Tasks and only when
- * `trama.parallelExecution` is on, read now. The ask sentence always stays on the instruction's line, after the Drift blocker's sentence and before the language one;
- * the auto-exit sentence, when `trama.autoExit` is on, follows the ask sentence.
+ * `trama.parallelExecution` is on, read now. The ask sentence always stays on the instruction's line, after the limit, sub-agent and optional-feature sentences and before the language one;
+ * the auto-exit sentence, when `trama.autoExit` is on, sits between the ask sentence and the language one.
  */
 function agentPrompt(instruction: string, role: Role, filesDrifts: boolean, severalTasks: boolean, advisor?: string, limit?: number): string {
   const withLimit = withAgentLimit(instruction, limit);
   const withSubAgent = canScan(role) && advisor === undefined ? `${withLimit} Compare each Machine with the trama-analysis sub-agent.` : withLimit;
   const withParallel = severalTasks && configuredParallelExecution() ? `${withSubAgent} ${PARALLEL_EXECUTION_SENTENCE}` : withSubAgent;
   const withAdvisor = advisor !== undefined ? `${withParallel} ${advisor}` : withParallel;
-  const withBlocker = withDriftBlocker(withAdvisor, filesDrifts && configuredDriftBlocker());
-  const withResolver = withAsyncDriftResolver(withBlocker, filesDrifts && configuredAsyncDriftResolver());
+  const withResolver = withAsyncDriftResolver(withAdvisor, filesDrifts && configuredAsyncDriftResolver());
   const withSharing = withContextSharing(withResolver, configuredSubagentsContextSharing());
   const withAsk = `${withSharing} ${ASK_DEVELOPER_SENTENCE}`;
   const withExit = configuredAutoExit() ? `${withAsk} ${AUTO_EXIT_SENTENCE}` : withAsk;
@@ -619,7 +647,7 @@ export function endHeldJob(root: string, id: string, abnormal?: string): void {
 
 export interface LaunchJobOptions {
   id?: string;
-  /** Whether the instruction lets the agent file Drifts: the Drift blocker's sentence then goes to it. */
+  /** Whether the instruction lets the agent file Drifts: the Async Drift Resolver's sentence then goes to it. */
   filesDrifts?: boolean;
   /** Whether the instruction is for a run over several Tasks (Run all, a Run of its sequence by model): the parallel execution's sentence then goes to it. */
   severalTasks?: boolean;
@@ -701,7 +729,7 @@ export async function launchAgent(
       name,
       cwd: root,
       shellPath,
-      env: { ...terminalEnv(endpoint, terminalId, jobId, advisor, isRun, runTask, parallel), ...ompPathEnv(omp) },
+      env: { ...terminalEnv(endpoint, terminalId, jobId, advisor, isRun, runTask, parallel), ...ompTerminalEnv(omp) },
       ...(asTab ? { location: { viewColumn: vscode.ViewColumn.Active, preserveFocus: true } } : {}),
     });
     if (replaced) warnShellReplaced(defaultShell);
@@ -767,7 +795,7 @@ async function openFocusedTerminal(root: string, name: string, omp: string, line
     name,
     cwd: root,
     shellPath,
-    env: { ...terminalEnv(endpoint, terminalId), ...ompPathEnv(omp) },
+    env: { ...terminalEnv(endpoint, terminalId), ...ompTerminalEnv(omp) },
     ...(asTab ? { location: { viewColumn: vscode.ViewColumn.Active, preserveFocus: false } } : {}),
   });
   announceLaunch(root, { kind: "work", title: name }, { terminal: terminalId });
@@ -847,10 +875,13 @@ function openBareTerminal(name: string, shellPath: string | undefined, env: Reco
  * Install omp: a new visible terminal named `Install omp` in the user's home folder, in the terminals area whatever `trama.terminalLocation` says, with
  * the agent terminals' shell (Windows PowerShell on Windows, where the command needs it). It is no agent terminal: no `TRAMA_*` variable, no hook, no
  * ghost, no job. The official installer's command is written when the shell is ready. `onFinished` runs once, when the command ends or the terminal closes.
+ * `systemCertificates` is the mode for this terminal (the saved setting unless the wizard's step says otherwise).
  */
-export function installOmp(onFinished: () => void, windows = process.platform === "win32"): vscode.Terminal {
+export function installOmp(onFinished: () => void, windows = process.platform === "win32", systemCertificates = configuredSystemCertificates()): vscode.Terminal {
   const { shellPath } = bareTerminalShell(windows);
-  return openBareTerminal("Install omp", shellPath, undefined, windows ? INSTALL_OMP_COMMAND.windows : INSTALL_OMP_COMMAND.posix, onFinished);
+  // With System Certificates on and a bundle on disk the installer's downloads trust the system's authorities too; otherwise the terminal gets no environment of Trama's.
+  const certificates = systemCertificatesEnv(systemCertificates);
+  return openBareTerminal("Install omp", shellPath, Object.keys(certificates).length === 0 ? undefined : certificates, windows ? INSTALL_OMP_COMMAND.windows : INSTALL_OMP_COMMAND.posix, onFinished);
 }
 
 /**
@@ -859,7 +890,34 @@ export function installOmp(onFinished: () => void, windows = process.platform ==
  * with the folders of omp and bun, so omp's script finds bun even when the editor started from a desktop launcher. Nothing of the terminal is read: not its output,
  * not its input, not the exit code. `onFinished` runs once, when the command ends or the terminal closes; every click opens another terminal and none is closed or reused.
  */
-export function loginOmp(program: string, provider: OmpLoginProvider, onFinished: () => void, windows = process.platform === "win32"): vscode.Terminal {
+export function loginOmp(program: string, provider: OmpLoginProvider, onFinished: () => void, windows = process.platform === "win32", systemCertificates = configuredSystemCertificates()): vscode.Terminal {
   const { family, shellPath } = bareTerminalShell(windows);
-  return openBareTerminal(`Log in to ${provider.name}`, shellPath, ompPathEnv(program), `${quoteProgram(family, program)} login ${provider.id}`, onFinished);
+  return openBareTerminal(`Log in to ${provider.name}`, shellPath, ompTerminalEnv(program, systemCertificates), `${quoteProgram(family, program)} login ${provider.id}`, onFinished);
+}
+
+/** How long `omp auth-broker logout` may take before Trama stops it. */
+export const LOGOUT_TIMEOUT_MS = 30_000;
+
+/** The outcome of a logout command: it succeeded (exit code 0), or why it did not, in English as the editor's error shows it. */
+export type LogoutOutcome = { ok: true } | { ok: false; reason: string };
+
+/**
+ * Log out of a model provider: `execFile(program, ["auth-broker", "logout", <id>])`, without a terminal and without a shell, with the environment of every omp process (`ompTerminalEnv`
+ * over the inherited `env`, so a saved Cursor API key reaches omp as `CURSOR_ACCESS_TOKEN` and wins) and 30 seconds. `provider` comes from `OMP_LOGIN_PROVIDERS`, so its `id` is never
+ * text the webview sent. Only the exit code and the error output are read: the reason of a failure is the last non-empty line of the error output, or else `exit code <n>`,
+ * `could not start omp` or `timed out`; a certificate error in the error output is the certificate error text of the mode instead. Never rejects.
+ */
+export function logoutOmp(program: string, provider: OmpLoginProvider, timeoutMs = LOGOUT_TIMEOUT_MS, env: NodeJS.ProcessEnv = process.env): Promise<LogoutOutcome> {
+  const { promise, resolve } = Promise.withResolvers<LogoutOutcome>();
+  const systemCertificates = configuredSystemCertificates();
+  execFile(program, ["auth-broker", "logout", provider.id], { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, env: { ...env, ...ompTerminalEnv(program, systemCertificates) } }, (error, _stdout, stderr) => {
+    if (error === null) return resolve({ ok: true });
+    const lines = String(stderr).split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "");
+    const last = lines.at(-1);
+    if (last !== undefined) return resolve({ ok: false, reason: certificateReason(last, [String(stderr)], systemCertificates) });
+    const code = (error as ExecFileException).code;
+    if (error.killed === true && code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") return resolve({ ok: false, reason: "timed out" });
+    resolve({ ok: false, reason: typeof code === "number" ? `exit code ${code}` : "could not start omp" });
+  });
+  return promise;
 }

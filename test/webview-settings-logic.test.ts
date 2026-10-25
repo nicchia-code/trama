@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type { ModelSuggestion } from "../extension/src/host/model-lists";
-import { composeRoleValue, ompStatusLine, splitRoleValue, thinkingLevels, withModel } from "../extension/src/webview/settings/logic";
+import { certificateErrorText, reasonLine } from "../extension/src/certificate-errors";
+import { composeRoleValue, exportedAtLabel, ompStatusLine, splitRoleValue, systemCertificatesLine, thinkingLevels, withModel } from "../extension/src/webview/settings/logic";
 
 const HAIKU = "anthropic/claude-haiku-4-5";
 const models: ModelSuggestion[] = [
@@ -41,4 +42,30 @@ test("the omp row says what omp answered, or, when omp is older than the minimum
   expect(ompStatusLine({ state: "done", missing: false, version: "18.12.6", models: 3 })).toEqual({ tone: "ok", text: "omp 18.12.6 answered with 3 models.", missing: false });
   expect(ompStatusLine({ state: "done", missing: false, version: "18.12.5", models: 3, tooOld: true })).toEqual({ tone: "warning", text: "Trama needs omp 18.12.6 or later; the installed omp is 18.12.5.", missing: true });
   expect(ompStatusLine({ state: "done", missing: true, error: "omp not found at x" })).toEqual({ tone: "warning", text: "omp not found at x. Trama cannot work without omp.", missing: true });
+});
+
+test("the System Certificates line reads in words for each state and takes its time in the editor's short form", () => {
+  const when = "2026-10-25T10:30:00.000Z";
+  const label = new Date(when).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+  expect(exportedAtLabel(when)).toBe(label);
+  expect(systemCertificatesLine(null)).toEqual({ tone: "exporting", text: "Exporting system certificates…" });
+  expect(systemCertificatesLine({ exporting: true, count: 4, exportedAt: when })).toEqual({ tone: "exporting", text: "Exporting system certificates…" });
+  expect(systemCertificatesLine({ exporting: false, count: 4, exportedAt: when })).toEqual({ tone: "ready", text: `4 certificates, exported ${label}.` });
+  expect(systemCertificatesLine({ exporting: false, count: 4, exportedAt: when, error: "the export did not finish within 30 s" })).toEqual({
+    tone: "warning",
+    text: `Could not export the system certificates (the export did not finish within 30 s). Using the ones exported ${label}.`,
+  });
+  expect(systemCertificatesLine({ exporting: false, error: "no certificate authority found" })).toEqual({
+    tone: "warning",
+    text: "Could not export the system certificates (no certificate authority found). omp gets no certificates from Trama.",
+  });
+});
+
+test("a certificate error text is the reason of the omp state, with its final full stop, and the other reasons stay as they were", () => {
+  const text = certificateErrorText(false);
+  expect(ompStatusLine({ state: "done", missing: false, error: text })).toEqual({ tone: "warning", text: `${text}. Trama cannot work without omp.`, missing: false });
+  expect(ompStatusLine({ state: "done", missing: false, error: certificateErrorText(true) }).text).toBe(`${certificateErrorText(true)}. Trama cannot work without omp.`);
+  expect(reasonLine(text)).toBe(`${text}.`);
+  expect(reasonLine(certificateErrorText(true))).toBe(`${certificateErrorText(true)}.`);
+  expect(reasonLine("omp exited with code 3")).toBe("omp exited with code 3");
 });

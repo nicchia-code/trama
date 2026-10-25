@@ -105,17 +105,25 @@ describe("omp Chat switched off", () => {
     expect(step.effects.slice(-4)).toEqual(["stop", "discard", "withdraw", "removed"]);
   });
 
-  test("with the agent in a turn General is kept and its agent keeps working", () => {
+  test("with the agent in a turn General is kept and its agent keeps working, and its saved entry is dropped", () => {
     expect(run([on, { type: "sessionStarted" }, offTurn]).machine.phase).toBe("kept");
+    expect(generalStep({ phase: "ready", session: true }, offTurn).effects).toEqual(["unsave"]);
   });
 
-  test("Kept: the close button closes it, and the switch back on cleans up and starts a new session", () => {
+  test("Kept: the close button closes it, and the switch back on returns it to Ready with its agent and conversation", () => {
     const kept = [on, { type: "sessionStarted" }, offTurn] as GeneralEvent[];
     expect(run([...kept, { type: "close" }]).machine.phase).toBe("absent");
     expect(run([...kept, { type: "exited" }]).machine.phase).toBe("absent");
     const back = run([...kept, { ...on }]);
-    expect(back.machine).toEqual({ phase: "starting", session: false });
-    expect(back.effects.slice(-5)).toEqual(["stop", "discard", "withdraw", "cleared", "start"]);
+    expect(back.machine).toEqual({ phase: "ready", session: true });
+    expect(generalStep({ phase: "kept", session: true }, { ...on }).effects).toEqual(["save"]);
+  });
+
+  test("a Ready General that was kept follows the rules of Ready: its exit, its stop and the window closing", () => {
+    const back = [on, { type: "sessionStarted" }, offTurn, { ...on }] as GeneralEvent[];
+    expect(run([...back, { type: "exited" }]).machine).toEqual({ phase: "stopped", session: true });
+    expect(run([...back, { type: "stop" }]).effects.at(-1)).toBe("cancel");
+    expect(run([...back, { type: "windowClosed" }]).machine).toEqual({ phase: "waiting", session: true });
   });
 
   test("Kept accepts messages and Stop as in Ready", () => {

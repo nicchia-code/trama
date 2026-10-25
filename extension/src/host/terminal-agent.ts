@@ -44,7 +44,7 @@ export function ompOptions(scanning: boolean, models: { model: string; scan: str
 /** The options of an Ask more conversation or terminal: `--model <m>` only when the analysis role has a model; no hook, overlay, `--slow` or `--advisor`. */
 export const askMoreOptions = (model: string): string[][] => (model === "" ? [] : [["--model", model]]);
 
-/** The approval of an omp Chat conversation: `ask` (omp asks permission, the default) or `yolo`. */
+/** The approval of an omp Chat conversation: `ask` (omp asks permission as in the terminal) or `yolo` (the default). */
 export type OmpApproval = "ask" | "yolo";
 
 /** The arguments of a conversation's `omp` process: the job's options as they are, then `acp`, and `--yolo` only with the `yolo` approval. */

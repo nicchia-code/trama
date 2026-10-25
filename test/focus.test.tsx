@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { Snapshot, TaskView } from "../src/core/snapshot";
 import { EMPTY_SPECS, type Specs } from "../src/core/specs";
 import type { FocusRequest } from "../extension/src/protocol";
+import { fitView } from "../extension/src/webview/diagram/canvas";
 import { createDiagramStore } from "../extension/src/webview/diagram/state";
 import { buildScene } from "../extension/src/webview/diagram/scene";
 import { FocusBar } from "../extension/src/webview/focus/bar";
@@ -103,6 +104,35 @@ describe("Diagram focus", () => {
     expect(store.get().fitTo?.length).toBeGreaterThan(0);
   });
 
+  test("a step slides the view to its elements; Fit and a link to an element jump, and none of them touches the focus", () => {
+    const store = setup();
+    store.stepFocus(1);
+    expect(store.get().fitSmooth).toBe(true);
+    expect(store.get().fitTo?.length).toBeGreaterThan(0);
+    const { focus } = store.get();
+    store.refit();
+    expect(store.get().fitSmooth).toBe(false);
+    expect(store.get().fitTo).toBeNull();
+    expect(store.get().focus?.index).toBe(focus?.index);
+    store.stepFocus(-1);
+    expect(store.get().fitSmooth).toBe(true);
+    store.navigateRef("order");
+    expect(store.get().fitSmooth).toBe(false);
+    expect(store.get().focus).not.toBeNull();
+  });
+
+  test("the view that contains a step is centred on it and never zooms in beyond the limit of Fit", () => {
+    const size = { width: 800, height: 600 };
+    const big = fitView({ x1: 0, y1: 0, x2: 1600, y2: 300 }, size, 36);
+    expect(big.zoom).toBeCloseTo((800 - 72) / 1600);
+    expect(big.pan.x).toBeCloseTo(400 - 800 * big.zoom);
+    expect(big.pan.y).toBeCloseTo(300 - 150 * big.zoom);
+    const small = fitView({ x1: 100, y1: 100, x2: 140, y2: 120 }, size, 36);
+    expect(small.zoom).toBe(1.2);
+    expect(small.pan.x).toBeCloseTo(400 - 120 * 1.2);
+    expect(small.pan.y).toBeCloseTo(300 - 110 * 1.2);
+  });
+
   test("a level opened by hand with none of the focus has no current step, and Previous and Next go to the first and the last", () => {
     const store = setup();
     const steps = store.get().focus?.steps ?? [];
@@ -117,7 +147,7 @@ describe("Diagram focus", () => {
     expect(store.get().level).toEqual(steps[0]?.level ?? { kind: "system" });
   });
 
-  test("Clear keeps the level, the position and the Proposal drawn; choosing a Proposal in the selector takes the focus off", () => {
+  test("Clear keeps the level, the position and the Proposal drawn; choosing a Proposal in the selector is ignored while the focus is on", () => {
     const store = setup();
     store.stepFocus(1);
     const { level, proposalId } = store.get();
@@ -126,9 +156,14 @@ describe("Diagram focus", () => {
     expect(store.get().level).toEqual(level);
     expect(store.get().proposalId).toBe(proposalId);
     store.focusOn({ kind: "proposal", id: returns?.id ?? "" });
+    const { index } = store.get().focus ?? { index: -1 };
     store.chooseProposal(null);
-    expect(store.get().focus).toBeNull();
-    expect(store.get().focusRequest).toBeNull();
+    expect(store.get().proposalId).toBe(returns?.id ?? null);
+    expect(store.get().focusRequest).not.toBeNull();
+    expect(store.get().focus?.index).toBe(index);
+    store.clearFocus();
+    store.chooseProposal(null);
+    expect(store.get().proposalId).toBeNull();
   });
 
   test("a new focus replaces the old one and the Proposal drawn; a Task's or a chip's draws none", () => {
@@ -251,6 +286,36 @@ describe("Requirements focus", () => {
     expect(screen.queryByRole("region", { name: "Focus" })).not.toBeNull();
     fireEvent.keyDown(button, { key: "Escape" });
     expect(screen.queryByRole("region", { name: "Focus" })).toBeNull();
+  });
+});
+
+describe("the Proposal selector during a focus", () => {
+  const drawn = shopWithProposals();
+  // Only a Proposal that touches the Requirements is offered by their selector.
+  const withProposals = withTask(["requirements/data#order"], { ...drawn, proposals: drawn.proposals.map((p) => ({ ...p, areas: drawn.areas.filter((a) => a.id === "data") })) });
+  const request: FocusRequest = { kind: "task", id: "t1" };
+  const requirementsSelector = () => screen.getByRole("combobox", { name: "Proposal to draw over the Requirements" }) as HTMLButtonElement;
+  const specsSelector = () => screen.getByRole("combobox", { name: "Proposal to draw over the Specs" }) as HTMLButtonElement;
+
+  test("Requirements: disabled while a focus is on, enabled again after Clear", () => {
+    function Harness() {
+      const [focus, setFocus] = useState<PageFocus | null>(settle(openPageFocus(request), requirementSteps(withProposals, spec(withProposals, request)).steps));
+      return <RequirementsTab snapshot={withProposals} proposalId={null} focus={focus} onProposal={() => {}} onFocus={setFocus} navigate={() => {}} openFile={() => {}} openLink={() => {}} />;
+    }
+    render(<Harness />);
+    expect(requirementsSelector().disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(requirementsSelector().disabled).toBe(false);
+  });
+
+  test("Specs: disabled while a focus is on, enabled without one", () => {
+    const snapshot = { ...withTask(["specs#ci"], shopWithProposals()), specs: specsWith({ ci: [entry("GitHub Actions")] }), specsPresent: true } as Snapshot;
+    const focus = settle(openPageFocus(request), specsSteps(snapshot, spec(snapshot, request)).steps);
+    render(<SpecsTab snapshot={snapshot} proposalId={null} focus={focus} onProposal={() => {}} onFocus={() => {}} openLink={() => {}} />);
+    expect(specsSelector().disabled).toBe(true);
+    cleanup();
+    render(<SpecsTab snapshot={snapshot} proposalId={null} focus={null} onProposal={() => {}} onFocus={() => {}} openLink={() => {}} />);
+    expect(specsSelector().disabled).toBe(false);
   });
 });
 

@@ -1,4 +1,7 @@
 import { execFile, type ExecFileException } from "node:child_process";
+import { certificateErrorText, isCertificateError } from "../certificate-errors";
+import { cursorKeyEnv } from "./cursor-api-key";
+import { savedSystemCertificates, systemCertificatesEnv } from "./system-certificates";
 import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 
@@ -80,8 +83,12 @@ export interface ModelList {
   missing?: true;
 }
 
-/** The reason omp gives no list: the program is missing, it did not answer in time, it exited with a failure code, or it printed no list. */
-function ompError(error: ExecFileException | null, ompPath: string, timeoutMs: number): string {
+/**
+ * The reason omp gives no list: the program is missing, it did not answer in time, it exited with a failure code, or it printed no list. When the error output of a
+ * failed run (`stderr`, read only for this test) says omp could not verify a certificate, the reason is the certificate error text for the mode `systemCertificates`.
+ */
+function ompError(error: ExecFileException | null, ompPath: string, timeoutMs: number, stderr: string, systemCertificates: boolean): string {
+  if (error !== null && error.code !== "ENOENT" && isCertificateError(stderr)) return certificateErrorText(systemCertificates);
   if (error?.code === "ENOENT") return `omp not found at ${ompPath === "" ? "the editor PATH" : ompPath}`;
   if (error?.code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" && error?.killed === true) return `omp models did not answer within ${timeoutMs / 1000} s`;
   if (typeof error?.code === "number") return `omp exited with code ${error.code}`;
@@ -101,13 +108,16 @@ export function ompPathVariable(ompPath: string, env: NodeJS.ProcessEnv = proces
   return [...new Set(folders), env["PATH"] ?? env["Path"] ?? ""].filter((part) => part !== "").join(delimiter);
 }
 
-/** `omp models --json`, run without a shell and with fixed arguments: `ompPath` when it is not empty, else `omp` from the editor's PATH. */
-export function ompModels(ompPath: string, timeoutMs = 15_000, env: NodeJS.ProcessEnv = process.env): Promise<ModelList> {
+/**
+ * `omp models --json`, run without a shell and with fixed arguments: `ompPath` when it is not empty, else `omp` from the editor's PATH. `systemCertificates` is the
+ * mode System Certificates for this process (the saved setting unless the wizard's step says otherwise): with it and a bundle on disk the process receives the bundle.
+ */
+export function ompModels(ompPath: string, timeoutMs = 15_000, env: NodeJS.ProcessEnv = process.env, systemCertificates: boolean = savedSystemCertificates()): Promise<ModelList> {
   const { promise, resolve } = Promise.withResolvers<ModelList>();
-  const options = { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, env: { ...env, PATH: ompPathVariable(ompPath, env) } };
-  execFile(ompPath === "" ? "omp" : ompPath, ["models", "--json"], options, (error, stdout) => {
+  const options = { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, env: { ...env, ...cursorKeyEnv(), ...systemCertificatesEnv(systemCertificates), PATH: ompPathVariable(ompPath, env) } };
+  execFile(ompPath === "" ? "omp" : ompPath, ["models", "--json"], options, (error, stdout, stderr) => {
     const list = error === null ? parseOmpList(stdout) : undefined;
-    resolve(list === undefined ? { models: [], error: ompError(error, ompPath, timeoutMs), ...(error?.code === "ENOENT" ? { missing: true as const } : {}) } : list);
+    resolve(list === undefined ? { models: [], error: ompError(error, ompPath, timeoutMs, String(stderr), systemCertificates), ...(error?.code === "ENOENT" ? { missing: true as const } : {}) } : list);
   });
   return promise;
 }

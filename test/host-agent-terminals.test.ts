@@ -20,6 +20,7 @@ import { syncRequirementSkills } from "../src/core/requirement-skills";
 import type { AgentAction } from "../extension/src/protocol";
 import { ASK_DEVELOPER_SENTENCE, AUTO_EXIT_SENTENCE, buildPrompt, languageSentence } from "../extension/src/host/prompts";
 import { ompPathVariable } from "../extension/src/host/model-lists";
+import { startCursorApiKey } from "../extension/src/host/cursor-api-key";
 import { type OmpLoginProvider, OMP_LOGIN_PROVIDERS, ompLoginProvider } from "../extension/src/omp-login";
 import type { Project } from "../src/core/store";
 
@@ -90,6 +91,10 @@ const inspected: Record<string, { globalValue?: unknown; workspaceValue?: unknow
 const updates: { key: string; value: unknown }[] = [];
 /** Settings the test changes; anything else reads as the editor's default. */
 const settingValues: Record<string, unknown> = { agent: "omp" };
+/** The optional features that are on by default (absent reads as on). Most tests keep them explicitly off, as `{ globalValue: false }`, so instructions stay plain; a test that checks the default turns this off. */
+const OPTIONAL_FEATURES = ["advisorScanner", "parallelExecution", "asyncDriftResolver", "subagentsContextSharing", "autoUpdateStaleProposals"];
+let featuresOffByDefault = true;
+const optionalOff = (key: string) => (featuresOffByDefault && OPTIONAL_FEATURES.includes(key) ? { globalValue: false } : undefined);
 let extensionPath = "";
 const editor = { appName: "Visual Studio Code" };
 /** What the fake editor does with a command: by default nothing; a test may make it fail or return a value. */
@@ -192,7 +197,7 @@ mock.module("vscode", () => ({
     },
     getConfiguration: () => ({
       get: (key: string, fallback: unknown) => (key in settingValues ? settingValues[key] : fallback),
-      inspect: (key: string) => inspected[key] ?? (key in settingValues ? { globalValue: settingValues[key] } : undefined),
+      inspect: (key: string) => inspected[key] ?? (key in settingValues ? { globalValue: settingValues[key] } : optionalOff(key)),
       update: async (key: string, value: unknown) => void updates.push({ key, value }),
     }),
     createFileSystemWatcher: (pattern: string) => pattern === "**/.trama/{requirements/**,specs.yaml}"
@@ -659,6 +664,220 @@ describe("Log in to a provider", () => {
   });
 });
 
+describe("System Certificates in the terminals and the commands", () => {
+  const VARIABLES = ["NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "GIT_SSL_CAINFO", "PIP_CERT", "CARGO_HTTP_CAINFO", "AWS_CA_BUNDLE", "DENO_CERT"];
+  const saved = { HOME: process.env["HOME"], XDG_CACHE_HOME: process.env["XDG_CACHE_HOME"] };
+  /** The bundle's path in the temporary home of this file; the folder is created, the file only by `writeBundle`. */
+  const bundle = async (): Promise<string> => {
+    const { bundlePath } = await import("../extension/src/host/system-certificates");
+    const path = bundlePath();
+    mkdirSync(join(path, ".."), { recursive: true });
+    return path;
+  };
+  beforeEach(() => {
+    process.env["HOME"] = home;
+    delete process.env["XDG_CACHE_HOME"];
+  });
+  afterEach(async () => {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    delete inspected["systemCertificates"];
+    const { bundlePath } = await import("../extension/src/host/system-certificates");
+    rmSync(bundlePath(), { force: true });
+  });
+
+  test("the user value alone turns the mode on: a workspace value, a non-boolean or no value is off", async () => {
+    const { configuredSystemCertificates } = await import("../extension/src/host/agent");
+    expect(configuredSystemCertificates()).toBe(false);
+    inspected["systemCertificates"] = { globalValue: true };
+    expect(configuredSystemCertificates()).toBe(true);
+    for (const entry of [{ workspaceValue: true }, { workspaceFolderValue: true }, { globalValue: "true" }, { globalValue: 1 }, { globalValue: false }]) {
+      inspected["systemCertificates"] = entry;
+      expect(configuredSystemCertificates()).toBe(false);
+    }
+  });
+
+  test("a job's terminal and the Ask more terminal get the nine variables in their env with the mode on and a bundle on disk, never in the command line; off, or without a bundle, none", async () => {
+    const { launchAgent, openAskMore, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const watching = watchAgentTerminal();
+    const root = mkdtempSync(join(tmpdir(), "trama-certs-terminals-"));
+    cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+    extensionPath = join(root, "ext");
+    mkdirSync(join(extensionPath, "media"), { recursive: true });
+    mkdirSync(join(extensionPath, "bin"), { recursive: true });
+    writeFileSync(join(extensionPath, "media", "ask-more.md"), "Ask more instructions.");
+    writeFileSync(join(extensionPath, "bin", process.platform === "win32" ? "trama.exe" : "trama"), "");
+    projectAt(root);
+    const path = await bundle();
+    const absent = (env: Record<string, string> | undefined) => VARIABLES.filter((name) => env?.[name] !== undefined);
+    try {
+      // On with no bundle: nothing is set.
+      inspected["systemCertificates"] = { globalValue: true };
+      expect(await launchAgent(root, "first", "Scan")).toBe("terminal");
+      expect(absent(environments.at(-1))).toEqual([]);
+      listeners.end.forEach((fn) => fn(shell(terminals.at(-1) as FakeTerminal)));
+
+      writeFileSync(path, "bundle\n");
+      expect(await launchAgent(root, "second", "Scan")).toBe("terminal");
+      const job = terminals.at(-1) as FakeTerminal;
+      for (const name of VARIABLES) expect(environments.at(-1)?.[name], name).toBe(path);
+      expect(job.line).not.toContain(path);
+      await openAskMore(root, "Ask T3", "Ask more about the Task.", "Ask about the Task…");
+      const ask = terminals.at(-1) as FakeTerminal;
+      for (const name of VARIABLES) expect(environments.at(-1)?.[name], name).toBe(path);
+      expect(ask.line).not.toContain(path);
+      listeners.end.forEach((fn) => fn(shell(job)));
+      listeners.end.forEach((fn) => fn(shell(ask)));
+
+      // Off with a bundle on disk: the environment is what it is without the feature.
+      delete inspected["systemCertificates"];
+      await launchAgent(root, "third", "Scan");
+      expect(absent(environments.at(-1))).toEqual([]);
+      listeners.end.forEach((fn) => fn(shell(terminals.at(-1) as FakeTerminal)));
+      // A workspace value never turns it on.
+      inspected["systemCertificates"] = { workspaceValue: true };
+      await launchAgent(root, "fourth", "Scan");
+      expect(absent(environments.at(-1))).toEqual([]);
+      listeners.end.forEach((fn) => fn(shell(terminals.at(-1) as FakeTerminal)));
+    } finally {
+      watching.dispose();
+      extensionPath = "";
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("the login terminal and the installer terminal get the variables with the step's value or, without it, the saved setting; the commands stay the fixed ones", async () => {
+    const { installOmp, loginOmp, INSTALL_OMP_COMMAND } = await import("../extension/src/host/agent");
+    const provider = ompLoginProvider("anthropic") as OmpLoginProvider;
+    const path = await bundle();
+    writeFileSync(path, "bundle\n");
+    // The saved setting is off: the installer has no environment of Trama's and the login only its PATH.
+    const plain = installOmp(() => {}, false) as unknown as FakeTerminal;
+    expect(created.at(-1)?.env).toBeUndefined();
+    expect(plain.line).toBe(INSTALL_OMP_COMMAND.posix);
+    expect(Object.keys(loginEnvironment(() => loginOmp("omp", provider, () => {}, false))).filter((name) => VARIABLES.includes(name))).toEqual([]);
+    // The step's value counts for that terminal only, saved or not.
+    const stepInstaller = installOmp(() => {}, false, true) as unknown as FakeTerminal;
+    for (const name of VARIABLES) expect(created.at(-1)?.env[name], name).toBe(path);
+    expect(Object.keys(created.at(-1)?.env ?? {}).sort()).toEqual([...VARIABLES].sort());
+    expect(stepInstaller.line).toBe(INSTALL_OMP_COMMAND.posix);
+    expect(stepInstaller.line).not.toContain(path);
+    const login = loginOmp("omp", provider, () => {}, false, true) as unknown as FakeTerminal;
+    for (const name of VARIABLES) expect(created.at(-1)?.env[name], name).toBe(path);
+    expect(login.line).toBe("'omp' login anthropic");
+    // The saved setting on, and the step off: the step wins.
+    inspected["systemCertificates"] = { globalValue: true };
+    const saved = installOmp(() => {}, false) as unknown as FakeTerminal;
+    for (const name of VARIABLES) expect(created.at(-1)?.env[name], name).toBe(path);
+    expect(saved.line).toBe(INSTALL_OMP_COMMAND.posix);
+    installOmp(() => {}, false, false);
+    expect(created.at(-1)?.env).toBeUndefined();
+    loginOmp("omp", provider, () => {}, false, false);
+    expect(Object.keys(created.at(-1)?.env ?? {}).filter((name) => VARIABLES.includes(name))).toEqual([]);
+  });
+
+  /** The env the terminal of `open` was created with. */
+  const loginEnvironment = (open: () => unknown): Record<string, string> => {
+    open();
+    return created.at(-1)?.env ?? {};
+  };
+
+  test.skipIf(process.platform === "win32")("the logout receives the variables with the mode on and a bundle on disk, and a certificate error in its error output is the reason in plain words, with the mode on or off", async () => {
+    const { logoutOmp } = await import("../extension/src/host/agent");
+    const { certificateErrorText } = await import("../extension/src/certificate-errors");
+    const dir = mkdtempSync(join(tmpdir(), "trama-logout-certs-"));
+    const program = join(dir, "omp");
+    const seen = join(dir, "seen");
+    writeFileSync(program, `#!/bin/sh\nprintf '%s' "\${NODE_EXTRA_CA_CERTS:-none}" > '${seen}'\necho 'Error: CERT_HAS_EXPIRED' >&2\nexit 1\n`, { mode: 0o755 });
+    const provider = ompLoginProvider("anthropic") as OmpLoginProvider;
+    const path = await bundle();
+    try {
+      expect(await logoutOmp(program, provider, 10_000, { PATH: process.env["PATH"] ?? "" })).toEqual({ ok: false, reason: certificateErrorText(false) });
+      expect(readFileSync(seen, "utf8")).toBe("none");
+      writeFileSync(path, "bundle\n");
+      inspected["systemCertificates"] = { globalValue: true };
+      expect(await logoutOmp(program, provider, 10_000, { PATH: process.env["PATH"] ?? "" })).toEqual({ ok: false, reason: certificateErrorText(true) });
+      expect(readFileSync(seen, "utf8")).toBe(path);
+      // Another failure keeps omp's last line.
+      writeFileSync(program, "#!/bin/sh\necho 'quota exceeded' >&2\nexit 1\n", { mode: 0o755 });
+      expect(await logoutOmp(program, provider)).toEqual({ ok: false, reason: "quota exceeded" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("The Cursor API key in the terminals", () => {
+  const withKey = async <T>(key: string | undefined, body: () => Promise<T>): Promise<T> => {
+    const secrets = { get: async () => key, store: async () => undefined, delete: async () => undefined, onDidChange: () => ({ dispose() {} }) };
+    const following = await startCursorApiKey(secrets as never, () => {});
+    try {
+      return await body();
+    } finally {
+      following.dispose();
+    }
+  };
+  const before = process.env["CURSOR_ACCESS_TOKEN"];
+  afterEach(() => {
+    if (before === undefined) delete process.env["CURSOR_ACCESS_TOKEN"];
+    else process.env["CURSOR_ACCESS_TOKEN"] = before;
+  });
+
+  test("a job's terminal and the Ask more terminal get CURSOR_ACCESS_TOKEN in their env, and the key is never in the command line; without a key the variable is not added", async () => {
+    const { launchAgent, openAskMore, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const watching = watchAgentTerminal();
+    const root = mkdtempSync(join(tmpdir(), "trama-cursor-key-terminals-"));
+    cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+    extensionPath = join(root, "ext");
+    mkdirSync(join(extensionPath, "media"), { recursive: true });
+    mkdirSync(join(extensionPath, "bin"), { recursive: true });
+    writeFileSync(join(extensionPath, "media", "ask-more.md"), "Ask more instructions.");
+    writeFileSync(join(extensionPath, "bin", process.platform === "win32" ? "trama.exe" : "trama"), "");
+    projectAt(root);
+    try {
+      await withKey("  sk-terminal-key  ", async () => {
+        expect(await launchAgent(root, "first", "Scan")).toBe("terminal");
+        const job = terminals.at(-1) as FakeTerminal;
+        expect(environments.at(-1)?.["CURSOR_ACCESS_TOKEN"]).toBe("sk-terminal-key");
+        expect(job.line).not.toContain("sk-terminal-key");
+        await openAskMore(root, "Ask T3", "Ask more about the Task.", "Ask about the Task…");
+        const ask = terminals.at(-1) as FakeTerminal;
+        expect(ask).not.toBe(job);
+        expect(environments.at(-1)?.["CURSOR_ACCESS_TOKEN"]).toBe("sk-terminal-key");
+        expect(ask.line).not.toContain("sk-terminal-key");
+        listeners.end.forEach((fn) => fn(shell(job)));
+        listeners.end.forEach((fn) => fn(shell(ask)));
+      });
+      process.env["CURSOR_ACCESS_TOKEN"] = "editor-token";
+      await withKey(undefined, async () => {
+        await launchAgent(root, "second", "Scan");
+        // Without a saved key Trama adds nothing: the terminal inherits the editor's own variable.
+        expect(Object.keys(environments.at(-1) ?? {})).not.toContain("CURSOR_ACCESS_TOKEN");
+        listeners.end.forEach((fn) => fn(shell(terminals.at(-1) as FakeTerminal)));
+      });
+    } finally {
+      watching.dispose();
+      extensionPath = "";
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("the login terminal gets the key in its env, and its command line is only the program, login and the provider", async () => {
+    const { loginOmp } = await import("../extension/src/host/agent");
+    const provider = ompLoginProvider("cursor") as OmpLoginProvider;
+    await withKey("sk-login-key", async () => {
+      const terminal = loginOmp("omp", provider, () => {}, false) as unknown as FakeTerminal;
+      expect(created.at(-1)?.env["CURSOR_ACCESS_TOKEN"]).toBe("sk-login-key");
+      expect(terminal.line).toBe("'omp' login cursor");
+    });
+    const without = loginOmp("omp", provider, () => {}, false) as unknown as FakeTerminal;
+    expect(Object.keys(created.at(-1)?.env ?? {})).not.toContain("CURSOR_ACCESS_TOKEN");
+    expect(without.line).toBe("'omp' login cursor");
+  });
+});
+
 describe("omp run hooks", () => {
   test("every job loads the bundled omp hook module in its own terminal", async () => {
     // Dynamic import is intentional: the fake vscode extension registry must be in place before agent.ts loads.
@@ -863,33 +1082,60 @@ describe("automatic terminal exit", () => {
       delete inspected.autoExit;
     }
   });
-  test("the Advisor Scanner is on only from the user value true", async () => {
+  test("the Advisor Scanner is on unless the user value is false", async () => {
     // Loaded after the editor and home mocks above are in place: a static import would run before them.
     const { configuredAdvisorScanner } = await import("../extension/src/host/agent");
+    featuresOffByDefault = false;
     try {
+      expect(configuredAdvisorScanner()).toBe(true);
       inspected.advisorScanner = { globalValue: true };
       expect(configuredAdvisorScanner()).toBe(true);
-      inspected.advisorScanner = { globalValue: "true" };
+      inspected.advisorScanner = { globalValue: false };
       expect(configuredAdvisorScanner()).toBe(false);
-      inspected.advisorScanner = { workspaceValue: true };
-      expect(configuredAdvisorScanner()).toBe(false);
+      inspected.advisorScanner = { workspaceValue: false };
+      expect(configuredAdvisorScanner()).toBe(true);
     } finally {
+      featuresOffByDefault = true;
       delete inspected.advisorScanner;
     }
   });
-  test("the parallel execution is on only from the user value true", async () => {
-    const { configuredParallelExecution } = await import("../extension/src/host/agent");
+  test("with nothing set every Run gets --advisor and TRAMA_ADVISOR_SCANNER; an explicit false takes them away, and another job never has them", async () => {
+    const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const watching = watchAgentTerminal();
+    featuresOffByDefault = false;
     try {
-      expect(configuredParallelExecution()).toBe(false);
+      await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, () => true, "run");
+      expect((terminals.at(-1) as FakeTerminal).line).toMatch(/^.omp. --advisor /);
+      expect(environments.at(-1)?.["TRAMA_ADVISOR_SCANNER"]).toBe("1");
+      await launchAgent(dir, "Use the trama-scan skill on the whole System.", "Scan", undefined, () => true, "scan");
+      expect((terminals.at(-1) as FakeTerminal).line).not.toMatch(/--advisor/);
+      expect(Object.keys(environments.at(-1) ?? {})).not.toContain("TRAMA_ADVISOR_SCANNER");
+      inspected.advisorScanner = { globalValue: false };
+      await launchAgent(dir, "Use the trama-implement skill on Task efgh5678.", "T4", undefined, () => true, "run");
+      expect((terminals.at(-1) as FakeTerminal).line).not.toMatch(/--advisor/);
+      expect(Object.keys(environments.at(-1) ?? {})).not.toContain("TRAMA_ADVISOR_SCANNER");
+    } finally {
+      featuresOffByDefault = true;
+      delete inspected.advisorScanner;
+      withdrawAll(projectAt(dir));
+      watching.dispose();
+    }
+  });
+  test("the parallel execution is on unless the user value is false", async () => {
+    const { configuredParallelExecution } = await import("../extension/src/host/agent");
+    featuresOffByDefault = false;
+    try {
+      expect(configuredParallelExecution()).toBe(true);
       inspected.parallelExecution = { globalValue: true };
       expect(configuredParallelExecution()).toBe(true);
-      inspected.parallelExecution = { globalValue: "true" };
-      expect(configuredParallelExecution()).toBe(false);
-      inspected.parallelExecution = { workspaceValue: true };
+      inspected.parallelExecution = { workspaceValue: false };
+      expect(configuredParallelExecution()).toBe(true);
+      inspected.parallelExecution = { globalValue: false };
       expect(configuredParallelExecution()).toBe(false);
       inspected.parallelExecution = { globalValue: false, workspaceValue: true };
       expect(configuredParallelExecution()).toBe(false);
     } finally {
+      featuresOffByDefault = true;
       delete inspected.parallelExecution;
     }
   });
@@ -908,53 +1154,70 @@ describe("automatic terminal exit", () => {
     }
   });
 
-  test("Context Sharing is on only from the user value true", async () => {
+  test("Context Sharing is on unless the user value is false", async () => {
     const { configuredSubagentsContextSharing } = await import("../extension/src/host/agent");
+    featuresOffByDefault = false;
     try {
-      expect(configuredSubagentsContextSharing()).toBe(false);
+      expect(configuredSubagentsContextSharing()).toBe(true);
       inspected.subagentsContextSharing = { globalValue: true };
       expect(configuredSubagentsContextSharing()).toBe(true);
-      inspected.subagentsContextSharing = { globalValue: "true" };
+      inspected.subagentsContextSharing = { globalValue: false };
       expect(configuredSubagentsContextSharing()).toBe(false);
-      inspected.subagentsContextSharing = { workspaceValue: true };
+      inspected.subagentsContextSharing = { workspaceValue: false };
+      expect(configuredSubagentsContextSharing()).toBe(true);
+      inspected.subagentsContextSharing = { globalValue: false, workspaceValue: true };
       expect(configuredSubagentsContextSharing()).toBe(false);
     } finally {
+      featuresOffByDefault = true;
       delete inspected.subagentsContextSharing;
     }
   });
-  test("the Async Drift Resolver is on only from the user value true, and its sentence follows the Drift blocker's", async () => {
+  test("Auto-update Stale Proposals is on unless the user value is false", async () => {
+    const { configuredAutoUpdateStaleProposals } = await import("../extension/src/host/agent");
+    featuresOffByDefault = false;
+    try {
+      expect(configuredAutoUpdateStaleProposals()).toBe(true);
+      inspected.autoUpdateStaleProposals = { globalValue: true };
+      expect(configuredAutoUpdateStaleProposals()).toBe(true);
+      inspected.autoUpdateStaleProposals = { globalValue: false };
+      expect(configuredAutoUpdateStaleProposals()).toBe(false);
+      inspected.autoUpdateStaleProposals = { workspaceValue: false };
+      expect(configuredAutoUpdateStaleProposals()).toBe(true);
+    } finally {
+      featuresOffByDefault = true;
+      delete inspected.autoUpdateStaleProposals;
+    }
+  });
+  test("the Async Drift Resolver is on unless the user value is false, and its sentence follows the sub-agent sentence", async () => {
     const { configuredAsyncDriftResolver, launchAgent } = await import("../extension/src/host/agent");
-    const blocker = "The Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
     const resolver = "The Async Drift Resolver is on: before finishing, prepare the resolution question of every Drift filed in this job, as your skill says.";
     const scan = "Use the trama-scan skill on the whole System.";
     const base = `${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent.`;
+    const sharing = 'The sub-agents context sharing is on: pass each sub-agent what you have already read that concerns its part, as the "Sub-agents context sharing" section of your skill says.';
     const send = async (instruction: string, name: string, filesDrifts: boolean) => {
       await launchAgent(dir, instruction, name, undefined, undefined, undefined, undefined, { filesDrifts });
       return typed.at(-1) ?? "";
     };
+    featuresOffByDefault = false;
     try {
-      expect(configuredAsyncDriftResolver()).toBe(false);
-      inspected.asyncDriftResolver = { globalValue: "true" };
-      expect(configuredAsyncDriftResolver()).toBe(false);
-      inspected.asyncDriftResolver = { workspaceValue: true };
-      expect(configuredAsyncDriftResolver()).toBe(false);
+      expect(configuredAsyncDriftResolver()).toBe(true);
+      expect(await send(scan, "Scan", true)).toBe(`'omp' '${base} ${resolver} ${sharing} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
+      expect(await send("Use the trama-design skill. Add refunds.", "Design", false)).not.toContain(resolver);
       inspected.asyncDriftResolver = { globalValue: true };
       expect(configuredAsyncDriftResolver()).toBe(true);
-      expect(await send(scan, "Scan", true)).toBe(`'omp' '${base} ${resolver} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
-      inspected.driftBlocker = { globalValue: true };
-      expect(await send(scan, "Scan", true)).toBe(`'omp' '${base} ${blocker} ${resolver} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
-      expect(await send("Use the trama-design skill. Add refunds.", "Design", false)).not.toContain(resolver);
-      delete inspected.asyncDriftResolver;
-      expect(await send(scan, "Scan", true)).toBe(`'omp' '${base} ${blocker} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
+      inspected.asyncDriftResolver = { workspaceValue: false };
+      expect(configuredAsyncDriftResolver()).toBe(true);
+      inspected.asyncDriftResolver = { globalValue: false };
+      expect(configuredAsyncDriftResolver()).toBe(false);
+      expect(await send(scan, "Scan", true)).toBe(`'omp' '${base} ${sharing} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
     } finally {
+      featuresOffByDefault = true;
       delete inspected.asyncDriftResolver;
-      delete inspected.driftBlocker;
     }
   });
-  test("the Context Sharing sentence follows the Async Drift Resolver's, or the limit and blocker sentences, on every instruction with the limit", async () => {
+  test("the Context Sharing sentence follows the Async Drift Resolver's, or the limit and sub-agent sentences, on every instruction with the limit", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
     const sharing = 'The sub-agents context sharing is on: pass each sub-agent what you have already read that concerns its part, as the "Sub-agents context sharing" section of your skill says.';
-    const blocker = "The Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
     const resolver = "The Async Drift Resolver is on: before finishing, prepare the resolution question of every Drift filed in this job, as your skill says.";
     const scan = "Use the trama-scan skill on the whole System.";
     const design = "Use the trama-design skill. Add refunds.";
@@ -964,23 +1227,21 @@ describe("automatic terminal exit", () => {
       await launchAgent(dir, instruction, name, undefined, undefined, undefined, undefined, { filesDrifts });
       return typed.at(-1) ?? "";
     };
+    featuresOffByDefault = false;
     try {
-      inspected.subagentsContextSharing = { globalValue: "true" };
-      expect(await send(scan, "Scan", true)).toBe(`'omp' '${scanBase} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
-      inspected.subagentsContextSharing = { workspaceValue: true };
-      expect(await send(scan, "Scan", true)).toBe(`'omp' '${scanBase} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
-      inspected.subagentsContextSharing = { globalValue: true };
-      expect(await send(scan, "Scan", true)).toBe(`'omp' '${scanBase} ${sharing} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
+      expect(await send(scan, "Scan", true)).toBe(`'omp' '${scanBase} ${resolver} ${sharing} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
       expect(await send(design, "Design", false)).toBe(`'omp' '${designBase} ${sharing} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
       expect(await send("Resolve the Drift.", "Resolve Drifts", false)).toBe(`'omp' 'Resolve the Drift. Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sharing} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
-      inspected.driftBlocker = { globalValue: true };
-      expect(await send(scan, "Scan", true)).toBe(`'omp' '${scanBase} ${blocker} ${sharing} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
-      inspected.asyncDriftResolver = { globalValue: true };
-      expect(await send(scan, "Scan", true)).toBe(`'omp' '${scanBase} ${blocker} ${resolver} ${sharing} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
+      inspected.subagentsContextSharing = { workspaceValue: false };
+      expect(await send(scan, "Scan", true)).toBe(`'omp' '${scanBase} ${resolver} ${sharing} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
+      inspected.subagentsContextSharing = { globalValue: false };
+      expect(await send(scan, "Scan", true)).toBe(`'omp' '${scanBase} ${resolver} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
+      inspected.asyncDriftResolver = { globalValue: false };
+      expect(await send(scan, "Scan", true)).toBe(`'omp' '${scanBase} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
     } finally {
+      featuresOffByDefault = true;
       delete inspected.subagentsContextSharing;
       delete inspected.asyncDriftResolver;
-      delete inspected.driftBlocker;
     }
   });
   test("an instruction is built when it is sent, and is not sent if the delivery conditions change", async () => {
@@ -1130,42 +1391,31 @@ describe("agent instruction settings", () => {
       delete settingValues["maxParallelAgents"];
     }
   });
-  test("the Drift blocker's sentence reaches only the instructions that may file Drifts, and only from the user setting", async () => {
+  test("a leftover trama.driftBlocker user setting is not read: no instruction carries a Drift blocker sentence, whatever the setting holds", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
-    const sentence = "The Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
     const scan = "Use the trama-scan skill on the whole System.";
+    const plain = `'omp' '${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`;
     const send = async (instruction: string, name: string, filesDrifts: boolean) => {
       await launchAgent(dir, instruction, name, undefined, undefined, undefined, undefined, { filesDrifts });
       return typed.at(-1) ?? "";
     };
-    inspected["driftBlocker"] = { globalValue: true };
     try {
-      expect(await send(scan, "Scan", true)).toBe(`'omp' '${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
-      expect(await send("Use the trama-implement skill on Task abc.", "T3", true)).toBe(`'omp' 'Use the trama-implement skill on Task abc. Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
-      expect(await send("Use the trama-import skill on this repository.", "Import", true)).toBe(`'omp' 'Use the trama-import skill on this repository. Run at most 20 sub-agents at once. ${sentence} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
-      expect((await send(buildPrompt({ kind: "implement-all" }), "All tasks", true)).endsWith(` ${sentence} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`)).toBe(true);
-      expect(await send("Use the trama-design skill. Add refunds.", "Design", false)).not.toContain(sentence);
-      expect(await send("Use the trama-resolve-drifts skill on the open Drifts ab12cd34.", "Drifts", false)).not.toContain(sentence);
-      expect(await send(scan, "Scan", false)).not.toContain(sentence);
-
-      inspected["driftBlocker"] = { globalValue: false };
-      expect(await send(scan, "Scan", true)).not.toContain(sentence);
-      inspected["driftBlocker"] = { globalValue: "true" };
-      expect(await send(scan, "Scan", true)).not.toContain(sentence);
-      inspected["driftBlocker"] = { workspaceValue: true };
-      expect(await send(scan, "Scan", true)).not.toContain(sentence);
-      delete inspected["driftBlocker"];
-      expect(await send(scan, "Scan", true)).not.toContain(sentence);
-
+      for (const held of [{ globalValue: true }, { globalValue: false }, { globalValue: "true" }, { workspaceValue: true }]) {
+        inspected["driftBlocker"] = held;
+        expect(await send(scan, "Scan", true)).toBe(plain);
+        expect(await send("Use the trama-implement skill on Task abc.", "T3", true)).not.toContain("Drift blocker");
+        expect(await send("Use the trama-import skill on this repository.", "Import", true)).not.toContain("Drift blocker");
+        expect(await send(buildPrompt({ kind: "implement-all" }), "All tasks", true)).not.toContain("Drift blocker");
+      }
       inspected["driftBlocker"] = { globalValue: true };
       settingValues["language"] = "Italian";
-      expect(await send(scan, "Scan", true)).toBe(`'omp' '${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE} ${languageSentence("Italian")}'`);
+      expect(await send(scan, "Scan", true)).toBe(`'omp' '${scan} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE} ${languageSentence("Italian")}'`);
     } finally {
       delete inspected["driftBlocker"];
       delete settingValues["language"];
     }
   });
-  test("the parallel execution's sentence reaches only the runs over several Tasks, right after the sub-agent sentence, and only from the user setting", async () => {
+  test("the parallel execution's sentence reaches only the runs over several Tasks, right after the sub-agent sentence, and is on unless the user setting is false", async () => {
     const { launchAgent } = await import("../extension/src/host/agent");
     const { PARALLEL_EXECUTION_SENTENCE } = await import("../extension/src/host/prompts");
     const sentence = 'The parallel execution is on: follow the "Parallel execution" section of the trama-implement skill.';
@@ -1185,14 +1435,19 @@ describe("agent instruction settings", () => {
 
       inspected["parallelExecution"] = { globalValue: false };
       expect(await send(all, "All tasks", true)).not.toContain(sentence);
-      inspected["parallelExecution"] = { globalValue: "true" };
-      expect(await send(all, "All tasks", true)).not.toContain(sentence);
-      inspected["parallelExecution"] = { workspaceValue: true };
-      expect(await send(all, "All tasks", true)).not.toContain(sentence);
+      inspected["parallelExecution"] = { workspaceValue: false };
+      expect(await send(all, "All tasks", true)).toContain(sentence);
+      // Untouched, the feature is on.
+      featuresOffByDefault = false;
+      inspected["asyncDriftResolver"] = { globalValue: false };
+      inspected["subagentsContextSharing"] = { globalValue: false };
       delete inspected["parallelExecution"];
-      expect(await send(all, "All tasks", true)).toBe(`'omp' '${all} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
+      expect(await send(all, "All tasks", true)).toBe(`'omp' '${all} Run at most 20 sub-agents at once. Compare each Machine with the trama-analysis sub-agent. ${sentence} ${ASK_DEVELOPER_SENTENCE} ${AUTO_EXIT_SENTENCE}'`);
     } finally {
+      featuresOffByDefault = true;
       delete inspected["parallelExecution"];
+      delete inspected["asyncDriftResolver"];
+      delete inspected["subagentsContextSharing"];
     }
   });
   test("a Run that starts with its share of the places says so in its instruction, and its trama task list carries that max", async () => {
@@ -1344,6 +1599,11 @@ describe("announcing every launch as its instruction starts", () => {
       before = listAnnouncements(p).length;
       await launchAgent(dir, "Use the trama-resolve-drifts skill on the Drifts.", "Drifts", { kind: "resolve", drifts: () => ["aaaa1111", "bbbb2222"] });
       expect(announced(p, before)).toEqual([{ kind: "proposal", title: "Resolve Drifts", phase: null, terminal: environments.at(-1)?.["TRAMA_TERMINAL"] ?? null, drifts: ["aaaa1111", "bbbb2222"] }]);
+
+      before = listAnnouncements(p).length;
+      await launchAgent(dir, "Use the trama-design skill to refine the stale Proposal abcd1234.", "Refine P3", { kind: "refine", proposal: "abcd1234", title: "Add refunds" }, () => true, "refine");
+      const refining = listAnnouncements(p).slice(before);
+      expect(refining.map((a) => ({ kind: a.kind, source: a.source, title: a.title, proposal: a.proposal, drifts: a.drifts, terminal: a.terminal }))).toEqual([{ kind: "proposal", source: "request", title: "Add refunds", proposal: "abcd1234", drifts: [], terminal: environments.at(-1)?.["TRAMA_TERMINAL"] ?? null }]);
 
       before = listAnnouncements(p).length;
       await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, () => true, "run");
@@ -2614,6 +2874,8 @@ describe("omp Chat conversations in place of terminals", () => {
     spawned?: number;
     /** omp answers the prompt of the work: what the conversation's turn-end listener hears. */
     endTurn: (end: TurnEnd) => void;
+    /** The process ends without Trama asking: what the conversation's exit listener hears. */
+    exited: (exit: { code: number | null; signal: string | null; details?: string }) => void;
   }
   let processes: FakeProcess[];
   let failStart: string | undefined;
@@ -2621,13 +2883,14 @@ describe("omp Chat conversations in place of terminals", () => {
   let closedTabs: string[];
   const saved = new Map<string, unknown>();
 
-  const register = async () => {
+  const register = async (resuming?: { root: string; entries: unknown[] }) => {
     const { setOmpChat } = await import("../extension/src/host/agent");
     processes = [];
     tabs = [];
     closedTabs = [];
     failStart = undefined;
     saved.clear();
+    if (resuming !== undefined) saved.set("trama.ompChat.conversations", resuming.entries);
     const none = () => ({ dispose() {} });
     const session = (process: FakeProcess) => ({
       sessionId: `s${processes.length}`,
@@ -2637,7 +2900,10 @@ describe("omp Chat conversations in place of terminals", () => {
       send: async () => undefined,
       cancel() {},
       stop: async () => void process.stops++,
-      onExit: none,
+      onExit: (listener: (exit: { code: number | null; signal: string | null; details?: string }) => void) => {
+        process.exited = listener;
+        return { dispose() {} };
+      },
       onTurnEnd: (listener: (end: TurnEnd) => void) => {
         process.endTurn = listener;
         return { dispose() {} };
@@ -2657,14 +2923,17 @@ describe("omp Chat conversations in place of terminals", () => {
         client: {
           start: async (launch, first, spawned) => {
             if (failStart !== undefined) throw new Error(failStart);
-            const process: FakeProcess = { launch, ...(first === undefined ? {} : { first }), stops: 0, endTurn: () => undefined };
+            const process: FakeProcess = { launch, ...(first === undefined ? {} : { first }), stops: 0, endTurn: () => undefined, exited: () => undefined };
             processes.push(process);
             spawned?.(5000 + processes.length - 1);
             process.spawned = 5000 + processes.length - 1;
             return session(process);
           },
-          resume: async () => {
-            throw new Error("not used");
+          resume: async (launch) => {
+            if (resuming === undefined) throw new Error("not used");
+            const process: FakeProcess = { launch, stops: 0, endTurn: () => undefined, exited: () => undefined };
+            processes.push(process);
+            return session(process);
           },
         },
         view: {
@@ -2686,11 +2955,11 @@ describe("omp Chat conversations in place of terminals", () => {
         },
       },
       { get: (key) => saved.get(key), update: async (key, value) => void saved.set(key, value) },
-      () => undefined,
+      () => resuming?.root,
     );
   };
-  const withOmpChat = async (body: () => Promise<void>) => {
-    await register();
+  const withOmpChat = async (body: () => Promise<void>, resuming?: { root: string; entries: unknown[] }) => {
+    await register(resuming);
     const previous = { agent: settingValues["agent"], inspected: inspected["ompChat"] };
     settingValues["agent"] = "omp";
     inspected["ompChat"] = { globalValue: true };
@@ -2722,8 +2991,7 @@ describe("omp Chat conversations in place of terminals", () => {
         const id = started?.launch.env["TRAMA_TERMINAL"] as string;
         expect(id).toMatch(/^[a-z0-9]{6}$/);
         expect(started?.launch.cwd).toBe(dir);
-        expect(started?.launch.args.slice(-1)).toEqual(["acp"]);
-        expect(started?.launch.args).not.toContain("--yolo");
+        expect(started?.launch.args.slice(-2)).toEqual(["acp", "--yolo"]);
         // Role scan: no --model of the execution role, the scan model for --slow, in the terminal's order.
         expect(started?.launch.args).toContain("--slow");
         expect(started?.launch.args[started.launch.args.indexOf("--slow") + 1]).toBe("slow-model");
@@ -2810,6 +3078,67 @@ describe("omp Chat conversations in place of terminals", () => {
     });
   });
 
+  test("a certificate error in the message of a refused prompt, or in omp's lines when it exits, is told in plain words with the mode of the setting; omp's lines stay behind Show details", async () => {
+    const { certificateErrorText } = await import("../extension/src/certificate-errors");
+    await withOmpChat(async () => {
+      const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+      const { onAgentStopped, onStoppedFollowing } = await import("../extension/src/host/drift-resolution");
+      watchAgentTerminal();
+      withdrawAll(projectAt(dir));
+      const stopped: [string, string][] = [];
+      const following: [string, string, string | undefined][] = [];
+      const subscriptions = [onAgentStopped((job, reason) => stopped.push([job, reason])), onStoppedFollowing((subject, reason, details) => following.push([subject, reason, details]))];
+      try {
+        for (const on of [false, true]) {
+          if (on) inspected["systemCertificates"] = { globalValue: true };
+          stopped.length = 0;
+          following.length = 0;
+          await launchAgent(dir, "Scan it.", "Scan", { kind: "check", title: "Scan" }, undefined, "scan");
+          processes.at(-1)?.endTurn({ error: "request failed: SELF_SIGNED_CERT_IN_CHAIN" });
+          expect(stopped).toEqual([["Scan", certificateErrorText(on)]]);
+          await launchAgent(dir, "Scan it.", "Scan", { kind: "check", title: "Scan" }, undefined, "scan");
+          processes.at(-1)?.exited({ code: 1, signal: null, details: "Error: certificate verify failed\n    at TLSSocket" });
+          expect(following).toEqual([["Scan", certificateErrorText(on), "Error: certificate verify failed\n    at TLSSocket"]]);
+        }
+        // Reasons that are not certificate errors are shown as before.
+        delete inspected["systemCertificates"];
+        stopped.length = 0;
+        following.length = 0;
+        await launchAgent(dir, "Scan it.", "Scan", { kind: "check", title: "Scan" }, undefined, "scan");
+        processes.at(-1)?.endTurn({ error: "401 Unauthorized" });
+        expect(stopped).toEqual([["Scan", "omp refused the prompt (401 Unauthorized)"]]);
+        await launchAgent(dir, "Scan it.", "Scan", { kind: "check", title: "Scan" }, undefined, "scan");
+        processes.at(-1)?.exited({ code: 1, signal: null, details: "boom" });
+        expect(following).toEqual([["Scan", "omp exited (code 1)", "boom"]]);
+      } finally {
+        for (const subscription of subscriptions) subscription.dispose();
+        delete inspected["systemCertificates"];
+      }
+    });
+  });
+
+  test("a start that fails with a certificate error warns with the text in place of the reason, and the job runs in a terminal", async () => {
+    const { certificateErrorText } = await import("../extension/src/certificate-errors");
+    await withOmpChat(async () => {
+      const { launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
+      watchAgentTerminal();
+      withdrawAll(projectAt(dir));
+      failStart = "SSL certificate problem: unable to get local issuer certificate";
+      try {
+        expect(await launchAgent(dir, "Scan it.", "Scan", { kind: "check", title: "Scan" }, undefined, "scan")).toBe("terminal");
+        expect(warningMessages).toEqual([`Trama: omp Chat could not start omp (${certificateErrorText(false)}); the job runs in a terminal.`]);
+        listeners.end.forEach((fn) => fn(shell(terminals.at(-1) as FakeTerminal)));
+        warningMessages.length = 0;
+        inspected["systemCertificates"] = { globalValue: true };
+        expect(await launchAgent(dir, "Scan it.", "Scan", { kind: "check", title: "Scan" }, undefined, "scan")).toBe("terminal");
+        expect(warningMessages).toEqual([`Trama: omp Chat could not start omp (${certificateErrorText(true)}); the job runs in a terminal.`]);
+        listeners.end.forEach((fn) => fn(shell(terminals.at(-1) as FakeTerminal)));
+      } finally {
+        delete inspected["systemCertificates"];
+      }
+    });
+  });
+
   test("a conversation's job is in the registry but is not terminal work: the execution check neither looks at it nor is armed by it", async () => {
     await withOmpChat(async () => {
       const { hasTerminalWork, launchAgent, watchAgentTerminal } = await import("../extension/src/host/agent");
@@ -2883,24 +3212,28 @@ describe("omp Chat conversations in place of terminals", () => {
       settingValues["analysis"] = " opus ";
       try {
         await openAskMore(root, "Ask T3", "Ask more about the Task.\nText:\nLaunch it.", "Ask about the Task…");
-        expect(processes[0]?.launch.args).toEqual(["--model", "opus", "acp"]);
-        // `trama.ompChatApproval` is read when a conversation opens, from the user value only: yolo adds `--yolo`, a workspace value or an unknown one does not.
-        inspected["ompChatApproval"] = { workspaceValue: "yolo" };
+        // The approval is yolo with no user value: `--yolo` follows `acp`.
+        expect(processes[0]?.launch.args).toEqual(["--model", "opus", "acp", "--yolo"]);
+        // `trama.ompChatApproval` is read when a conversation opens, from the user value only: `ask` alone drops `--yolo`; a workspace value, `yolo` and an unknown one keep it.
+        inspected["ompChatApproval"] = { workspaceValue: "ask" };
         await openAskMore(root, "Ask T4", "Ask more.", "Ask about the Task…");
-        expect(processes[1]?.launch.args).toEqual(["--model", "opus", "acp"]);
+        expect(processes[1]?.launch.args).toEqual(["--model", "opus", "acp", "--yolo"]);
         inspected["ompChatApproval"] = { globalValue: "bypass" };
         await openAskMore(root, "Ask T5", "Ask more.", "Ask about the Task…");
-        expect(processes[2]?.launch.args).toEqual(["--model", "opus", "acp"]);
-        inspected["ompChatApproval"] = { globalValue: "yolo" };
+        expect(processes[2]?.launch.args).toEqual(["--model", "opus", "acp", "--yolo"]);
+        inspected["ompChatApproval"] = { globalValue: "ask" };
         await openAskMore(root, "Ask T6", "Ask more.", "Ask about the Task…");
-        expect(processes[3]?.launch.args).toEqual(["--model", "opus", "acp", "--yolo"]);
+        expect(processes[3]?.launch.args).toEqual(["--model", "opus", "acp"]);
+        inspected["ompChatApproval"] = { globalValue: "yolo" };
+        await openAskMore(root, "Ask T9", "Ask more.", "Ask about the Task…");
+        expect(processes[4]?.launch.args).toEqual(["--model", "opus", "acp", "--yolo"]);
         // `trama.ompChatIntentTracing` is read the same way: PI_INTENT_TRACING=0 only for the user value false, 1 for anything else or none.
         inspected["ompChatIntentTracing"] = { globalValue: false };
         await openAskMore(root, "Ask T7", "Ask more.", "Ask about the Task…");
-        expect(processes[4]?.launch.env["PI_INTENT_TRACING"]).toBe("0");
+        expect(processes[5]?.launch.env["PI_INTENT_TRACING"]).toBe("0");
         inspected["ompChatIntentTracing"] = { workspaceValue: false };
         await openAskMore(root, "Ask T8", "Ask more.", "Ask about the Task…");
-        expect(processes[5]?.launch.env["PI_INTENT_TRACING"]).toBe("1");
+        expect(processes[6]?.launch.env["PI_INTENT_TRACING"]).toBe("1");
         expect(processes[0]?.launch.cwd).toBe(root);
         expect(processes[0]?.first).toBeUndefined(); // Ask more sends nothing until the developer writes; the instruction is composed with that first message
         expect(processes[0]?.launch.hook).toBe(false); // Ask more is not a job conversation: its forms go to the view
@@ -2915,6 +3248,109 @@ describe("omp Chat conversations in place of terminals", () => {
         rmSync(root, { recursive: true, force: true });
       }
     });
+  });
+
+  /** Lets the promise chains of the notice (the write of the key, then the message) run: they are microtasks, so no real time passes. */
+  const settled = async () => {
+    for (let turn = 0; turn < 20; turn++) await Promise.resolve();
+  };
+
+  /** A project folder for Ask more, and the notice store of the editor as a map that logs its writes. */
+  const noticeFixture = async () => {
+    const { setYoloNoticeStore } = await import("../extension/src/host/yolo-notice");
+    const root = mkdtempSync(join(tmpdir(), "trama-yolo-notice-"));
+    cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+    extensionPath = join(root, "ext");
+    mkdirSync(join(extensionPath, "media"), { recursive: true });
+    mkdirSync(join(extensionPath, "bin"), { recursive: true });
+    writeFileSync(join(extensionPath, "media", "ask-more.md"), "Trama: Ask more\n");
+    writeFileSync(join(extensionPath, "bin", "trama"), "");
+    const memory = new Map<string, unknown>();
+    const writes: string[] = [];
+    setYoloNoticeStore({ get: <T>(key: string) => memory.get(key) as T | undefined, update: async (key, value) => void (writes.push(`${key}=${String(value)}`), memory.set(key, value)) });
+    const done = () => {
+      setYoloNoticeStore(undefined);
+      extensionPath = "";
+      withdrawAll(projectAt(root));
+      rmSync(root, { recursive: true, force: true });
+    };
+    return { root, memory, writes, done };
+  };
+
+  test("a developer who never chose an approval is told once that omp Chat runs in yolo: the key is written first, the start does not wait, and a user ask or yolo never shows it", async () => {
+    await withOmpChat(async () => {
+      const { openAskMore, watchAgentTerminal } = await import("../extension/src/host/agent");
+      watchAgentTerminal();
+      const { YOLO_NOTICE_KEY } = await import("../extension/src/host/yolo-notice");
+      const { root, memory, writes, done } = await noticeFixture();
+      const offers = answerOffer.length;
+      try {
+        // The message stays unanswered (the fake never resolves it), and the conversation starts in yolo all the same.
+        await openAskMore(root, "Ask T3", "Ask more.", "Ask about the Task…");
+        await settled();
+        expect(processes).toHaveLength(1);
+        expect(processes[0]?.launch.args).toEqual(["acp", "--yolo"]);
+        expect(answerOffer.length - offers).toBe(1);
+        expect(writes).toEqual([`${YOLO_NOTICE_KEY}=true`]);
+        // Never again: not for the next conversation, whatever its kind.
+        await openAskMore(root, "Ask T4", "Ask more.", "Ask about the Task…");
+        await settled();
+        expect(answerOffer.length - offers).toBe(1);
+        expect(writes).toHaveLength(1);
+        expect(processes[1]?.launch.args).toEqual(["acp", "--yolo"]);
+
+        // A user value, ask or yolo, means the developer chose: no notice, and the key is not written.
+        for (const chosen of ["ask", "yolo"]) {
+          memory.clear();
+          writes.length = 0;
+          inspected["ompChatApproval"] = { globalValue: chosen };
+          await openAskMore(root, `Ask ${chosen}`, "Ask more.", "Ask about the Task…");
+          await settled();
+          expect(answerOffer.length - offers).toBe(1);
+          expect(writes).toEqual([]);
+        }
+        expect(processes.at(-2)?.launch.args).toEqual(["acp"]);
+        expect(processes.at(-1)?.launch.args).toEqual(["acp", "--yolo"]);
+
+        // Without a user value but with the key already true, nothing shows.
+        delete inspected["ompChatApproval"];
+        memory.set(YOLO_NOTICE_KEY, true);
+        await openAskMore(root, "Ask T9", "Ask more.", "Ask about the Task…");
+        await settled();
+        expect(answerOffer.length - offers).toBe(1);
+        expect(writes).toEqual([]);
+      } finally {
+        delete inspected["ompChatApproval"];
+        done();
+      }
+    });
+  });
+
+  test("a conversation resumed after a reload never shows the yolo notice, and keeps the arguments it started with", async () => {
+    const { openAskMore, watchAgentTerminal } = await import("../extension/src/host/agent");
+    const { root, writes, done } = await noticeFixture();
+    const offers = answerOffer.length;
+    const entry = { id: "abc123", name: "Ask T3", sessionId: "s-1", state: "idle", args: ["acp", "--yolo"], env: { TRAMA_AGENT: "1", TRAMA_TERMINAL: "abc123" }, hook: false, openedAt: "2026-10-23T10:00:00.000Z" };
+    try {
+      await withOmpChat(
+        async () => {
+          watchAgentTerminal();
+          await settled();
+          expect(processes).toHaveLength(1);
+          expect(processes[0]?.launch.args).toEqual(["acp", "--yolo"]);
+          expect(answerOffer.length - offers).toBe(0);
+          expect(writes).toEqual([]);
+          // The first conversation that starts new does show it.
+          await openAskMore(root, "Ask T4", "Ask more.", "Ask about the Task…");
+          await settled();
+          expect(answerOffer.length - offers).toBe(1);
+          expect(writes).toHaveLength(1);
+        },
+        { root, entries: [entry] },
+      );
+    } finally {
+      done();
+    }
   });
 });
 
@@ -3368,5 +3804,98 @@ describe("Approve waits for a Run in progress", () => {
     } finally {
       window.close();
     }
+  });
+});
+
+describe("Log out of a provider", () => {
+  const posixOnly = process.platform === "win32";
+  const providerOf = (id: string): OmpLoginProvider => {
+    const found = ompLoginProvider(id);
+    if (found === undefined) throw new Error(`no provider ${id}`);
+    return found;
+  };
+  /** A fake omp in a temporary folder: it writes its arguments, the PATH and `CURSOR_ACCESS_TOKEN` it received to `seen`, then runs `body`. */
+  const fakeOmp = (body: string): { dir: string; program: string; seen: () => string[] } => {
+    const dir = mkdtempSync(join(tmpdir(), "trama-logout-"));
+    const program = join(dir, "omp");
+    const seen = join(dir, "seen");
+    writeFileSync(program, `#!/bin/sh\nprintf '%s\\n' "$#" "$@" "path=$PATH" "token=$CURSOR_ACCESS_TOKEN" > '${seen}'\n${body}\n`, { mode: 0o755 });
+    return { dir, program, seen: () => readFileSync(seen, "utf8").split("\n") };
+  };
+  const before = process.env["CURSOR_ACCESS_TOKEN"];
+  afterEach(() => {
+    if (before === undefined) delete process.env["CURSOR_ACCESS_TOKEN"];
+    else process.env["CURSOR_ACCESS_TOKEN"] = before;
+  });
+
+  test.skipIf(posixOnly)("runs the program with auth-broker logout and the id of the list, without a shell, the PATH of omp's folder in front, and succeeds on exit code 0", async () => {
+    const { logoutOmp } = await import("../extension/src/host/agent");
+    const { dir, program, seen } = fakeOmp("echo 'out'; exit 0");
+    try {
+      expect(await logoutOmp(program, providerOf("xai-oauth"))).toEqual({ ok: true });
+      const lines = seen();
+      expect(lines.slice(0, 4)).toEqual(["3", "auth-broker", "logout", "xai-oauth"]);
+      expect(lines[4]?.startsWith(`path=${dir}`)).toBe(true);
+      // The Cursor key and the editor's variable are not part of this check: the next test covers the environment.
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test.skipIf(posixOnly)("the saved Cursor API key reaches omp as CURSOR_ACCESS_TOKEN over the inherited one and never in the arguments; no saved key leaves the inherited variable", async () => {
+    const { logoutOmp } = await import("../extension/src/host/agent");
+    const { dir, program, seen } = fakeOmp("exit 0");
+    process.env["CURSOR_ACCESS_TOKEN"] = "editor-token";
+    const secrets = { get: async () => "  sk-logout  ", store: async () => undefined, delete: async () => undefined, onDidChange: () => ({ dispose() {} }) };
+    const following = await startCursorApiKey(secrets as never, () => {});
+    try {
+      expect(await logoutOmp(program, providerOf("cursor"))).toEqual({ ok: true });
+      const lines = seen();
+      expect(lines.slice(0, 4)).toEqual(["3", "auth-broker", "logout", "cursor"]);
+      expect(lines[5]).toBe("token=sk-logout");
+      expect(lines.slice(1, 4).join(" ")).not.toContain("sk-logout");
+    } finally {
+      following.dispose();
+    }
+    const none = { get: async () => undefined, store: async () => undefined, delete: async () => undefined, onDidChange: () => ({ dispose() {} }) };
+    const unset = await startCursorApiKey(none as never, () => {});
+    try {
+      expect(await logoutOmp(program, providerOf("cursor"))).toEqual({ ok: true });
+      expect(seen()[5]).toBe("token=editor-token");
+    } finally {
+      unset.dispose();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test.skipIf(posixOnly)("a non-zero exit fails with the last non-empty line of the error output, or with the exit code when there is none; standard output is not the reason", async () => {
+    const { logoutOmp } = await import("../extension/src/host/agent");
+    const withLines = fakeOmp("echo 'out only' ; printf 'one\\n\\n  two  \\n\\n' >&2; exit 4");
+    const without = fakeOmp("echo 'out only'; exit 7");
+    try {
+      expect(await logoutOmp(withLines.program, providerOf("anthropic"))).toEqual({ ok: false, reason: "two" });
+      expect(await logoutOmp(without.program, providerOf("anthropic"))).toEqual({ ok: false, reason: "exit code 7" });
+    } finally {
+      rmSync(withLines.dir, { recursive: true, force: true });
+      rmSync(without.dir, { recursive: true, force: true });
+    }
+  });
+
+  test.skipIf(posixOnly)("a program that cannot start fails with `could not start omp`, and one that does not finish in time is stopped and fails with `timed out`", async () => {
+    const { logoutOmp } = await import("../extension/src/host/agent");
+    expect(await logoutOmp(join(tmpdir(), "trama-no-such-omp", "omp"), providerOf("anthropic"))).toEqual({ ok: false, reason: "could not start omp" });
+    const slow = fakeOmp("exec sleep 30");
+    try {
+      const started = Date.now();
+      expect(await logoutOmp(slow.program, providerOf("anthropic"), 300)).toEqual({ ok: false, reason: "timed out" });
+      expect(Date.now() - started).toBeLessThan(10_000);
+    } finally {
+      rmSync(slow.dir, { recursive: true, force: true });
+    }
+  });
+
+  test("the default time limit is 30 seconds", async () => {
+    const { LOGOUT_TIMEOUT_MS } = await import("../extension/src/host/agent");
+    expect(LOGOUT_TIMEOUT_MS).toBe(30_000);
   });
 });

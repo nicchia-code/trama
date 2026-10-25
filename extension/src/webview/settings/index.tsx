@@ -13,7 +13,7 @@ import type { Slot, View, ViewContext } from "../types";
 import { Wizard } from "../wizard";
 import { WizardController } from "../wizard/controller";
 import { SettingField } from "./field";
-import { groupSettings, type OmpStatus, ompStatusLine, THEME_KEY, themeSetting } from "./logic";
+import { type CertificatesState, groupSettings, type OmpStatus, ompStatusLine, SYSTEM_CERTIFICATES_KEY, THEME_KEY, themeSetting } from "./logic";
 
 type SettingsMessage = Extract<ToWebview, { type: "settings" }>;
 type ModelSuggestionsMessage = Extract<ToWebview, { type: "modelSuggestions" }>;
@@ -38,6 +38,12 @@ export interface SettingsView extends View {
   receiveResult(message: GuidedSetupResultMessage): void;
   /** The state of omp: being checked, the version that answers, or why not. */
   receiveOmpStatus(message: Extract<ToWebview, { type: "ompStatus" }>): void;
+  /** Whether a Cursor API key is saved, from the host's `cursorApiKey`: the Cursor row's key buttons and the wizard's follow it. */
+  receiveCursorApiKey(message: Extract<ToWebview, { type: "cursorApiKey" }>): void;
+  /** Whether the logout of a provider is running, from the host's `ompLogoutState`: the provider's row of the Settings tab and of the wizard follows it. */
+  receiveOmpLogoutState(message: Extract<ToWebview, { type: "ompLogoutState" }>): void;
+  /** The state of the System Certificates bundle, from the host's `systemCertificates`: the line under the setting follows it. */
+  receiveSystemCertificates(message: Extract<ToWebview, { type: "systemCertificates" }>): void;
 }
 
 export interface SettingsPageProps {
@@ -57,6 +63,12 @@ export interface SettingsPageProps {
   omp?: OmpStatus | null;
   /** The Providers section: null while it is not shown (omp has not answered yet, or does not answer); otherwise the providers omp lists models of, absent when their states are unknown. */
   providers?: ProvidersView;
+  /** Whether a Cursor API key is saved, and how many times the host has told so (`changes`); the key itself never reaches the panel. */
+  cursorKey?: { saved: boolean; changes: number };
+  /** The providers whose logout the host is running. */
+  loggingOut?: readonly string[];
+  /** The state of the System Certificates bundle, from the host's `systemCertificates`; null until the first message. */
+  certificates?: CertificatesState | null;
   /** The agent instruction files found in the project's folder, from the last `instructionFiles` answer; null while the search runs, and always null outside a project. */
   instructionFiles?: readonly InstructionFileView[] | null;
 }
@@ -65,7 +77,7 @@ export interface SettingsPageProps {
  * The page: a title, with «Guided setup» in a project, and then every setting the manifest declares, in the groups and subgroups of the setup
  * wizard, in one column. Each setting is saved to the user settings when the developer confirms it.
  */
-export function SettingsPage({ schema, values, generation, models, listError, omp = null, providers = null, instructionFiles = null, post, openLink, onGuidedSetup, wizard }: SettingsPageProps) {
+export function SettingsPage({ schema, values, generation, models, listError, omp = null, providers = null, cursorKey = { saved: false, changes: 0 }, loggingOut = [], certificates = null, instructionFiles = null, post, openLink, onGuidedSetup, wizard }: SettingsPageProps) {
   const send = (key: string, value: SettingValue) => post({ type: "setSetting", key, value });
   if (wizard !== undefined) return <>{wizard}</>;
   const field = (setting: SettingSchema) => (
@@ -79,6 +91,7 @@ export function SettingsPage({ schema, values, generation, models, listError, om
       send={send}
       openLink={openLink}
       lead={ROLE_ADVICE[setting.key]}
+      {...(setting.key === SYSTEM_CERTIFICATES_KEY ? { certificates: { state: certificates, onRefresh: () => post({ type: "refreshSystemCertificates" }) } } : {})}
     />
   );
   const status = ompStatusLine(omp);
@@ -107,7 +120,7 @@ export function SettingsPage({ schema, values, generation, models, listError, om
               </h2>
               <p className="mt-0 mb-5 text-muted-foreground">{GROUP_SENTENCES[group.title]}</p>
               {group.title === "omp" ? <OmpStatusBox tone={status.tone} text={status.text} missing={status.missing} onInstall={() => post({ type: "installOmp" })} /> : null}
-              {group.title === "omp" && providers !== null ? <Providers connected={providers.connected} onLogin={(provider) => post({ type: "ompLogin", provider })} /> : null}
+              {group.title === "omp" && providers !== null ? <Providers connected={providers.connected} onLogin={(provider) => post({ type: "ompLogin", provider })} onLogout={(provider) => post({ type: "ompLogout", provider })} loggingOut={loggingOut} apiKey={{ ...cursorKey, onSet: () => post({ type: "setCursorApiKey" }), onRemove: () => post({ type: "removeCursorApiKey" }) }} /> : null}
               {group.settings.length > 0 ? <div className="grid gap-5">{group.settings.map(field)}</div> : null}
               {group.subgroups.length > 0 ? <Subgroups groups={group.subgroups.map((subgroup) => ({ title: subgroup.title, items: subgroup.settings }))} render={field} /> : null}
               {group.title === "omp" ? (
@@ -127,7 +140,7 @@ export function SettingsPage({ schema, values, generation, models, listError, om
 
 /** Mounts the Settings tab in `slot`; the panel's theme follows `trama.theme` as the host sends it, also while the tab is hidden. */
 export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeController): SettingsView => {
-  let page: SettingsPageProps = { schema: [], values: {}, generation: 0, models: [], listError: null, omp: null, providers: null, instructionFiles: null, post: context.post, openLink: context.openLink };
+  let page: SettingsPageProps = { schema: [], values: {}, generation: 0, models: [], listError: null, omp: null, providers: null, cursorKey: { saved: false, changes: 0 }, loggingOut: [], certificates: null, instructionFiles: null, post: context.post, openLink: context.openLink };
   let hasProject = false;
   let visible = false;
   const wizard = new WizardController({
@@ -184,6 +197,23 @@ export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeCont
     receiveOmpStatus(message) {
       const { type: _type, ...status } = message;
       page = { ...page, omp: status, providers: providersView(page.providers ?? null, status.state === "checking" ? "pending" : { answers: ompStatusLine(status).tone === "ok", providers: status.providers }) };
+      render();
+    },
+    receiveCursorApiKey(message) {
+      page = { ...page, cursorKey: { saved: message.saved, changes: (page.cursorKey?.changes ?? 0) + 1 } };
+      wizard.receiveCursorApiKey(message);
+      render();
+    },
+    receiveOmpLogoutState(message) {
+      const others = (page.loggingOut ?? []).filter((provider) => provider !== message.provider);
+      page = { ...page, loggingOut: message.running ? [...others, message.provider] : others };
+      wizard.receiveLogoutState(message);
+      render();
+    },
+    receiveSystemCertificates(message) {
+      const { type: _type, ...state } = message;
+      page = { ...page, certificates: state };
+      wizard.receiveSystemCertificates(message);
       render();
     },
     projectPresent(present) {

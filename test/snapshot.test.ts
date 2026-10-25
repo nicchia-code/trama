@@ -118,6 +118,23 @@ test("a Drift announcement keeps the Drift's title in each snapshot, whatever it
   expect(listAnnouncements(p).find((a) => a.id === drift.id)?.title).toBe("Announced Drift title");
 });
 
+test("the announcement of a refinement is bound to its Proposal: no ghost of its own, and the hand-over delivers it", () => {
+  const prop = newProposal(p, "Returns");
+  const order = editInProposal(p, prop.id, "checkout/order.md");
+  writeFileSync(order, readFileSync(order, "utf8").replace("### Shipped (final)", "### Shipped\n- `user.CANCEL` → Returned\n\n### Returned (final)"));
+  writeFileSync(editInProposal(p, prop.id, "actors/user.md"), readFileSync(join(dir, ".trama/model/actors/user.md"), "utf8") + "\n### RETURN\nAsks to return.\n");
+  handOver(p, prop.id);
+  // The Proposal is Open: its card carries the refinement, so the announcement bound to it is no ghost.
+  const refining = announce(p, { kind: "proposal", title: "Returns", proposal: prop.id, source: "request", terminal: "ab12cd" });
+  expect(listAnnouncements(p).find((a) => a.id === refining.id)).toMatchObject({ proposal: prop.id, title: "Returns" });
+  expect(buildSnapshot(p).announcements.map((a) => a.id)).not.toContain(refining.id);
+  expect(buildSnapshot(p).proposals.map((x) => x.id)).toContain(prop.id);
+  // A Draft that nobody refines keeps its ghost.
+  const draft = newProposal(p, "Draft title", "", { origin: { terminal: "ef34gh" } });
+  const ghost = announce(p, { kind: "proposal", title: "Draft title", proposal: draft.id, source: "request", terminal: "ef34gh" });
+  expect(buildSnapshot(p).announcements.map((a) => a.id)).toContain(ghost.id);
+});
+
 test("a Proposal that would leave the Model invalid reports the errors instead of failing the snapshot", () => {
   const prop = newProposal(p, "Broken");
   const order = editInProposal(p, prop.id, "checkout/order.md");

@@ -144,9 +144,9 @@ test("the Scan count keeps Tasks finished after the scan that were cleared, unti
   clearDoneTasks(p, ["aaaaaaaa", "bbbbbbbb"]);
   expect(readFileSync(join(p.dir, "last-scan/cleared"), "utf8")).toBe(`aaaaaaaa ${AFTER}\n`);
   expect(buildSnapshot(p).tasksSinceScan).toBe(2);
-  // A line that does not read is ignored, and a Task listed twice counts once.
-  writeFileSync(join(p.dir, "last-scan/cleared"), `aaaaaaaa ${AFTER}\nnonsense\naaaaaaaa 2026-10-03T10:00:00.000Z\nbbbbbbbb not-a-date\n`);
-  expect(clearedSince(p, Date.parse(SCAN))).toBe(1);
+  // A line that does not read is ignored; every other line counts, whatever the identity of its Task.
+  writeFileSync(join(p.dir, "last-scan/cleared"), `aaaaaaaa ${AFTER}\nnonsense\n0007 2026-10-03T10:00:00.000Z\nbbbbbbbb not-a-date\ncccccccc ${BEFORE}\n`);
+  expect(clearedSince(p, Date.parse(SCAN))).toBe(2);
   writeLastScan(p, "2026-10-05T10:00:00.000Z");
   expect(existsSync(join(p.dir, "last-scan/cleared"))).toBe(false);
   expect(readFileSync(join(p.dir, "last-scan/.gitignore"), "utf8")).toBe("*\n");

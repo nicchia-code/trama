@@ -1,4 +1,4 @@
-// The ACP client of omp Chat: it spawns `omp acp` (with `--yolo` only when `trama.ompChatApproval` is `yolo`) and talks to it over the process's stdio with `ClientSideConnection` of @agentclientprotocol/sdk.
+// The ACP client of omp Chat: it spawns `omp acp` (with `--yolo` unless `trama.ompChatApproval` is `ask`) and talks to it over the process's stdio with `ClientSideConnection` of @agentclientprotocol/sdk.
 //
 // Verified with omp 18.12.6, which `omp acp` honours the options given before `acp`: `--hook` loads Trama's module, `--config` applies the overlay, `--advisor`
 // turns the advisors on, and `--model` and `--slow` choose the models. So the options of a job are passed as they are in front of `acp` (`ompArguments` in
@@ -9,6 +9,9 @@
 // `sessionCapabilities.close` (`session/close` when a process is stopped), `loadSession` (`session/load` reopens a saved session) and the select of category
 // `model` in the session's configuration options (`session/set_config_option`). The process leads its own group, so stopping it stops what it started.
 import { type ChildProcess, spawn } from "node:child_process";
+import { certificateReason } from "../../certificate-errors";
+import { cursorKeyEnv } from "../cursor-api-key";
+import { savedSystemCertificates, systemCertificatesEnv } from "../system-certificates";
 import { Readable, Writable } from "node:stream";
 import {
   type Client,
@@ -625,7 +628,8 @@ export class OmpClient implements OmpClientPort {
 
   private async open(launch: OmpLaunch, reopen: string | undefined, first?: OmpPrompt, spawned?: (pid: number) => void): Promise<OmpSessionPort> {
     const ompPath = await this.deps.ompPath();
-    const env = { ...process.env, ...launch.env };
+    const systemCertificates = savedSystemCertificates();
+    const env = { ...process.env, ...launch.env, ...cursorKeyEnv(), ...systemCertificatesEnv(systemCertificates) };
     // The folder of the omp program and the folder of bun go in front of the launch's PATH, so a script of omp finds its runtime.
     env["PATH"] = ompPathVariable(ompPath, env);
     // The process leads its own group on Linux and macOS, so that stopping it stops every command omp started (`OmpSession.stop`).
@@ -644,7 +648,10 @@ export class OmpClient implements OmpClientPort {
     } catch (error) {
       const problem = await explained(error, failed);
       await session.stop();
-      throw new OmpStartFailure(startFailureReason(problem, ompPath), await session.errorOutput());
+      const reason = startFailureReason(problem, ompPath);
+      const details = await session.errorOutput();
+      // A certificate error in omp's message or in its error output is told in plain words; omp's own lines stay in `details`.
+      throw new OmpStartFailure(certificateReason(reason, [reason, details], systemCertificates), details);
     }
     session.opened();
     if (first !== undefined) {

@@ -291,19 +291,6 @@ function ResolvesBlock({ proposal, numbers, showDrift }: { proposal: ProposalVie
               </TooltipTrigger>
               <TooltipContent>Show the Drift on the diagram</TooltipContent>
             </Tooltip>
-            {row.notBlocking.length > 0 ? (
-              <p className="text-muted-foreground">
-                Not blocking:{" "}
-                {row.notBlocking.map((item, at) => (
-                  <Fragment key={at}>
-                    {at > 0 ? ", " : ""}
-                    <span role="img" aria-label={`Not blocked by this Drift: ${item.reason}`} title={`Not blocked by this Drift: ${item.reason}`} className="font-mono">
-                      {item.name.text}
-                    </span>
-                  </Fragment>
-                ))}
-              </p>
-            ) : null}
           </li>
         ))}
       </ul>

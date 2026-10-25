@@ -134,6 +134,18 @@ Il developer preme Install omp: nel passo omp del wizard di setup, nel gruppo om
 ### LOG_IN_PROVIDER
 Il developer preme Log in, o Log in again, sulla riga di un fornitore di modelli nella sezione Providers del gruppo omp della scheda Settings o del passo omp del wizard di setup. Trama apre un terminale visibile in cui omp fa il login a quel fornitore: omp apre il browser o mostra un codice, e il developer completa l'accesso lì (vedi il Setup wizard e il Panel).
 
+### LOG_OUT_PROVIDER
+The developer presses Log out on the row of a Connected model provider, in the Providers section of the omp group of the Settings tab or of the omp step of the setup wizard, and confirms in the editor's dialog that follows; closing the dialog changes nothing. Trama has omp forget every account of that provider that omp stored, in the background and with no terminal; credentials that omp reads from elsewhere (environment variables, `.env` files, omp's model settings) and Trama's Cursor API key stay (see the Setup wizard and the Panel).
+
+### SET_CURSOR_API_KEY
+Il developer preme Set API key, o Change API key quando una chiave è già salvata, sulla riga Cursor della sezione Providers, nel gruppo omp della scheda Settings o nel passo omp del wizard di setup, e conferma una chiave API di Cursor nella casella mascherata che l'editor apre. La casella non accetta una chiave vuota o fatta di soli spazi e resta aperta dicendo di inserirne una; Esc la chiude senza che nulla cambi. Trama conserva la chiave nel portachiavi dell'editor, mai in un file né nelle impostazioni, e la passa a ogni omp che avvia da allora (vedi Agent launching).
+
+### REMOVE_CURSOR_API_KEY
+Il developer preme Remove API key sulla riga Cursor della sezione Providers, nel gruppo omp della scheda Settings o nel passo omp del wizard di setup; il pulsante c'è solo quando Trama conserva una chiave API di Cursor. Trama la toglie dal portachiavi dell'editor senza chiedere conferma, e da allora omp parte senza la chiave di Trama.
+
+### REFRESH_SYSTEM_CERTIFICATES
+The developer asks Trama to export the system's certificates again, with Refresh next to the System Certificates status, in the omp group of the Settings tab or in the omp step of the setup wizard, or with the Refresh System Certificates command of the editor. It is available only while System Certificates is on (see Agent launching).
+
 ### CHANGE_SETTING
 Il developer cambia un'impostazione di Trama dalla scheda Settings: sceglie un valore in un menu, spunta o toglie una casella, oppure conferma un campo di testo o numerico.
 

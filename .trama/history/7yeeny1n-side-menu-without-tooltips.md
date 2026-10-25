@@ -1,9 +1,10 @@
 ---
 created: 2026-10-24T11:23:03.235Z
-updated: 2026-10-24T11:23:03.235Z
+updated: 2026-10-24T20:56:01.645Z
 summary: The side menu shows no hover tooltips; below 56 px it becomes icon-only, and a disabled Scan System explains itself in a line under the button.
 tasks:
   - dimk77i0
+  - 6bec8jmb
 cleared:
   dimk77i0:
     title: Menu laterale senza tooltip

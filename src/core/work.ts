@@ -60,12 +60,6 @@ interface TaskData {
 
 export type DriftResolution = "fix-code" | "proposal" | "dismissed" | "unified";
 
-/** A Task an open Drift leaves free at creation, and the reason it gives on one line; the list is written only at creation. */
-export interface NotBlocking {
-  task: string;
-  reason: string;
-}
-
 interface DriftData {
   status: "open" | "resolved";
   resolution: DriftResolution | null;
@@ -84,8 +78,6 @@ interface DriftData {
   note: string | null;
   resolvedBy: string | null;
   created: string | null;
-  /** The Tasks this Drift leaves free, in the order they were named: not blocked by it. Empty when it blocks as always. */
-  notBlocking: NotBlocking[];
   /** The job (`TRAMA_JOB`) of the agent terminal that filed the Drift; set at creation and never changed. Null when none, and on Drifts written before the field. */
   job: string | null;
 }
@@ -153,26 +145,11 @@ function parseDrift(raw: Raw, where: string): DriftData {
     note: textOrNull(raw, "note", where),
     resolvedBy: idField(raw, "resolvedBy", where),
     created: createdField(raw, where),
-    notBlocking: notBlockingField(raw, where),
     job: textOrNull(raw, "job", where),
   };
   if (data.resolution === "unified" && data.unifiedInto === null) throw new TramaError(`${where}: resolution "unified" needs "unifiedInto", the Drift it was merged into`);
   if (data.unifiedInto !== null && data.resolution !== "unified") throw new TramaError(`${where}: "unifiedInto" goes only with resolution "unified", found ${JSON.stringify(data.resolution)}`);
   return data;
-}
-
-/** The `notBlocking` list of a Drift: each item a Task identity and a reason on one line; absent or null is none. */
-function notBlockingField(raw: Raw, where: string): NotBlocking[] {
-  const v = raw["notBlocking"];
-  if (v === undefined || v === null) return [];
-  if (!Array.isArray(v)) throw new TramaError(`${where}: "notBlocking" must be a list of { task, reason }, found ${JSON.stringify(v)}`);
-  return v.map((item: unknown, i) => {
-    const entry: Raw = typeof item === "object" && item !== null && !Array.isArray(item) ? { ...item } : {};
-    const task = idField(entry, "task", where);
-    const reason = textOrNull(entry, "reason", where)?.trim() ?? "";
-    if (task === null || reason === "") throw new TramaError(`${where}: "notBlocking" item ${i + 1} needs a "task" and a "reason"`);
-    return { task, reason };
-  });
 }
 
 function load<D>(dir: string, entry: { id: string; name: string }, parse: (raw: Raw, where: string) => D): Item<D> {
@@ -196,7 +173,6 @@ function saveItem(path: string, data: object, body: string) {
   }
   if (Array.isArray(copy["unifies"]) && copy["unifies"].length === 0) delete copy["unifies"];
   if (copy["unifiedInto"] === null) delete copy["unifiedInto"];
-  if (Array.isArray(copy["notBlocking"]) && copy["notBlocking"].length === 0) delete copy["notBlocking"];
   if (copy["job"] === null) delete copy["job"];
   if (copy["resolvedBy"] === null) delete copy["resolvedBy"];
   if ("holder" in copy) {
@@ -803,42 +779,10 @@ function previousOf(p: Project, named: string | undefined, origin: string | null
   return previous.id;
 }
 
-/** A Task a Drift leaves free, with its title: null once the Task no longer exists, which the list keeps all the same. */
-export interface FreedTask extends NotBlocking {
-  title: string | null;
-}
-
-/** The Tasks a Drift leaves free, in the order they were named. A Task that no longer exists stays in the list, with no title. */
-export function freedTasks(drift: Drift, tasks: Task[]): FreedTask[] {
-  return drift.data.notBlocking.map((n) => ({ ...n, title: tasks.find((t) => t.id === n.task)?.title ?? null }));
-}
-
 /** The live Tasks a new Drift with these references and this origin would block: what `trama drift new` with `dryRun` lists. Refuses references that do not resolve; an origin Task that no longer exists (deleted with Clear) blocks nothing. */
 export function driftCandidates(p: Project, refs: string[], origin: string[]): Task[] {
   checkRefs(p, refs);
   return blockedByDrift(loadProject(p), listTasks(p), refs, origin);
-}
-
-/**
- * The Tasks a new Drift may leave free: each one a Task the Drift would block (the origin included), named once, with
- * a reason on one line. Refuses, naming the Task, anything else.
- */
-function checkNotBlocking(p: Project, named: NotBlocking[], refs: string[], origin: string[]): NotBlocking[] {
-  const existing = listTasks(p);
-  const wouldBlock = blockedByDrift(loadProject(p), existing, refs, origin);
-  const seen = new Set<string>();
-  return named.map(({ task, reason }) => {
-    if (task === "") throw new TramaError("A reason for a Task was given with no Task before it: each `reason` of `notBlocking` goes with its `task`");
-    if (!existing.some((t) => t.id === task)) throw new TramaError(`Task ${task} does not exist, so the Drift cannot leave it free`);
-    const name = cardName(p, "task", task);
-    if (seen.has(task)) throw new TramaError(`Task ${name} is named more than once in notBlocking`);
-    seen.add(task);
-    const text = reason.trim();
-    if (!text) throw new TramaError(`Task ${name} needs its reason, in one line: why the difference does not touch it`);
-    if (/\n/.test(text)) throw new TramaError(`The reason for Task ${name} must be a single line`);
-    if (!wouldBlock.some((t) => t.id === task)) throw new TramaError(`The Drift would not block Task ${name}, so it cannot leave it free`);
-    return { task, reason: text };
-  });
 }
 
 /** A Drift checked and built but not written: what `newDrift` writes, and what `trama comparison move` checks for every card before it writes any. */
@@ -850,7 +794,7 @@ export interface PlannedDrift {
 
 export function planDrift(
   p: Project,
-  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; where: string; notBlocking?: NotBlocking[]; job?: string },
+  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; where: string; job?: string },
 ): PlannedDrift {
   const origin = input.origin ? getTask(p, input.origin).id : null;
   const previous = previousOf(p, input.previous, origin);
@@ -859,7 +803,7 @@ export function planDrift(
 
 function planDriftWith(
   p: Project,
-  input: { title: string; refs: string[]; proposal?: string; happens: string; should: string; options: DriftOption[]; where: string; notBlocking?: NotBlocking[]; job?: string },
+  input: { title: string; refs: string[]; proposal?: string; happens: string; should: string; options: DriftOption[]; where: string; job?: string },
   origin: string[],
   previous: string[],
   unifies: string[],
@@ -877,8 +821,7 @@ function planDriftWith(
   if (attached) requireAttachable(p, attached);
   if (options.length === 0 && attached === null) throw new TramaError("A Drift without Fix options needs an attached Proposal that fixes the Model or the Requirements: give `proposal` with its Draft, or two to five fix options");
   const proposal = attached?.id ?? null;
-  const notBlocking = checkNotBlocking(p, input.notBlocking ?? [], input.refs, origin);
-  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin, previous, unifies, unifiedInto: null, option: null, note: null, resolvedBy: null, created: createdNow(), notBlocking, job: input.job?.trim() || null };
+  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin, previous, unifies, unifiedInto: null, option: null, note: null, resolvedBy: null, created: createdNow(), job: input.job?.trim() || null };
   const sections = [
     `## ${HAPPENS_HEADING}\n\n${happens}`,
     `## ${SHOULD_HEADING}\n\n${should}`,
@@ -896,7 +839,7 @@ export function writeDrift(p: Project, plan: PlannedDrift, announcement?: string
 
 export function newDrift(
   p: Project,
-  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; where: string; announcement?: string; notBlocking?: NotBlocking[]; job?: string },
+  input: { title: string; refs: string[]; proposal?: string; origin?: string; previous?: string; happens: string; should: string; options: DriftOption[]; where: string; announcement?: string; job?: string },
 ): Drift {
   return writeDrift(p, planDrift(p, input), input.announcement);
 }
@@ -974,7 +917,7 @@ export function unifiedCandidates(p: Project, named: string[], refs: string[]): 
  */
 export function newUnifiedDrift(
   p: Project,
-  input: { unifies: string[]; title: string; refs: string[]; proposal?: string; happens: string; should: string; options: DriftOption[]; where: string; announcement?: string; notBlocking?: NotBlocking[]; job?: string },
+  input: { unifies: string[]; title: string; refs: string[]; proposal?: string; happens: string; should: string; options: DriftOption[]; where: string; announcement?: string; job?: string },
 ): { drift: Drift; unified: Drift[] } {
   const unified = unifiedBy(p, input.unifies, input.proposal);
   const origin = unifiedOrigins(unified);
@@ -1146,12 +1089,11 @@ function fixCode(p: Project, drift: Drift, optionNumber: number | undefined, not
   drift.data.resolution = "fix-code";
   drift.data.option = option ? (optionNumber as number) : null;
   drift.data.note = note;
-  // Each Task the Drift came from goes back to To do and, until the fix Task is Done, is blocked (see computeBlocked);
-  // an origin the Drift left free is not held by it, so it stays where it is.
+  // Each Task the Drift came from goes back to To do and, until the fix Task is Done, is blocked (see computeBlocked).
   for (const id of drift.data.origin) {
     const origin = getTaskOrNull(p, id);
     if (origin === null) continue;
-    if (origin.data.column === "done" || drift.data.notBlocking.some((n) => n.task === origin.id)) continue;
+    if (origin.data.column === "done") continue;
     origin.data.column = "todo";
     origin.data.agent = false;
     origin.data.holder = null;

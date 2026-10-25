@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { editDrift, type PreparedQuestion, preparedOutcome, preparedStatus } from "../src/core/prepared";
 import { getProposal, listProposals, newProposal } from "../src/core/proposals";
-import { resolveDriftBlocker, resolveDriftsBlocker } from "../src/core/resolution";
+import { resolveDriftBlocker, resolveDriftInProposal, resolveDriftsBlocker } from "../src/core/resolution";
 import type { QuestionRequest, QuestionResult } from "../src/core/questions";
 import { type Project, projectAt } from "../src/core/store";
 import { getDrift, newDrift } from "../src/core/work";
@@ -17,7 +17,7 @@ mock.module("vscode", () => ({
   workspace: {
     workspaceFolders: [],
     getWorkspaceFolder: () => undefined,
-    getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback, inspect: (key: string) => (key === "asyncDriftResolver" && asyncResolver ? { globalValue: true } : undefined), update: async () => undefined }),
+    getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback, inspect: (key: string) => (key === "asyncDriftResolver" && !asyncResolver ? { globalValue: false } : undefined), update: async () => undefined }),
   },
   extensions: { getExtension: () => undefined },
   ConfigurationTarget: { Global: 1, Workspace: 2 },
@@ -199,4 +199,25 @@ test("while a prepared job is open, Run, Run all and Resolve on other Drifts are
   expect(resolveDriftBlocker(p, work, false)).toBe("Drifts are being resolved");
   endHeldJob(dir, preparedJob);
   expect(driftWork(dir).resolving).toBe(false);
+});
+
+test("the agent started from an answer is not refused for a resolution awaiting a decision; Resolve on a Drift held by a resolution is refused, with or without an answer", async () => {
+  const d = preparedDrift();
+  const held = preparedDrift("Held");
+  newProposal(p, "Manual", "", { kind: "resolution" });
+  const resolution = newProposal(p, "Holding", "", { kind: "resolution" });
+  resolveDriftInProposal(p, resolution.id, held.id, { decision: "dismissed" });
+  const { controller, internals } = controllerAnswering(async () => answered(d.id, ["Keep"]));
+  const reasonOf = async (drift: string, answer?: { selected: string[]; text?: string }): Promise<string> => {
+    try {
+      await internals.launchAction(p, { kind: "resolve-drifts", drift }, answer);
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
+    return "";
+  };
+  expect(await reasonOf(d.id, { selected: ["Keep"], text: "but log it" })).not.toContain("awaits a decision");
+  expect(await reasonOf(held.id, { selected: ["Keep"], text: "but log it" })).toContain("is part of resolution");
+  expect(await reasonOf(held.id)).toContain("is part of resolution");
+  controller.dispose();
 });

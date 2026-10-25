@@ -1,11 +1,13 @@
 ---
 created: 2026-10-20T22:27:10.554Z
-updated: 2026-10-20T22:27:10.554Z
+updated: 2026-10-24T20:56:01.270Z
 summary: Diagramma, Requisiti e Specs hanno ciascuno il proprio focus (da Proposal, Task o chip) percorribile a passi; i pulsanti View e i chip aprono la scheda giusta con il focus e i livelli del Diagramma si adattano agli elementi.
 tasks:
   - 0qa3744x
   - 1rz3k7ev
   - tvf2644b
+  - vs2q3cjz
+  - yh0ni696
 cleared:
   tvf2644b:
     title: Focus delle schede

@@ -2,9 +2,12 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { ReadableStream as NodeReadableStream, TransformStream as NodeTransformStream, WritableStream as NodeWritableStream } from "node:stream/web";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { OmpClient, type OmpClientDeps } from "../extension/src/host/omp-chat/client";
+import { certificateErrorText } from "../extension/src/certificate-errors";
+import { startCursorApiKey } from "../extension/src/host/cursor-api-key";
+import { bundlePath, setSystemCertificatesSetting } from "../extension/src/host/system-certificates";
 import type { TurnEnd } from "../src/core/omp-chat-conversation";
 import { QUESTION_TOOL_REFUSAL } from "../src/core/questions";
 import { type OmpExit, type OmpLaunch, OmpStartFailure, type OmpSessionPort, type PermissionRequest } from "../extension/src/host/omp-chat/ports";
@@ -80,6 +83,71 @@ describe.skipIf(!posix)("starting omp", () => {
     }
   });
 
+  test("the Cursor API key Trama saved reaches the process as CURSOR_ACCESS_TOKEN over the editor's own value, without being in the launch; without a key the variable is left as it is", async () => {
+    const seen = join(folder, "token-seen");
+    const spy = join(folder, "omp-spy");
+    writeFileSync(spy, `#!/bin/sh\nprintf '%s\\n' "\${CURSOR_ACCESS_TOKEN-unset}" >> '${seen}'\nexec "${wrapper}" "$@"\n`);
+    chmodSync(spy, 0o755);
+    const secrets = { get: async () => "  saved-key  ", store: async () => undefined, delete: async () => undefined, onDidChange: () => ({ dispose() {} }) };
+    const before = process.env["CURSOR_ACCESS_TOKEN"];
+    process.env["CURSOR_ACCESS_TOKEN"] = "editor-token";
+    const opening = launch();
+    try {
+      const without = await new OmpClient({ ompPath: () => spy, mcpServers: () => [] }).start(opening);
+      await without.stop();
+      const following = await startCursorApiKey(secrets as never, () => {});
+      try {
+        const withKey = await new OmpClient({ ompPath: () => spy, mcpServers: () => [] }).start(opening);
+        await withKey.stop();
+      } finally {
+        following.dispose();
+      }
+      expect(readFileSync(seen, "utf8").split("\n").filter((line) => line !== "")).toEqual(["editor-token", "saved-key"]);
+      // The key is added at the spawn: the launch, which a conversation saves, never holds it.
+      expect(JSON.stringify(opening)).not.toContain("saved-key");
+    } finally {
+      if (before === undefined) delete process.env["CURSOR_ACCESS_TOKEN"];
+      else process.env["CURSOR_ACCESS_TOKEN"] = before;
+    }
+  });
+
+  test("the bundle of System Certificates reaches the process in the nine variables over the editor's own, only with the saved mode on and a bundle on disk, and never through the launch", async () => {
+    const seen = join(folder, "certs-seen");
+    const spy = join(folder, "omp-certs-spy");
+    writeFileSync(spy, `#!/bin/sh\nprintf '%s|%s\\n' "\${NODE_EXTRA_CA_CERTS-unset}" "\${DENO_CERT-unset}" >> '${seen}'\nexec "${wrapper}" "$@"\n`);
+    chmodSync(spy, 0o755);
+    const home = join(folder, "certs-home");
+    const saved = { HOME: process.env["HOME"], XDG_CACHE_HOME: process.env["XDG_CACHE_HOME"], NODE_EXTRA_CA_CERTS: process.env["NODE_EXTRA_CA_CERTS"], DENO_CERT: process.env["DENO_CERT"] };
+    process.env["HOME"] = home;
+    delete process.env["XDG_CACHE_HOME"];
+    delete process.env["DENO_CERT"];
+    process.env["NODE_EXTRA_CA_CERTS"] = "/corporate/old.pem";
+    const opening = launch();
+    const startOnce = async () => {
+      const session = await new OmpClient({ ompPath: () => spy, mcpServers: () => [] }).start(opening);
+      await session.stop();
+    };
+    try {
+      const path = bundlePath();
+      setSystemCertificatesSetting(() => true);
+      // No bundle yet: nothing is set, the editor's value stays.
+      await startOnce();
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, "bundle\n");
+      await startOnce();
+      setSystemCertificatesSetting(() => false);
+      await startOnce();
+      expect(readFileSync(seen, "utf8").split("\n").filter((line) => line !== "")).toEqual(["/corporate/old.pem|unset", `${path}|${path}`, "/corporate/old.pem|unset"]);
+      expect(JSON.stringify(opening)).not.toContain(path);
+    } finally {
+      setSystemCertificatesSetting(() => false);
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+
   test("the MCP servers of the project go in session/new", async () => {
     const { readMcpServers } = await import("../src/core/omp-mcp");
     const session = await client({ mcpServers: (root) => readMcpServers(root, {}, join(folder, "nohome")) }).start(launch());
@@ -135,6 +203,24 @@ describe.skipIf(!posix)("a start that fails", () => {
     expect(await failure(client().start(launch("no-close")))).toBe("omp does not declare session/close");
     expect(await failure(client().start(launch("no-model")))).toBe("omp declares no model option for the session");
     expect(await failure(client().resume(launch("no-load"), "s-1"))).toBe("omp does not declare session/load");
+  });
+  test("a certificate error in omp's message or error output is the reason in plain words, with the mode of the setting, and omp's lines stay in the details", async () => {
+    const failing = join(folder, "omp-cert-failure");
+    writeFileSync(failing, "#!/bin/sh\necho 'Error: UNABLE_TO_VERIFY_LEAF_SIGNATURE' >&2\nexit 3\n");
+    chmodSync(failing, 0o755);
+    try {
+      for (const on of [false, true]) {
+        setSystemCertificatesSetting(() => on);
+        const error = await new OmpClient({ ompPath: () => failing }).start(launch()).then(() => undefined, (caught: unknown) => caught);
+        expect(error).toBeInstanceOf(OmpStartFailure);
+        expect((error as OmpStartFailure).message).toBe(certificateErrorText(on));
+        expect((error as OmpStartFailure).details).toBe("Error: UNABLE_TO_VERIFY_LEAF_SIGNATURE");
+      }
+    } finally {
+      setSystemCertificatesSetting(() => false);
+    }
+    // Not a certificate error: the reason stays as it was.
+    expect(await failure(client().start(launch("exit3")))).toBe("omp exited with code 3");
   });
   test("the pid is told the moment the process is spawned, also when the start then fails", async () => {
     const pids: number[] = [];

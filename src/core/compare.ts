@@ -10,10 +10,7 @@ import type { Project } from "./store";
 import {
   type Drift,
   type DriftOption,
-  driftCandidates,
-  type NotBlocking,
   getDrift,
-  getTask,
   listDrifts,
   listTasks,
   type PlannedDrift,
@@ -25,7 +22,7 @@ import {
   writeTask,
 } from "./work";
 
-/** What `trama comparison new` gathers for one Machine: the references, what concerns them, and their candidates. */
+/** What `trama comparison new` gathers for one Machine: the references and what concerns them. */
 export interface Briefing {
   project: ProjectModel;
   machine: Machine;
@@ -33,8 +30,6 @@ export interface Briefing {
   openTasks: Task[];
   openDrifts: Drift[];
   closedDrifts: Drift[];
-  /** The Tasks a Drift on each reference would block, when asked for; null otherwise. */
-  candidates: Map<string, Task[]> | null;
 }
 
 /** The references of a Machine when none is named: the Machine, its States and its Events. */
@@ -42,7 +37,7 @@ function wholeMachine(machine: Machine): string[] {
   return [machine.id, ...flattenStates(machine.states).map((s) => `${machine.id}/${s.name}`), ...machine.events.map((e) => `${machine.id}.${e.name}`)];
 }
 
-export function briefing(p: Project, machineId: string, refs: string[], candidates: boolean): Briefing {
+export function briefing(p: Project, machineId: string, refs: string[]): Briefing {
   const project = loadProject(p);
   const machine = project.model.machines.get(machineId);
   if (!machine) throw new TramaError(`Unknown Machine "${machineId}"`);
@@ -65,7 +60,6 @@ export function briefing(p: Project, machineId: string, refs: string[], candidat
     openTasks: tasks,
     openDrifts: drifts.filter((d) => d.data.status === "open"),
     closedDrifts: drifts.filter((d) => d.data.status === "resolved" && d.data.resolution !== "unified"),
-    candidates: candidates ? new Map(scope.map((ref) => [ref, driftCandidates(p, [ref], [])])) : null,
   };
 }
 
@@ -77,7 +71,7 @@ export interface ComparisonTask {
   technical?: boolean;
 }
 
-/** One Drift of a comparison file; `notBlocking` names Tasks by identity or short number. */
+/** One Drift of a comparison file. */
 export interface ComparisonDrift {
   title: string;
   refs: string[];
@@ -87,7 +81,6 @@ export interface ComparisonDrift {
   options: DriftOption[];
   previous?: string;
   proposal?: string;
-  notBlocking?: NotBlocking[];
 }
 
 export interface ComparisonFile {
@@ -117,7 +110,7 @@ function taskShape(c: Record<string, unknown>): string[] {
   return out;
 }
 
-const DRIFT_FIELDS = new Set(["title", "refs", "happens", "should", "where", "options", "previous", "proposal", "notBlocking"]);
+const DRIFT_FIELDS = new Set(["title", "refs", "happens", "should", "where", "options", "previous", "proposal"]);
 
 function driftShape(c: Record<string, unknown>): string[] {
   const out: string[] = [];
@@ -126,7 +119,6 @@ function driftShape(c: Record<string, unknown>): string[] {
   if (!Array.isArray(c["options"]) || !c["options"].every((o) => isObject(o) && typeof o["title"] === "string" && typeof o["text"] === "string")) out.push("options must be a list of {title, text} strings");
   for (const field of Object.keys(c)) if (!DRIFT_FIELDS.has(field)) out.push(`unknown field ${field}`);
   for (const field of ["previous", "proposal"]) if (!optional(c[field], (x) => typeof x === "string")) out.push(`${field} must be a string`);
-  if (!optional(c["notBlocking"], (x) => Array.isArray(x) && x.every((n) => isObject(n) && typeof n["task"] === "string" && typeof n["reason"] === "string"))) out.push("notBlocking must be a list of {task, reason} strings");
   return out;
 }
 
@@ -182,7 +174,6 @@ export function archiveComparison(p: Project, comparisonId: string, raw: string,
       if (proposal !== undefined && proposals.has(proposal)) throw new TramaError(`Proposal ${proposal} is already attached to another Drift of this file`);
       if (proposal !== undefined) proposals.add(proposal);
       const previous = c["previous"] === undefined ? undefined : getDrift(p, c["previous"] as string, true).id;
-      const notBlocking = ((c["notBlocking"] ?? []) as { task: string; reason: string }[]).map((n) => ({ task: getTask(p, n.task, true).id, reason: n.reason }));
       drifts.push(planDrift(p, {
         title: c["title"] as string,
         refs: c["refs"] as string[],
@@ -192,7 +183,6 @@ export function archiveComparison(p: Project, comparisonId: string, raw: string,
         should: c["should"] as string,
         options: c["options"] as DriftOption[],
         where: c["where"] as string,
-        notBlocking,
         job,
       }));
     } catch (err) {

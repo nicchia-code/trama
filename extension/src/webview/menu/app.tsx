@@ -70,7 +70,7 @@ export function MenuApp({ state, post }: { state: MenuState | null; post: (messa
       {state.situation === "noFolder" ? (
         <>
           <p className="px-2 py-1 text-sm text-muted-foreground @max-[56px]:hidden">Open a folder to use Trama.</p>
-          <Button className="w-full justify-start @max-[56px]:justify-center" onClick={() => post({ type: "openFolder" })}>
+          <Button aria-label="Open Folder" className="w-full justify-start @max-[56px]:justify-center" onClick={() => post({ type: "openFolder" })}>
             <FolderOpen aria-hidden="true" focusable="false" className="size-4" />
             <span className="@max-[56px]:hidden">Open Folder</span>
           </Button>

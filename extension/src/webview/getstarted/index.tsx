@@ -15,6 +15,9 @@ export interface GetStartedView extends View {
   receiveFolders(message: Extract<ToWebview, { type: "workspaceFolders" }>): void;
   receiveModels(message: Extract<ToWebview, { type: "modelSuggestions" }>): void;
   receiveAgentCheck(message: Extract<ToWebview, { type: "agentCheck" }>): void;
+  receiveCursorApiKey(message: Extract<ToWebview, { type: "cursorApiKey" }>): void;
+  receiveOmpLogoutState(message: Extract<ToWebview, { type: "ompLogoutState" }>): void;
+  receiveSystemCertificates(message: Extract<ToWebview, { type: "systemCertificates" }>): void;
   receiveFolderChildren(message: Extract<ToWebview, { type: "folderChildren" }>): void;
   receiveInstructionFiles(message: Extract<ToWebview, { type: "instructionFiles" }>): void;
   /** Whether the folder has a Trama project: the wizard starts over when the folder stops being one and is forgotten when it becomes one. */
@@ -48,6 +51,9 @@ export const mountGetStarted = (slot: Slot, context: ViewContext): GetStartedVie
     receiveFolders: (message) => wizard.receiveFolders(message.folders),
     receiveModels: (message) => wizard.receiveModels(message),
     receiveAgentCheck: (message) => wizard.receiveAgentCheck(message),
+    receiveCursorApiKey: (message) => wizard.receiveCursorApiKey(message),
+    receiveOmpLogoutState: (message) => wizard.receiveLogoutState(message),
+    receiveSystemCertificates: (message) => wizard.receiveSystemCertificates(message),
     receiveFolderChildren: (message) => wizard.receiveFolderChildren(message),
     receiveInstructionFiles: (message) => wizard.receiveInstructionFiles(message),
     projectPresent(present) {

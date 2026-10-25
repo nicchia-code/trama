@@ -2,14 +2,15 @@
  * The pieces the setup wizard and the Settings tab both show, so that neither repeats the other's text: the centred column, the
  * status box of omp, the Providers section, the box of agent instruction files, the sentences of the steps and the advice of the model roles.
  */
-import { CircleCheck, Loader, LogIn, TriangleAlert } from "lucide-react";
-import { type ReactNode, useId } from "react";
+import { CircleCheck, KeyRound, Loader, LogIn, LogOut, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { type OmpLoginProvider, OMP_LOGIN_PROVIDERS, providerConnected } from "../omp-login";
 import type { SettingSchema, SettingValue } from "../host/settings-schema";
 import { InstallOmpButton } from "./install-omp";
 import { cn } from "./lib/utils";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
+import { type CertificatesState, systemCertificatesLine } from "./settings/logic";
 import type { WizardStep } from "./wizard/logic";
 
 /** The one column of the wizard and of the Settings tab: at most about 720 px, the whole width minus the margins in a narrow panel. */
@@ -92,11 +93,68 @@ export function OmpStatusBox({ tone, text, missing, onInstall }: { tone: "checki
 }
 
 /**
- * The Providers section of omp's group in the Settings tab and of the wizard's omp step: the fixed list of model providers, each with the state of its
- * connection and its Log in button. Presentation only: `connected` is `providers` of the last answer of omp with the list of models (absent: every state is
- * unknown, which shows no state), `onLogin` gets the id of the provider whose button was pressed. The list is shown only when omp answers; the callers decide.
+ * The state of the System Certificates bundle, one line of secondary text under the setting's description with its icon on the left and, at the right end of the same line,
+ * `Refresh`; when the line does not fit the button wraps under the text, aligned left. The line reads in words, is a polite live region and is what the checkbox is described
+ * by (`id`). Presentation only: `state` is the host's `systemCertificates` (null until it arrives), `onRefresh` sends the request. While an export runs `Refresh` is disabled and
+ * says so in its tooltip.
  */
-export function Providers({ list = OMP_LOGIN_PROVIDERS, connected, onLogin }: { list?: readonly OmpLoginProvider[]; connected: readonly string[] | undefined; onLogin: (provider: string) => void }) {
+export function SystemCertificatesLine({ id, state, onRefresh }: { id: string; state: CertificatesState | null; onRefresh: () => void }) {
+  const line = systemCertificatesLine(state);
+  const exporting = line.tone === "exporting";
+  // Refresh stays usable when no export runs, even before the host has reported any bundle.
+  const busy = state === null || state.exporting;
+  const refresh = (
+    <Button type="button" variant="outline" size="sm" aria-label="Refresh system certificates" {...(busy ? { disabled: true, "aria-disabled": true } : {})} onClick={onRefresh}>
+      <RefreshCw aria-hidden="true" />
+      Refresh
+    </Button>
+  );
+  return (
+    <div id={id} aria-live="polite" className="flex min-w-0 flex-wrap items-start gap-x-3 gap-y-2 text-sm text-muted-foreground">
+      <p className="m-0 flex min-w-0 flex-1 basis-56 items-start gap-2 wrap-anywhere">
+        {exporting ? (
+          <Loader aria-hidden="true" className="mt-0.5 size-4 shrink-0 animate-spin motion-reduce:animate-none" />
+        ) : line.tone === "ready" ? (
+          <CircleCheck aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-green-600 dark:text-green-400" />
+        ) : (
+          <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-amber-800 dark:text-amber-300" />
+        )}
+        <span>{line.text}</span>
+      </p>
+      {busy ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            {/* A disabled button gets no pointer events: the span carries the tooltip while an export runs. */}
+            <span className="inline-flex">{refresh}</span>
+          </TooltipTrigger>
+          <TooltipContent>Exporting system certificates…</TooltipContent>
+        </Tooltip>
+      ) : (
+        refresh
+      )}
+    </div>
+  );
+}
+
+/**
+ * What the Cursor row needs to offer the API key: whether one is saved (`saved`, from the host's `cursorApiKey`; the panel never has the key), how many times the host
+ * has told it (`changes`, so a replaced key, which leaves `saved` as it was, still brings the focus back), and what the buttons do.
+ */
+export interface ApiKeyControls {
+  saved: boolean;
+  changes: number;
+  onSet: () => void;
+  onRemove: () => void;
+}
+
+/**
+ * The Providers section of omp's group in the Settings tab and of the wizard's omp step: the fixed list of model providers, each with the state of its
+ * connection, its Log in button and, only when it is Connected, its Log out button; the provider that takes an API key (`apiKey`) also has its key buttons. Presentation only:
+ * `connected` is `providers` of the last answer of omp with the list of models (absent: every state is unknown, which shows no state), `onLogin` and `onLogout` get the id of
+ * the provider whose button was pressed, and `loggingOut` lists the providers whose logout the host is running: their rows show the spinner and have every button unavailable.
+ * The list is shown only when omp answers; the callers decide.
+ */
+export function Providers({ list = OMP_LOGIN_PROVIDERS, connected, onLogin, onLogout, loggingOut, apiKey }: { list?: readonly OmpLoginProvider[]; connected: readonly string[] | undefined; onLogin: (provider: string) => void; onLogout: (provider: string) => void; loggingOut: readonly string[]; apiKey: ApiKeyControls }) {
   const id = useId();
   return (
     <section aria-labelledby={`${id}-title`} className="mb-5">
@@ -106,20 +164,46 @@ export function Providers({ list = OMP_LOGIN_PROVIDERS, connected, onLogin }: { 
       <p className="mt-0 mb-3 text-muted-foreground">Log in to the model providers you use with omp.</p>
       <ul aria-label="Providers" className="m-0 grid list-none divide-y border-y p-0">
         {list.map((provider) => (
-          <ProviderRow key={provider.id} provider={provider} descriptionId={`${id}-${provider.id}`} connected={providerConnected(connected, provider.id)} onLogin={() => onLogin(provider.id)} />
+          <ProviderRow
+            key={provider.id}
+            provider={provider}
+            descriptionId={`${id}-${provider.id}`}
+            connected={providerConnected(connected, provider.id)}
+            busy={loggingOut.includes(provider.id)}
+            onLogin={() => onLogin(provider.id)}
+            onLogout={() => onLogout(provider.id)}
+            apiKey={provider.apiKey === true ? apiKey : undefined}
+          />
         ))}
       </ul>
     </section>
   );
 }
 
-/** One row of the Providers list: the name with its subscription, the state in words (none while unknown), and the button, under them in a narrow panel. */
-function ProviderRow({ provider, descriptionId, connected, onLogin }: { provider: OmpLoginProvider; descriptionId: string; connected: boolean | undefined; onLogin: () => void }) {
+/**
+ * One row of the Providers list: the name with its subscription (and, with a saved key, `API key saved`), the state in words (none while unknown), and the buttons, under
+ * them in a narrow panel. While its logout runs (`busy`) the row is `aria-busy`, Log out shows the spinner and no button of the row can be pressed; when the logout ends the
+ * focus goes back to the login button, whose tooltip does not open by that focus, only by the pointer or the keyboard.
+ */
+function ProviderRow({ provider, descriptionId, connected, busy, onLogin, onLogout, apiKey }: { provider: OmpLoginProvider; descriptionId: string; connected: boolean | undefined; busy: boolean; onLogin: () => void; onLogout: () => void; apiKey: ApiKeyControls | undefined }) {
   const action = connected === true ? "Log in again" : "Log in";
   const sentence = `Open a terminal that logs omp in to ${provider.name}`;
   const description = provider.description;
+  const login = useRef<HTMLButtonElement>(null);
+  const wasBusy = useRef(false);
+  const quiet = useRef(false);
+  const [tip, setTip] = useState(false);
+  useEffect(() => {
+    if (wasBusy.current && !busy) {
+      quiet.current = true;
+      setTip(false);
+      login.current?.focus();
+    }
+    wasBusy.current = busy;
+  }, [busy]);
+  const unavailable = busy ? { disabled: true, "aria-disabled": true } : {};
   return (
-    <li className="flex min-w-0 flex-col items-start gap-2 py-2.5 min-[480px]:flex-row min-[480px]:items-center min-[480px]:justify-between min-[480px]:gap-4">
+    <li aria-busy={busy || undefined} className="flex min-w-0 flex-col items-start gap-2 py-2.5 min-[480px]:flex-row min-[480px]:items-center min-[480px]:justify-between min-[480px]:gap-4">
       <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
         <div className="min-w-0">
           <Tooltip>
@@ -129,6 +213,7 @@ function ProviderRow({ provider, descriptionId, connected, onLogin }: { provider
             {description === undefined ? null : <TooltipContent>{description}</TooltipContent>}
           </Tooltip>
           <p className="m-0 text-xs text-muted-foreground wrap-anywhere">{provider.plan}</p>
+          {apiKey?.saved === true ? <p className="m-0 text-xs text-muted-foreground">API key saved</p> : null}
         </div>
         {connected === undefined ? null : connected ? (
           <span className="inline-flex items-center gap-1 text-sm">
@@ -139,23 +224,120 @@ function ProviderRow({ provider, descriptionId, connected, onLogin }: { provider
           <span className="text-sm text-muted-foreground">Not connected</span>
         )}
       </div>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button type="button" variant="outline" size="sm" aria-label={`${action} to ${provider.name}`} {...(description === undefined ? {} : { "aria-describedby": descriptionId })} onClick={onLogin}>
-            <LogIn aria-hidden="true" />
-            {action}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>
-          {description === undefined ? sentence : <span className="grid gap-1"><span>{description}</span><span>{sentence}</span></span>}
-        </TooltipContent>
-      </Tooltip>
+      <div className="flex max-w-full min-w-0 flex-wrap items-center gap-2">
+        <Tooltip
+          open={tip}
+          onOpenChange={(next) => {
+            if (next && quiet.current) return;
+            setTip(next);
+          }}
+        >
+          <TooltipTrigger asChild>
+            <Button
+              ref={login}
+              type="button"
+              variant="outline"
+              size="sm"
+              aria-label={`${action} to ${provider.name}`}
+              {...(description === undefined ? {} : { "aria-describedby": descriptionId })}
+              {...unavailable}
+              onClick={onLogin}
+              onPointerMove={() => void (quiet.current = false)}
+              onKeyDown={() => void (quiet.current = false)}
+              onBlur={() => void (quiet.current = false)}
+            >
+              <LogIn aria-hidden="true" />
+              {action}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {description === undefined ? sentence : <span className="grid gap-1"><span>{description}</span><span>{sentence}</span></span>}
+          </TooltipContent>
+        </Tooltip>
+        {connected === true ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button type="button" variant="ghost" size="sm" aria-label={`Log out of ${provider.name}`} {...unavailable} onClick={onLogout}>
+                {busy ? <Loader aria-hidden="true" className="animate-spin" /> : <LogOut aria-hidden="true" />}
+                Log out
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Make omp forget its accounts of {provider.name}</TooltipContent>
+          </Tooltip>
+        ) : null}
+        {apiKey === undefined ? null : <ApiKeyButtons name={provider.name} controls={apiKey} unavailable={busy} />}
+      </div>
       {description === undefined ? null : (
         <span id={descriptionId} className="sr-only">
           {description}
         </span>
       )}
     </li>
+  );
+}
+
+/**
+ * The key buttons of a provider that takes an API key: Set API key (Change API key with a key saved) and, only with one saved, Remove API key; both are unavailable (`unavailable`)
+ * while the row's logout runs. After a save or a removal the host answers with `cursorApiKey`, and the focus goes back to the first button, which stays when Remove goes away; the
+ * tooltip does not open by that focus, only by the pointer or the keyboard.
+ */
+function ApiKeyButtons({ name, controls, unavailable }: { name: string; controls: ApiKeyControls; unavailable: boolean }) {
+  const button = useRef<HTMLButtonElement>(null);
+  const returning = useRef(false);
+  const quiet = useRef(false);
+  const [tip, setTip] = useState(false);
+  const { saved, changes, onSet, onRemove } = controls;
+  useEffect(() => {
+    if (!returning.current) return;
+    returning.current = false;
+    quiet.current = true;
+    setTip(false);
+    button.current?.focus();
+  }, [changes]);
+  const press = (action: () => void) => () => {
+    returning.current = true;
+    action();
+  };
+  return (
+    <>
+      <Tooltip
+        open={tip}
+        onOpenChange={(next) => {
+          if (next && quiet.current) return;
+          setTip(next);
+        }}
+      >
+        <TooltipTrigger asChild>
+          <Button
+            ref={button}
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-label={`${saved ? "Change" : "Set"} ${name} API key`}
+            {...(unavailable ? { disabled: true, "aria-disabled": true } : {})}
+            onClick={press(onSet)}
+            onPointerMove={() => void (quiet.current = false)}
+            onKeyDown={() => void (quiet.current = false)}
+            onBlur={() => void (quiet.current = false)}
+          >
+            <KeyRound aria-hidden="true" />
+            {saved ? "Change API key" : "Set API key"}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Save a {name} API key that Trama passes to omp</TooltipContent>
+      </Tooltip>
+      {saved ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button type="button" variant="ghost" size="sm" aria-label={`Remove ${name} API key`} {...(unavailable ? { disabled: true, "aria-disabled": true } : {})} onClick={press(onRemove)}>
+              <Trash2 aria-hidden="true" />
+              Remove API key
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Remove the {name} API key saved in Trama</TooltipContent>
+        </Tooltip>
+      ) : null}
+    </>
   );
 }
 

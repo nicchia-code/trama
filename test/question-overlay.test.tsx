@@ -56,9 +56,17 @@ test("the dialog has its title, the name of the asking terminal and the position
 });
 
 test("a round with no asking terminal shows no name", () => {
-  const ui = render(<QuestionOverlay round={{ id: 1, name: null, prepared: true, state: startRound([q("one")]) }} openLink={() => {}} post={() => {}} />);
+  const ui = render(<QuestionOverlay round={{ id: 1, name: null, prepared: false, state: startRound([q("one")]) }} openLink={() => {}} post={() => {}} />);
   expect(screen.getByRole("dialog", { name: "Questions from the agent" })).not.toBeNull();
   expect(screen.queryByText("Design")).toBeNull();
+  expect(screen.queryByText("Prepared question")).toBeNull();
+  ui.unmount();
+});
+
+test("a prepared question round says Prepared question where a round names its agent", () => {
+  const ui = render(<QuestionOverlay round={{ id: 1, name: null, prepared: true, state: startRound([q("one")]) }} openLink={() => {}} post={() => {}} />);
+  expect(screen.getByRole("dialog", { name: "Questions from the agent" })).not.toBeNull();
+  expect(screen.getByText("Prepared question")).not.toBeNull();
   ui.unmount();
 });
 

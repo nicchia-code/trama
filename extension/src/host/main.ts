@@ -4,11 +4,12 @@ import * as vscode from "vscode";
 import { syncRequirementSkills } from "../../../src/core/requirement-skills";
 import { ActivitiesItem, SHOW_ACTIVITIES_COMMAND } from "./activities-item";
 import { watchAnnouncements } from "./announcements";
-import { agentTabName, watchAgentTerminal, configuredOmpPath, configuredSkillsDir, ompChatGeneralSettingsChanged, ownsAgentTerminal, setBundledCliDir, setOmpChat, setOverlayStorage, settings, windowClosed } from "./agent";
+import { agentTabName, watchAgentTerminal, configuredOmpPath, configuredSkillsDir, configuredSystemCertificates, ompChatGeneralSettingsChanged, ownsAgentTerminal, setBundledCliDir, setOmpChat, setOverlayStorage, settings, windowClosed } from "./agent";
 import { Controller, describeError } from "./controller";
 import { startExecutionCheck } from "./execution-check";
 import { DesignRequests } from "./design-requests";
 import { bundledTrama } from "./bundled";
+import { startCursorApiKey } from "./cursor-api-key";
 import { findProject } from "./project";
 import { QuestionSession } from "./question-session";
 import { EditorQuestions } from "./questions";
@@ -19,6 +20,8 @@ import { OmpUsage, ompUsageRunner } from "./omp-chat/usage";
 import { MenuView } from "./menu/view";
 import { SHOW_COMMANDS } from "../menu-protocol";
 import { findConfiguredOmp, findOmp, forgetUpdateCheck, setUpdateStore } from "./omp-update";
+import { bundleStale, loadBundleState, setSystemCertificatesSetting } from "./system-certificates";
+import { setYoloNoticeStore } from "./yolo-notice";
 
 const SKILL_SYNC_DEBOUNCE_MS = 300;
 
@@ -41,6 +44,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // One watcher of `.trama/` for the extension's whole life: the panel follows it while open, the design requests always.
   setOverlayStorage(context.globalStorageUri);
   setUpdateStore(context.globalState);
+  setYoloNoticeStore(context.globalState);
   const tramaFiles = vscode.workspace.createFileSystemWatcher("**/.trama/**");
   const requests = new DesignRequests(context.workspaceState, tramaFiles, undefined, undefined, () => trama.launch({ kind: "implement-all" }));
   const trama = new Controller(context.extensionUri, session, tramaFiles, requests, context.workspaceState);
@@ -62,6 +66,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("trama.sendDesignRequest", guarded((uri?: vscode.Uri) => requests.send(uri))),
     vscode.commands.registerCommand("trama.import", guarded(() => trama.importFromCode())),
     vscode.commands.registerCommand("trama.updateSkills", guarded(async () => trama.updateSkills())),
+    vscode.commands.registerCommand("trama.refreshSystemCertificates", guarded(() => trama.refreshSystemCertificatesCommand())),
     watchAgentTerminal(),
     activities,
     vscode.commands.registerCommand(SHOW_ACTIVITIES_COMMAND, () => activities.show()),
@@ -73,11 +78,20 @@ export function activate(context: vscode.ExtensionContext): void {
       // A changed `trama.ompPath` means another omp: the outcome of the last update check no longer holds.
       if (event.affectsConfiguration("trama.ompPath")) forgetUpdateCheck();
       if (event.affectsConfiguration("trama")) trama.settingsChanged(event.affectsConfiguration("trama.ompPath"));
+      // System Certificates: turned on, the bundle is exported; turned off, only omp is checked again. The processes started afterwards follow the new value.
+      if (event.affectsConfiguration("trama.systemCertificates")) void trama.systemCertificatesChanged();
     }),
   );
   exposeBundledCli(context);
+  // System Certificates: the bundle on disk is read into the state, and with the mode on and the bundle missing or older than 24 hours it is exported in the background: it never holds the activation or a launch.
+  setSystemCertificatesSetting(configuredSystemCertificates);
+  loadBundleState();
+  if (configuredSystemCertificates() && bundleStale()) void trama.exportSystemCertificates("automatic");
+  // The Cursor API key is read now and kept in memory; a conversation that starts or resumes waits for that first read, so it gets the key too.
+  const cursorKey = startCursorApiKey(context.secrets, (message) => void vscode.window.showErrorMessage(message));
+  context.subscriptions.push({ dispose: () => void cursorKey.then((subscription) => subscription.dispose()) });
   // The window follows its conversations and General from here on: only now can the announcements of agents nobody follows be told from those it resumes.
-  const orphans = watchAnnouncements(() => findProject()?.root, startOmpChat(context));
+  const orphans = watchAnnouncements(() => findProject()?.root, startOmpChat(context, cursorKey));
   // The first execution check follows the withdrawal of the orphan ghosts.
   context.subscriptions.push(orphans, startExecutionCheck(() => findProject()?.root, tramaFiles, orphans.done));
 }
@@ -87,7 +101,7 @@ export function activate(context: vscode.ExtensionContext): void {
  * that shows the view follows the settings (`trama.ompChat`) and the conversations from the start. The returned promise settles when the window has read the
  * conversations it will resume and its General (they are registered as followed before the sessions reopen), not when the sessions are back.
  */
-function startOmpChat(context: vscode.ExtensionContext): Promise<void> {
+function startOmpChat(context: vscode.ExtensionContext, cursorKeyRead: Promise<unknown>): Promise<void> {
   const savedIds = () => readSavedConversations(context.workspaceState.get(CONVERSATIONS_KEY)).entries.map((entry) => entry.id);
   // The usage of the subscription: `omp usage --json` in the folder of the panel (General's, also when General is not there), with the program General runs as (`tech#omp-chat`).
   const usage = new OmpUsage(ompUsageRunner({ ompPath: configuredOmpPath, findOmp: findConfiguredOmp, folder: () => findProject()?.root }));
@@ -96,6 +110,7 @@ function startOmpChat(context: vscode.ExtensionContext): Promise<void> {
   // The program is the one the launches run: found as `findOmp` finds it (a conversation that resumes after a reload has had no launch before it).
   const client = new OmpClient({
     ompPath: async () => {
+      await cursorKeyRead;
       const wanted = configuredOmpPath();
       return (await findOmp(wanted)) ?? wanted;
     },

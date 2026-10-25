@@ -112,10 +112,11 @@ const stay = (state: ConversationState): ConversationStep => ({ state, effects: 
 const closed = (what: string): ConversationStep => ({ state: "closed", effects: [{ effect: "stop-process" }, { effect: "end-work", abnormal: what }, { effect: "close" }] });
 
 /**
- * The transition of a conversation in `state` on `event`; `autoExit` is `trama.autoExit`, read when omp answers the prompt of the work. An Event the
- * state does not receive changes nothing: Agent idle no longer follows what happens (a new end of turn changes nothing), and Closed receives nothing.
+ * The transition of a conversation in `state` on `event`; `autoExit` is `trama.autoExit`, read when omp answers the prompt of the work; `empty` is an Ask more still
+ * waiting for its first message. An Event the state does not receive changes nothing: Agent idle no longer follows what happens (a new end of turn changes nothing), and
+ * Closed receives nothing.
  */
-export function conversationStep(state: ConversationState, event: ConversationEvent, autoExit: boolean): ConversationStep {
+export function conversationStep(state: ConversationState, event: ConversationEvent, autoExit: boolean, empty = false): ConversationStep {
   switch (state) {
     case "running":
       switch (event.type) {
@@ -154,7 +155,8 @@ export function conversationStep(state: ConversationState, event: ConversationEv
         case "omp-acp.EXITED":
           return { state: "closed", effects: [{ effect: "end-work" }, { effect: "stop-process" }, { effect: "close" }] };
         case "editor.WINDOW_CLOSED":
-          return { state: "waiting", effects: [{ effect: "stop-process-for-window" }] };
+          // An Ask more with no message yet has nothing to resume: it is not kept and does not come back.
+          return empty ? { state: "closed", effects: [{ effect: "stop-process-for-window" }, { effect: "close" }] } : { state: "waiting", effects: [{ effect: "stop-process-for-window" }] };
         default:
           return stay(state);
       }
@@ -185,6 +187,13 @@ export function conversationStep(state: ConversationState, event: ConversationEv
 
 /** Whether closing the conversation asks first: only when its agent is in a turn (a prompt sent and its answer not yet arrived). */
 export const closeNeedsConfirmation = (inTurn: boolean): boolean => inTurn;
+
+/** The modal confirmation that closing the conversation `name` asks while its agent is in a turn, the same for every conversation tab, General's included. */
+export const closeDialog = (name: string): { message: string; detail: string; button: string } => ({
+  message: `Close ${name} and stop its agent?`,
+  detail: "The conversation and its agent end; Trama stops following its job.",
+  button: "Close",
+});
 
 /** The Trama variables a saved conversation keeps of its environment; the question endpoint and the PATH are made again at the resume. */
 export const SAVED_ENV_KEYS = ["TRAMA_AGENT", "TRAMA_TERMINAL", "TRAMA_ACP", "TRAMA_JOB", "TRAMA_ADVISOR_SCANNER", "TRAMA_RUN", "TRAMA_TASK", "TRAMA_PARALLEL", "PI_INTENT_TRACING"] as const;
@@ -273,9 +282,9 @@ export function withSavedConversation(list: readonly SavedConversation[], entry:
 export const withoutSavedConversation = (list: readonly SavedConversation[], id: string): SavedConversation[] => list.filter((item) => item.id !== id);
 
 /** What the resume of a saved entry does once its session reopens: its state, and for a working one the notice and the fixed prompt. */
-export function resumeDecision(entry: Pick<SavedConversation, "state" | "hook">): { wasRunning: boolean; notice?: string; prompt?: string } {
-  // Only a conversation of a job's work (with Trama's hook) continues its work; Ask more reopens at rest, even when it was in a turn.
-  return entry.state === "running" && entry.hook ? { wasRunning: true, notice: RESUME_NOTICE, prompt: RESUME_PROMPT } : { wasRunning: false };
+export function resumeDecision(entry: Pick<SavedConversation, "state" | "hook" | "job">): { wasRunning: boolean; notice?: string; prompt?: string } {
+  // A conversation of a job's work, with or without Trama's hook, continues its work; Ask more (no hook, no job) reopens at rest, even when it was in a turn.
+  return entry.state === "running" && (entry.hook || entry.job !== undefined) ? { wasRunning: true, notice: RESUME_NOTICE, prompt: RESUME_PROMPT } : { wasRunning: false };
 }
 
 /** The error of a resume that did not answer in time. */

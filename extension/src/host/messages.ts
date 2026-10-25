@@ -20,12 +20,10 @@ const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
 
 const bad = (reason: string): Parsed => ({ ok: false, reason });
 
-function parseAction(value: unknown): AgentAction | string {
+function parseAction(value: unknown): Exclude<AgentAction, { kind: "scan" }> | string {
   if (typeof value !== "object" || value === null) return "launch needs an action";
   const raw = value as Raw;
   switch (raw["kind"]) {
-    case "scan":
-      return raw["feature"] === undefined ? { kind: "scan" } : "scan takes no Feature";
     case "implement":
       return typeof raw["task"] === "string" && ID.test(raw["task"]) ? { kind: "implement", task: raw["task"] } : "implement needs a valid Task ID";
     case "implement-all":
@@ -99,6 +97,13 @@ function parseConfirmSetup(raw: Raw, settings: readonly SettingSchema[]): Parsed
   };
 }
 
+/** The wizard step's `systemCertificates` of `agentCheckWanted`, `installOmp` and `ompLogin`: absent, or a boolean; anything else is a reason the message is refused. */
+function parseSystemCertificates(raw: Raw, type: string): { systemCertificates?: boolean } | string {
+  const value = raw["systemCertificates"];
+  if (value === undefined) return {};
+  return typeof value === "boolean" ? { systemCertificates: value } : `${type} needs systemCertificates as a boolean, or none`;
+}
+
 /**
  * Checks a message from the webview, which is untrusted input, against the `ToHost` contract. `settings` is the manifest's schema: only its keys can be set.
  * `hasTaskImage` tells whether a Task has an image file of that name: `openTaskImage` is accepted only for one that exists.
@@ -120,19 +125,39 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
       if (typeof raw["ompPath"] !== "string" || raw["ompPath"].length > MAX_PATH_TEXT) return bad("modelSuggestionsWanted needs an omp path as text, or none");
       return { ok: true, message: { type, ompPath: raw["ompPath"] } };
     }
-    case "agentCheckWanted":
-      return typeof raw["ompPath"] === "string" && raw["ompPath"].length <= MAX_PATH_TEXT
-        ? { ok: true, message: { type, ompPath: raw["ompPath"] } }
-        : bad("agentCheckWanted needs an omp path");
+    case "agentCheckWanted": {
+      if (typeof raw["ompPath"] !== "string" || raw["ompPath"].length > MAX_PATH_TEXT) return bad("agentCheckWanted needs an omp path");
+      const certificates = parseSystemCertificates(raw, type);
+      return typeof certificates === "string" ? bad(certificates) : { ok: true, message: { type, ompPath: raw["ompPath"], ...certificates } };
+    }
     case "ompLogin": {
       const provider = typeof raw["provider"] === "string" ? ompLoginProvider(raw["provider"]) : undefined;
       if (provider === undefined) return bad("ompLogin needs a provider of the list");
+      if (raw["ompPath"] !== undefined && (typeof raw["ompPath"] !== "string" || raw["ompPath"].length > MAX_PATH_TEXT)) return bad("ompLogin needs an omp path as text, or none");
+      const certificates = parseSystemCertificates(raw, type);
+      if (typeof certificates === "string") return bad(certificates);
+      return { ok: true, message: { type, provider: provider.id, ...(raw["ompPath"] === undefined ? {} : { ompPath: raw["ompPath"] as string }), ...certificates } };
+    }
+    case "ompLogout": {
+      const provider = typeof raw["provider"] === "string" ? ompLoginProvider(raw["provider"]) : undefined;
+      if (provider === undefined) return bad("ompLogout needs a provider of the list");
       if (raw["ompPath"] === undefined) return { ok: true, message: { type, provider: provider.id } };
-      if (typeof raw["ompPath"] !== "string" || raw["ompPath"].length > MAX_PATH_TEXT) return bad("ompLogin needs an omp path as text, or none");
+      if (typeof raw["ompPath"] !== "string" || raw["ompPath"].length > MAX_PATH_TEXT) return bad("ompLogout needs an omp path as text, or none");
       return { ok: true, message: { type, provider: provider.id, ompPath: raw["ompPath"] } };
     }
+    case "setCursorApiKey":
+    case "removeCursorApiKey": {
+      if (raw["ompPath"] === undefined) return { ok: true, message: { type } };
+      if (typeof raw["ompPath"] !== "string" || raw["ompPath"].length > MAX_PATH_TEXT) return bad(`${type} needs an omp path as text, or none`);
+      return { ok: true, message: { type, ompPath: raw["ompPath"] } };
+    }
+    case "installOmp": {
+      const certificates = parseSystemCertificates(raw, type);
+      return typeof certificates === "string" ? bad(certificates) : { ok: true, message: { type, ...certificates } };
+    }
     case "ompStatusWanted":
-    case "installOmp":
+    case "refreshSystemCertificates":
+    case "systemCertificatesExport":
       return { ok: true, message: { type } };
     case "viewChanged": {
       const view = PANEL_VIEWS.find((name) => name === raw["view"]);

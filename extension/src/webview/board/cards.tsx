@@ -1,5 +1,5 @@
 import { Ban, Check, ListChecks, Network, Play, Settings, WandSparkles, X } from "lucide-react";
-import { Fragment, type ReactNode, useRef, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import type { FocusRequest } from "../../protocol";
 import { cardNameOf, ID_NAMES } from "../../../../src/core/card-names";
 import { joinReasons } from "../../../../src/core/design";
@@ -11,7 +11,7 @@ import { SplitButton } from "../split-button";
 import { Progress } from "../ui/progress";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { roleLabel } from "../settings/logic";
-import { type AnnouncedCard, blockedReason, historyWhen, namesList, type Badge as BadgeData, type Card as BoardCard, type DriftBlocker, type DriftCard, type FixWait, type NotBlockingItem, type ProposalCard, type ResolvedRow, type TaskCard } from "./logic";
+import { type AnnouncedCard, blockedReason, historyWhen, namesList, type Badge as BadgeData, type Card as BoardCard, type DriftBlocker, type DriftCard, type FixWait, type ProposalCard, type ResolvedRow, type TaskCard } from "./logic";
 import { BoardButton, Head, StatusDot, Tip, TipBadge, taskBorder, useBoardEnv } from "./parts";
 
 /**
@@ -185,29 +185,6 @@ function ModelControls({ card }: { card: ProposalCard }) {
   );
 }
 
-/** The line `Not blocking: T3, T5` under a Drift's Tasks: each one has its reason as tooltip and accessible name, and opens nothing. */
-export function NotBlocking({ items }: { items: NotBlockingItem[] }) {
-  if (items.length === 0) return null;
-  return (
-    <p className="text-xs text-muted-foreground">
-      Not blocking:{" "}
-      {items.map((item, at) => {
-        const text = `Not blocked by this Drift: ${item.reason}`;
-        return (
-          <Fragment key={at}>
-            {at > 0 ? ", " : ""}
-            <Tip text={text}>
-              <span role="img" aria-label={text} className="font-mono">
-                {item.name.text}
-              </span>
-            </Tip>
-          </Fragment>
-        );
-      })}
-    </p>
-  );
-}
-
 /** The `Resolves Drifts` block of a resolution Proposal: one row per Drift that leads to it on the Diagram, each with the Tasks it blocks. */
 function ResolvesList({ card }: { card: ProposalCard }) {
   const env = useBoardEnv();
@@ -231,7 +208,6 @@ function ResolvesList({ card }: { card: ProposalCard }) {
                 <span className="break-words text-muted-foreground">{row.decision}</span>
               </button>
             </Tip>
-            <NotBlocking items={row.notBlocking} />
           </li>
         ))}
       </ul>

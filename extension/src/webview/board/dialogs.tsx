@@ -12,7 +12,6 @@ import { Button } from "../ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
 import { joinReasons, RUN_IN_PROGRESS } from "../../../../src/core/design";
 import { type AnnouncedCard, type DriftCard, type ProposalCard, runningFor, type TaskCard } from "./logic";
-import { NotBlocking } from "./cards";
 import { BoardButton, RefChips, Tip, TaskProposalTag, taskTagText, useBoardEnv } from "./parts";
 
 /** Focus goes to Close when a read-only window opens, and back to the card's title when it closes (the default). */
@@ -164,7 +163,6 @@ export function DriftDetailsDialog({ card, onClose }: { card: DriftCard | undefi
           </DialogHeader>
           {card.refs.length > 0 ? <RefChips refs={card.refs} /> : null}
           <DriftCompare drift={card.drift} openLink={env.context.openLink} />
-          <NotBlocking items={card.notBlocking} />
           {card.drift.unifies.length > 0 ? <UnifiesList unifies={card.drift.unifies} numbers={env.numbers} show={(drift) => env.context.navigate("diagram", { drift })} /> : null}
           <DetailsFooter kind="drift" id={card.id} name={card.name.text} />
         </DialogContent>

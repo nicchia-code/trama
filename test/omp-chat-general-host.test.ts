@@ -6,6 +6,8 @@ import { type ChatViewPort, type Disposable, type OmpClientPort, type OmpExit, t
 import type { SendMode } from "../extension/src/omp-chat-protocol";
 import { type ChatState, initialChatState, reduce } from "../extension/src/webview/omp-chat/state";
 import { findConfiguredOmp } from "../extension/src/host/omp-update";
+import { certificateErrorText } from "../extension/src/certificate-errors";
+import { setSystemCertificatesSetting } from "../extension/src/host/system-certificates";
 
 /** The fakes resolve at once, so draining the microtask queue is enough: no timer is needed. */
 async function settle(): Promise<void> {
@@ -187,7 +189,7 @@ function setup(options: Options = {}) {
   const view = new FakeView();
   const store = new MemoryStore();
   if (options.saved !== undefined) store.values.set(GENERAL_KEY, options.saved);
-  const confirmations = { asked: 0, answer: options.answer ?? true };
+  const confirmations = { asked: 0, answer: options.answer ?? true, dialogs: [] as [string, string, string][] };
   const installed = options.installed ?? true;
   const ends: [string, string][] = [];
   const usability = { usable: true };
@@ -213,8 +215,9 @@ function setup(options: Options = {}) {
     launch: async (root, terminalId) => ({ args: ["acp"], env: { TRAMA_TERMINAL: terminalId, PI_INTENT_TRACING: "1" }, cwd: root }),
     resumeLaunch: async (root, args, env) => ({ args, env: { ...env, QUESTION_ENDPOINT: "http://endpoint" }, cwd: root }),
     endWork: (terminalId, root) => ends.push([terminalId, root]),
-    confirm: async () => {
+    confirm: async (message, detail, button) => {
       confirmations.asked++;
+      confirmations.dialogs.push([message, detail, button]);
       return confirmations.answer;
     },
     interruptRounds: (terminalId) => interrupted.push(terminalId),
@@ -375,6 +378,49 @@ describe("General in the host", () => {
     expect(s.view.cleared).toBe(1);
   });
 
+  test("omp Chat switched back on while General is kept returns it to Ready: nothing is stopped, cleared or restarted", async () => {
+    const s = setup();
+    s.general.start();
+    await settle();
+    const first = s.client.sessions[0]!;
+    first.inTurn = true;
+    s.usability.usable = false;
+    s.general.settingsChanged();
+    await settle();
+    expect(s.view.last?.phase).toBe("kept");
+    // A kept General never resumes: its saved entry is gone while it stays, and written again when it returns to Ready.
+    expect(s.store.get(GENERAL_KEY)).toBeUndefined();
+    s.usability.usable = true;
+    s.general.settingsChanged();
+    await settle();
+    expect(s.view.last?.phase).toBe("ready");
+    expect(first.stops).toBe(0);
+    expect(first.cancels).toBe(0);
+    expect(s.view.cleared).toBe(0);
+    expect(s.client.starts).toHaveLength(1);
+    expect((s.store.get(GENERAL_KEY) as SavedGeneral).sessionId).toBe("s1");
+    expect(s.ends).toEqual([]);
+  });
+
+  test("closing a kept General in a turn asks with the close dialog of the other conversations, named General", async () => {
+    const s = setup({ answer: false });
+    s.general.start();
+    await settle();
+    s.client.sessions[0]!.inTurn = true;
+    s.usability.usable = false;
+    s.general.settingsChanged();
+    await settle();
+    s.view.emit("close", GENERAL_ID);
+    await settle();
+    expect(s.confirmations.dialogs).toEqual([["Close General and stop its agent?", "The conversation and its agent end; Trama stops following its job.", "Close"]]);
+    expect(s.view.last?.phase).toBe("kept");
+    s.confirmations.answer = true;
+    s.view.emit("close", GENERAL_ID);
+    await settle();
+    expect(s.client.sessions[0]!.stops).toBe(1);
+    expect(s.store.get(GENERAL_KEY)).toBeUndefined();
+  });
+
   test("a saved session is resumed without a prompt", async () => {
     const s = setup({ saved });
     s.general.start();
@@ -504,6 +550,29 @@ describe("General in the host", () => {
     s.client.sessions.at(-1)!.exit({ code: 3, signal: null });
     await settle();
     expect(s.view.last?.error).toEqual({ kind: "exited", reason: "its command exited with code 3" });
+  });
+
+  test("a certificate error in omp's lines, when its process exits, is the reason shown in General, in plain words with the mode of the setting, followed by omp's lines as before", async () => {
+    try {
+      for (const on of [false, true]) {
+        setSystemCertificatesSetting(() => on);
+        const s = setup();
+        s.general.start();
+        await settle();
+        s.client.sessions.at(-1)!.exit({ code: 1, signal: null, details: "Error: UNABLE_TO_GET_ISSUER_CERT_LOCALLY\n    at TLSSocket.onConnectSecure" });
+        await settle();
+        expect(s.view.last?.error).toEqual({ kind: "exited", reason: certificateErrorText(on), details: "Error: UNABLE_TO_GET_ISSUER_CERT_LOCALLY\n    at TLSSocket.onConnectSecure" });
+      }
+      // Without a certificate error the reason is the exit's own.
+      const other = setup();
+      other.general.start();
+      await settle();
+      other.client.sessions.at(-1)!.exit({ code: 1, signal: null, details: "panic: out of memory" });
+      await settle();
+      expect(other.view.last?.error).toEqual({ kind: "exited", reason: "its command exited with code 1", details: "panic: out of memory" });
+    } finally {
+      setSystemCertificatesSetting(() => false);
+    }
   });
 
   test("General is followed under its identity while it has a process or a saved session, for the execution check of every window", async () => {

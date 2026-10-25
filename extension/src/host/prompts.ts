@@ -124,9 +124,6 @@ export function withLanguage(prompt: string, language: string): string {
   return typed === "" ? prompt : `${prompt} ${languageSentence(typed)}`;
 }
 
-/** The sentence the Drift blocker adds to an instruction whose agent may file Drifts (`trama.driftBlocker`). */
-export const DRIFT_BLOCKER_SENTENCE = "The Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
-
 /** The sentence the Async Drift Resolver adds to the instructions that may file Drifts (`trama.asyncDriftResolver`). */
 export const ASYNC_DRIFT_RESOLVER_SENTENCE = "The Async Drift Resolver is on: before finishing, prepare the resolution question of every Drift filed in this job, as your skill says.";
 
@@ -176,11 +173,6 @@ export function mayFileDrifts(action: ResolvedAction): boolean {
   }
 }
 
-/** Ends an instruction with the Drift blocker's sentence, on the same line, when `on`; otherwise the instruction is exactly as built. */
-export function withDriftBlocker(prompt: string, on: boolean): string {
-  return on ? `${prompt} ${DRIFT_BLOCKER_SENTENCE}` : prompt;
-}
-
 /** Ends an instruction with the Async Drift Resolver's sentence, on the same line, when `on`; otherwise the instruction is exactly as built. */
 export function withAsyncDriftResolver(prompt: string, on: boolean): string {
   return on ? `${prompt} ${ASYNC_DRIFT_RESOLVER_SENTENCE}` : prompt;
@@ -205,7 +197,7 @@ export interface AskMoreLink {
 export type AskMoreSubject =
   | { kind: "task"; id: string; number: string; title: string; body: string; refs: string[]; images: string[]; proposal: AskMoreLink | null; drift: AskMoreLink | null }
   | { kind: "proposal"; id: string; number: string; title: string; status: string; proposalKind: string; body: string; tasks: (AskMoreLink & { refs: string[] })[]; drifts: (AskMoreLink & { decision: string | null; option: number | null })[] }
-  | { kind: "drift"; id: string; number: string; title: string; status: string; happens: string; should: string; where: string | null; refs: string[]; notBlocking: { task: string; reason: string }[]; proposal: AskMoreLink | null; task: AskMoreLink | null; previous: AskMoreLink[]; unifies: AskMoreLink[] }
+  | { kind: "drift"; id: string; number: string; title: string; status: string; happens: string; should: string; where: string | null; refs: string[]; proposal: AskMoreLink | null; task: AskMoreLink | null; previous: AskMoreLink[]; unifies: AskMoreLink[] }
   /** A question of an open round: the one in view in full, then every question of the round. `drift` is set for the prepared question of a Drift. */
   | { kind: "question"; question: Question; round: Question[]; drift: AskMoreLink | null };
 
@@ -252,7 +244,7 @@ export function askMorePart(subject: AskMoreSubject): string {
       ].join("\n");
     }
     case "drift": {
-      const reads = [commandText(`trama drift show ${subject.id}`), ...(subject.proposal ? [commandText(`trama proposal show ${subject.proposal.id}`)] : []), ...(subject.task ? [commandText(`trama task show ${subject.task.id}`)] : []), ...subject.notBlocking.map((free) => commandText(`trama task show ${free.task}`)), ...subject.previous.map((d) => commandText(`trama drift show ${d.id}`)), ...subject.unifies.map((d) => commandText(`trama drift show ${d.id}`)), ...modelReads(subject.refs)];
+      const reads = [commandText(`trama drift show ${subject.id}`), ...(subject.proposal ? [commandText(`trama proposal show ${subject.proposal.id}`)] : []), ...(subject.task ? [commandText(`trama task show ${subject.task.id}`)] : []), ...subject.previous.map((d) => commandText(`trama drift show ${d.id}`)), ...subject.unifies.map((d) => commandText(`trama drift show ${d.id}`)), ...modelReads(subject.refs)];
       return [
         `Ask more about the Drift ${subject.id}: "${subject.title}". Its short number in this working copy is ${subject.number}, for the developer only: use the identity in every command. Status: ${subject.status}.`,
         "",
@@ -260,9 +252,6 @@ export function askMorePart(subject: AskMoreSubject): string {
         `What should happen: ${subject.should.trim() || "(not written)"}`,
         `Where in the code: ${subject.where?.trim() || "none"}`,
         `References: ${refsText(subject.refs)}`,
-        "",
-        "Tasks it leaves free, with the reason:",
-        listOrNone(subject.notBlocking.map((free) => `\`${free.task}\` — ${free.reason}`)),
         "",
         `Proposal attached: ${subject.proposal ? linkText(subject.proposal) : "none"}`,
         `Task it comes from: ${subject.task ? linkText(subject.task) : "none"}`,

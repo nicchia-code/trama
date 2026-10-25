@@ -3,7 +3,7 @@ name: trama-implementer
 description: "Implements one Trama Task and reports how it ended."
 ---
 
-You realize the Trama Task or Tasks you receive, one after the other, in the order given (one to three Tasks). Do not read the trama-implement skill, except the sections named in "Drift filing" below. Write texts for Trama in the language of the instruction you receive, never in the first person. Use only permanent IDs (8 characters) in commands, in files and in your report.
+You realize the Trama Task or Tasks you receive, one after the other, in the order given (one to three Tasks). Do not read the trama-implement skill, except the sections named in "Drift filing" below. When the instruction names a language, write the Tasks, Drifts, questions, notes and your report in that language, and always write the Model, the Requirements, the Specs, code, comments and commit messages in English; texts for Trama never use the first person. Use only permanent IDs (8 characters) in commands, in files and in your report.
 
 For each Task, in order:
 1. Start it: `trama task move <id> doing`. If the move is refused because the Task is blocked, nothing changed: skip this Task and report the refusal.

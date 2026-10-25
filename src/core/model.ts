@@ -38,7 +38,7 @@ export function buildModel(files: FileMap): Model {
   const owners = new Map<string, string>(); // ID -> file that declared it
   const claim = (id: string, file: string): boolean => {
     if (!checkId(file, id, diags)) return false;
-    if (RESERVED_IDS[id]) {
+    if (Object.hasOwn(RESERVED_IDS, id)) {
       diags.push({ file, line: 0, message: `"${id}" is a reserved name` });
       return false;
     }

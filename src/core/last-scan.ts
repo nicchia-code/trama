@@ -60,7 +60,7 @@ export function rememberCleared(p: Project, id: string, finished: string): void 
   writeFileAtomic(clearedFile(p), `${before === "" || before.endsWith("\n") ? before : `${before}\n`}${id} ${finished}\n`);
 }
 
-/** How many Tasks Clear deleted whose `finished` is after `since`; a Task cleared more than once counts once, and a line that does not read is ignored. */
+/** How many Tasks Clear deleted whose `finished` is after `since`: one per line, whatever the identity; a line that does not read is ignored. */
 export function clearedSince(p: Project, since: number): number {
   let text: string;
   try {
@@ -68,14 +68,11 @@ export function clearedSince(p: Project, since: number): number {
   } catch {
     return 0;
   }
-  const latest = new Map<string, number>();
+  let count = 0;
   for (const line of text.split("\n")) {
-    const match = /^([a-z0-9]{8}) (\S+)$/.exec(line);
+    const match = /^(\S+) (\S+)$/.exec(line);
     if (match === null || !ISO_INSTANT.test(match[2] as string)) continue;
-    const instant = Date.parse(match[2] as string);
-    if (Number.isNaN(instant)) continue;
-    latest.set(match[1] as string, Math.max(latest.get(match[1] as string) ?? instant, instant));
+    if (Date.parse(match[2] as string) > since) count++;
   }
-  return [...latest.values()].filter((instant) => instant > since).length;
+  return count;
 }
-

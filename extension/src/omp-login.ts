@@ -7,6 +7,8 @@ export interface OmpLoginProvider {
   plan: string;
   /** Only for the providers the name alone does not tell apart: the tooltip on the name and the button. */
   description?: string;
+  /** Only for the provider that takes an API key Trama saves and passes to omp (Cursor): its row offers Set/Change/Remove API key. */
+  apiKey?: true;
 }
 
 /** The providers of the Providers section, in order. A fixed list, not read from omp: no other provider has a Log in button. */
@@ -16,7 +18,7 @@ export const OMP_LOGIN_PROVIDERS: readonly OmpLoginProvider[] = [
   { id: "github-copilot", name: "GitHub Copilot", plan: "Copilot subscription" },
   { id: "google-gemini-cli", name: "Google Gemini CLI", plan: "Cloud Code Assist", description: "Gemini models through Google Cloud Code Assist, the Gemini CLI login." },
   { id: "google-antigravity", name: "Google Antigravity", plan: "Gemini, Claude, GPT-OSS", description: "Gemini, Claude and GPT-OSS models through Google's Antigravity login." },
-  { id: "cursor", name: "Cursor", plan: "Cursor subscription" },
+  { id: "cursor", name: "Cursor", plan: "Cursor subscription or API key", apiKey: true },
   { id: "xai-oauth", name: "xAI Grok", plan: "SuperGrok or X Premium+" },
 ];
 

@@ -25,13 +25,13 @@ export interface Canvas {
   /**
    * Draws a graph. The viewport stays where it is unless the graph's nodes and edges changed or `fit` is set; `fitIds` narrows that fit to those nodes and edges.
    * `focusIds` are the nodes and edges of the focus: they are drawn in the colour of the focus (or keep the colours of their change) and everything else
-   * drops to 30% opacity; null or empty draws the level as it is.
+   * drops to 30% opacity; null or empty draws the level as it is. With `smooth` the fit slides the view to its place, unless the system asks for reduced motion.
    */
-  render(graph: GraphSpec, fit: boolean, fitIds?: readonly string[] | null, focusIds?: readonly string[] | null): Promise<void>;
+  render(graph: GraphSpec, fit: boolean, fitIds?: readonly string[] | null, focusIds?: readonly string[] | null, smooth?: boolean): Promise<void>;
   select(id: string | null): void;
   zoomBy(factor: number): void;
-  /** Fits the view to the whole drawing, or to the given nodes and edges. */
-  fit(ids?: readonly string[] | null): void;
+  /** Fits the view to the whole drawing, or to the given nodes and edges; `smooth` slides it there, unless the system asks for reduced motion. */
+  fit(ids?: readonly string[] | null, smooth?: boolean): void;
   /** The container became visible or changed size. */
   resize(): void;
   /** Colours changed (theme switch). */
@@ -42,6 +42,20 @@ export interface Canvas {
 
 const FIT_PADDING = 36;
 const MAX_FIT_ZOOM = 1.2;
+const MIN_ZOOM = 0.08;
+/** The length of the slide to a step, as short as the other transitions of the panel. */
+const SLIDE_MS = 150;
+
+/** The zoom and the pan that contain `box` in a view of `size` with a margin, never zooming in beyond the limit of Fit. */
+export function fitView(box: { x1: number; y1: number; x2: number; y2: number }, size: { width: number; height: number }, padding = FIT_PADDING): { zoom: number; pan: { x: number; y: number } } {
+  const width = box.x2 - box.x1;
+  const height = box.y2 - box.y1;
+  const wanted = Math.min(width > 0 ? (size.width - 2 * padding) / width : Infinity, height > 0 ? (size.height - 2 * padding) / height : Infinity);
+  const zoom = Math.min(MAX_FIT_ZOOM, Math.max(MIN_ZOOM, Number.isFinite(wanted) ? wanted : MAX_FIT_ZOOM));
+  return { zoom, pan: { x: size.width / 2 - ((box.x1 + box.x2) / 2) * zoom, y: size.height / 2 - ((box.y1 + box.y2) / 2) * zoom } };
+}
+
+const prefersReducedMotion = (): boolean => typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 function stylesheet(p: Palette): cytoscape.StylesheetJson {
   const tint = (c: string) => mix(c, p.node, 0.18);
@@ -160,7 +174,7 @@ export function createCanvas(container: HTMLElement, handlers: CanvasHandlers): 
     container,
     style: stylesheet(readPalette()),
     wheelSensitivity: 0.25,
-    minZoom: 0.08,
+    minZoom: MIN_ZOOM,
     maxZoom: 2.5,
     boxSelectionEnabled: false,
     autoungrabify: true,
@@ -175,7 +189,7 @@ export function createCanvas(container: HTMLElement, handlers: CanvasHandlers): 
   /** The nodes and edges of the focus in the graph drawn; null when the level is drawn as it is. */
   let focused: readonly string[] | null = null;
 
-  const elementId = (el: cytoscape.SingularElementReturnValue): string => (el.data("edge") as string | undefined) ?? el.id();
+  const elementId = (el: cytoscape.SingularElementArgument): string => (el.data("edge") as string | undefined) ?? el.id();
 
   cy.on("tap", (event) => {
     if (event.target === cy) return handlers.select(null);
@@ -268,11 +282,12 @@ export function createCanvas(container: HTMLElement, handlers: CanvasHandlers): 
     scheduleHandles();
   };
 
-  /** A fit asked for while the container has no size (the tab is hidden) happens when it gets one. */
+  /** A fit asked for while the container has no size (the tab is hidden) happens when it gets one, jumping. */
   let fitIsPending = false;
   let fitPending: readonly string[] | null = null;
-  const fit = (ids?: readonly string[] | null) => {
+  const fit = (ids?: readonly string[] | null, smooth = false) => {
     cy.resize();
+    cy.stop();
     if (cy.width() === 0 || cy.height() === 0) {
       fitPending = ids ?? null;
       fitIsPending = true;
@@ -281,15 +296,11 @@ export function createCanvas(container: HTMLElement, handlers: CanvasHandlers): 
     fitIsPending = false;
     fitPending = null;
     if (cy.elements().empty()) return;
-    const wanted = ids && ids.length > 0 ? cy.elements().filter((el) => ids.includes(el.id())) : null;
-    cy.fit(wanted && wanted.nonempty() ? wanted : undefined, FIT_PADDING);
-    if (cy.zoom() > MAX_FIT_ZOOM) {
-      cy.zoom(MAX_FIT_ZOOM);
-      if (wanted && wanted.nonempty()) {
-        const box = wanted.boundingBox();
-        cy.pan({ x: cy.width() / 2 - ((box.x1 + box.x2) / 2) * cy.zoom(), y: cy.height() / 2 - ((box.y1 + box.y2) / 2) * cy.zoom() });
-      } else cy.center();
-    }
+    // The labels of the edges are elements of their own, so an edge is fitted together with its label.
+    const wanted = ids && ids.length > 0 ? cy.elements().filter((el) => ids.includes(elementId(el))) : null;
+    const view = fitView((wanted && wanted.nonempty() ? wanted : cy.elements()).boundingBox(), { width: cy.width(), height: cy.height() });
+    if (smooth && !prefersReducedMotion()) cy.animate({ zoom: view.zoom, pan: view.pan }, { duration: SLIDE_MS, easing: "ease-in-out" });
+    else cy.viewport({ zoom: view.zoom, pan: view.pan });
   };
 
   /** Dims everything but the elements of the focus; those a change colours keep their colours, the others take the colour of the focus. */
@@ -314,7 +325,7 @@ export function createCanvas(container: HTMLElement, handlers: CanvasHandlers): 
   };
 
   return {
-    async render(graph, refit, fitIds, focusIds) {
+    async render(graph, refit, fitIds, focusIds, smooth) {
       const mine = ++ticket;
       const key = layoutKey(graph);
       const layout = drawn?.key === key ? drawn.layout : await layoutGraph(graph);
@@ -325,7 +336,7 @@ export function createCanvas(container: HTMLElement, handlers: CanvasHandlers): 
       select(selected);
       focused = focusIds ?? null;
       applyFocus();
-      if (changed || refit) fit(fitIds);
+      if (changed || refit) fit(fitIds, smooth);
     },
     select,
     zoomBy(factor) {

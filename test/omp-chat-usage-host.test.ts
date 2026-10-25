@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { certificateErrorText } from "../extension/src/certificate-errors";
 import { parseChatMessage } from "../extension/src/host/omp-chat/messages";
+import { bundlePath, setSystemCertificatesSetting } from "../extension/src/host/system-certificates";
 import { OmpUsage, ompUsageRunner, USAGE_MIN_INTERVAL_MS, type UsageMessage, type UsageSource } from "../extension/src/host/omp-chat/usage";
 import { type ChatSurface, ChatViewModel } from "../extension/src/host/omp-chat/view-model";
 import type { ToChatWebview } from "../extension/src/omp-chat-protocol";
@@ -151,6 +153,47 @@ describe("omp usage --json", () => {
     inTempDir(async (root) => {
       const program = fakeOmp(root, "echo failure >&2\nexit 3");
       await expect(runnerFor(program, root)()).rejects.toThrow("omp exited with code 3");
+    }),
+  );
+
+  posix("names a certificate error in plain words, with the saved mode, instead of the usage error, and keeps the exit code for other failures", () =>
+    inTempDir(async (root) => {
+      const program = fakeOmp(root, "echo 'Error: SELF_SIGNED_CERT_IN_CHAIN' >&2\nexit 1");
+      try {
+        setSystemCertificatesSetting(() => false);
+        await expect(runnerFor(program, root)()).rejects.toThrow(certificateErrorText(false));
+        setSystemCertificatesSetting(() => true);
+        await expect(runnerFor(program, root)()).rejects.toThrow(certificateErrorText(true));
+      } finally {
+        setSystemCertificatesSetting(() => false);
+      }
+      await expect(runnerFor(fakeOmp(root, "echo 'disk full' >&2\nexit 1"), root)()).rejects.toThrow("omp exited with code 1");
+    }),
+  );
+
+  posix("receives the bundle with the saved mode on and a bundle on disk, and nothing with the mode off", () =>
+    inTempDir(async (root) => {
+      const saved = { HOME: process.env["HOME"], XDG_CACHE_HOME: process.env["XDG_CACHE_HOME"] };
+      process.env["HOME"] = root;
+      delete process.env["XDG_CACHE_HOME"];
+      try {
+        const path = bundlePath();
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, "bundle\n");
+        const program = fakeOmp(root, `printf '%s' "\${NODE_EXTRA_CA_CERTS:-none}|\${DENO_CERT:-none}" > "${join(root, "env")}"\ncat <<'EOF'\n${REPORT}\nEOF`);
+        setSystemCertificatesSetting(() => true);
+        await runnerFor(program, root)();
+        expect(readFileSync(join(root, "env"), "utf8")).toBe(`${path}|${path}`);
+        setSystemCertificatesSetting(() => false);
+        await runnerFor(program, root)();
+        expect(readFileSync(join(root, "env"), "utf8")).toBe(`${process.env["NODE_EXTRA_CA_CERTS"] ?? "none"}|${process.env["DENO_CERT"] ?? "none"}`);
+      } finally {
+        setSystemCertificatesSetting(() => false);
+        for (const [name, value] of Object.entries(saved)) {
+          if (value === undefined) delete process.env[name];
+          else process.env[name] = value;
+        }
+      }
     }),
   );
 

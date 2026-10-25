@@ -26,12 +26,13 @@ This is the index of the Area's Requirements. The General Requirements are below
 
 ## Fragments
 
+- **Fine della corsa dell'agente** (`agent-terminal-end.md`): Usa quando implementi come finisce la corsa dell'agente nel terminale e la chiusura automatica del terminale (Auto Exit). Sections: `agent-terminal/Agent idle`.
 - **Regole di avvio dell'agente** (`agent-terminal.md`): Usa quando implementi come Trama avvia l'agente e gestisce le richieste di design. Sections: `agent-terminal`.
 - **Regole degli annunci** (`announcements.md`): Usa per annunci, ghost, controlli e confronti. Sections: `announcement`.
 - **Regole dell'approvazione** (`approvals.md`): Usa quando implementi ciò che succede all'approvazione di una Proposal. Sections: `proposal/Approved`.
 - **Regole di Ask more** (`ask-more.md`): Usa quando implementi l'istruzione di Ask more, ciò che riceve l'agente e cosa può fare la sua chat. Sections: `developer.ASK_MORE`.
 - **Regole delle Proposal** (`decisions.md`): Usa quando implementi le regole delle Proposal, dalla scrittura all'approvazione. Sections: `proposal`.
-- **Regole della risoluzione dei Drift** (`drift-resolution.md`): Usa quando lanci Resolve Drifts, decidi quando una risoluzione o un Run sono in corso, scrivi una risoluzione `nonBlocking` o prepari e usi le domande pronte dell'Async Drift Resolver. Sections: `drift-resolution`.
+- **Regole della risoluzione dei Drift** (`drift-resolution.md`): Usa quando lanci Resolve Drifts, decidi quando una risoluzione o un Run sono in corso o prepari e usi le domande pronte dell'Async Drift Resolver. Sections: `drift-resolution`.
 - **Regole dei Drift** (`drifts.md`): Usa quando implementi le regole dei Drift, della loro risoluzione e del pulsante Resolve Drifts. Sections: `drift`.
 - **Regole del controllo di esecuzione** (`execution-check.md`): Usa quando lavori sul controllo di esecuzione che chiude i lavori il cui agente è scomparso e libera i Task che nessuna finestra segue, o su `trama task check`. Sections: `time`, `agent.CHECK_TASK`.
 - **Regole del focus** (`focus.md`): Usa quando calcoli cosa evidenzia il focus di una scheda del pannello: elementi, sezioni, passi e riferimenti mancanti. Sections: `focus`.
@@ -39,10 +40,11 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Note dei ghost** (`ghost-notes.md`): Usa quando implementi le note che l'agente dichiara sui ghost: a chi vanno, lunghezza, quante se ne tengono, quando le skill le scrivono. Sections: `agent.DECLARE_ANNOUNCEMENT_NOTE`.
 - **Regole dei file di istruzioni** (`instruction-files.md`): Usa quando implementi l'esclusione dei file di istruzioni degli agenti nei lanci di omp. Sections: `agent-terminal/Agent running`.
 - **Regole di agenti e modelli** (`models.md`): Usa per scelta dell'agente, ruoli dei modelli e istruzioni all'agente. Sections: `agent-launching`.
+- **Regole delle conversazioni di omp Chat** (`omp-chat-conversation.md`): Usa quando implementi come nascono, lavorano, chiedono il permesso e finiscono le conversazioni di omp Chat dei lavori. Sections: `omp-chat-conversation`.
 - **Regole della conversazione General** (`omp-chat-general.md`): Usa quando implementi le regole della conversazione General di omp Chat: quando c'è, avvio, pulizia, errori, ripresa e ciò che non blocca. Sections: `omp-chat-general`.
-- **omp Chat** (`omp-chat.md`): Usa quando implementi quando omp Chat si usa, come nascono, finiscono e riprendono le sue conversazioni, l'uso dell'abbonamento e quali server MCP riceve omp. Sections: `omp-chat`, `omp-chat-conversation`.
+- **omp Chat** (`omp-chat.md`): Usa quando implementi quando omp Chat si usa, le schede della sua vista e l'uso dell'abbonamento. Sections: `omp-chat`.
 - **Installazione di omp** (`omp-install.md`): Usa quando implementi Install omp e il terminale che installa omp. Sections: `developer.INSTALL_OMP`.
-- **Login dei fornitori di omp** (`omp-login.md`): Usa quando implementi il login ai fornitori di modelli di omp dalla scheda Settings e dal wizard di setup. Sections: `developer.LOG_IN_PROVIDER`.
+- **Login dei fornitori di omp** (`omp-login.md`): Usa quando implementi il login ai fornitori di modelli di omp o la chiave API di Cursor dalla scheda Settings e dal wizard di setup. Sections: `developer.LOG_IN_PROVIDER`, `developer.LOG_OUT_PROVIDER`, `developer.SET_CURSOR_API_KEY`, `developer.REMOVE_CURSOR_API_KEY`, `editor.CURSOR_API_KEY_CHANGED`.
 - **Regole delle prenotazioni dei file** (`prenotazioni.md`): Usa quando lavori sulle prenotazioni dei file dei sotto-agenti durante un Run: chi prenota, chi è fermato, quando una prenotazione finisce. Sections: `prenotazione-file`.
 - **Regole del progetto** (`project.md`): Usa quando implementi init, aggiornamento delle skill e skill dei Requisiti. Sections: `project`.
 - **Regole dei round di domande** (`questions-notices.md`): Usa quando implementi i round di domande. Sections: `question-round`.
@@ -52,6 +54,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Regole dei Run per modello in parallelo e della stima di Run all** (`run-paralleli.md`): Usa quando lavori sulla sequenza per modello di Run all lanciata in parallelo, sulla divisione del limite dei sotto-agenti fra i suoi Run e sulla stima del tempo che manca a un Run all. Sections: `drift-resolution/Running tasks`.
 - **Regole di scan, confronti e Advisor Scanner** (`scans.md`): Usa per scan, confronto delle Machine e Advisor Scanner. Sections: `work`.
 - **Regole del wizard di setup** (`setup-wizard.md`): Usa quando implementi i passi, i salvataggi, le cartelle escluse e la conferma del wizard di setup. Sections: `setup-wizard`.
+- **System certificates** (`system-certificates.md`): Use when implementing the System Certificates mode (export of the system's certificate authorities, the bundle, its refresh and the variables given to omp) or the message of a certificate error. Sections: `developer.REFRESH_SYSTEM_CERTIFICATES`.
 - **Task progress rules** (`task-progress.md`): Use when implementing the percentage the agent declares on a Task it has taken. Sections: `task/Taken by the agent`.
 - **Regole dei Task** (`tasks.md`): Usa quando implementi le regole dei Task. Sections: `task`.
 - **Regole dell'attesa del turno, della History e di Clear** (`turn-history.md`): Usa per l'attesa del turno sulle schede, le voci di History e Clear della colonna Done. Sections: `voce-history`, `panel/Board`, `developer.CLEAR_DONE`, `developer.DELETE_TASK`.

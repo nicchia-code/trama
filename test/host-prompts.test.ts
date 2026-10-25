@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ASK_DEVELOPER_SENTENCE, askMorePart, AUTO_EXIT_SENTENCE, buildPrompt, DRIFT_BLOCKER_SENTENCE, importPrompt, instructedMessage, languageSentence, mayFileDrifts, terminalName, withDriftBlocker, withLanguage } from "../extension/src/host/prompts";
+import { ASK_DEVELOPER_SENTENCE, askMorePart, AUTO_EXIT_SENTENCE, buildPrompt, importPrompt, instructedMessage, languageSentence, mayFileDrifts, terminalName, withLanguage } from "../extension/src/host/prompts";
 
 test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "written-design", request: "2026-10-04T19-05-12" })).toBe(
@@ -92,8 +92,7 @@ test("a Run all group cut by Proposal names its Proposals and the filter, and it
   expect(terminalName({ kind: "implement-all", group: { exclude: ["aaaa1111"] } }, short)).toBe("All tasks");
   expect(terminalName({ kind: "implement-all", group: { model: "  " } }, short)).toBe("All tasks");
 });
-test("the Drift blocker's sentence is added on the same line only when on, and only the instructions that may file Drifts take it", () => {
-  const sentence = "The Drift blocker is on: follow its steps whenever you file a Drift, and tell your sub-agents.";
+test("only the instructions that may file Drifts are told so", () => {
   expect(mayFileDrifts({ kind: "scan" })).toBe(true);
   expect(mayFileDrifts({ kind: "implement", task: "abc" })).toBe(true);
   expect(mayFileDrifts({ kind: "implement-all" })).toBe(true);
@@ -101,9 +100,6 @@ test("the Drift blocker's sentence is added on the same line only when on, and o
   expect(mayFileDrifts({ kind: "written-design", request: "r" })).toBe(false);
   expect(mayFileDrifts({ kind: "setup-request", request: "r" })).toBe(false);
   expect(mayFileDrifts({ kind: "resolve-drifts", drift: "ab12cd34" })).toBe(false);
-  expect(withDriftBlocker("Use the trama-scan skill on the whole System.", false)).toBe("Use the trama-scan skill on the whole System.");
-  expect(withDriftBlocker("Use the trama-scan skill on the whole System.", true)).toBe(`Use the trama-scan skill on the whole System. ${sentence}`);
-  expect(DRIFT_BLOCKER_SENTENCE).toBe(sentence);
 });
 
 test("every instruction carries the one ask sentence, whatever the job", () => {
@@ -161,7 +157,7 @@ test("the Ask more part of a Task names only permanent identities in its command
   expect(part).not.toMatch(/trama (task|proposal|drift|model) show T1/);
 });
 
-test("the Ask more part of a Drift lists its sides, the Tasks it leaves free, its origin and the Drifts it unites", () => {
+test("the Ask more part of a Drift lists its sides, its origin and the Drifts it unites, and no freed Tasks", () => {
   const part = askMorePart({
     kind: "drift",
     id: "d1d1d1d1",
@@ -172,7 +168,6 @@ test("the Ask more part of a Drift lists its sides, the Tasks it leaves free, it
     should: "The refund follows the coupon.",
     where: "src/refund.ts",
     refs: ["order"],
-    notBlocking: [{ task: "t2t2t2t2", reason: "touches only the menu" }],
     proposal: null,
     task: { id: "t1t1t1t1", title: "Fix refund" },
     previous: [],
@@ -181,11 +176,11 @@ test("the Ask more part of a Drift lists its sides, the Tasks it leaves free, it
   expect(part).toContain("What happens: The refund ignores the coupon.");
   expect(part).toContain("What should happen: The refund follows the coupon.");
   expect(part).toContain("Where in the code: src/refund.ts");
-  expect(part).toContain("`t2t2t2t2` — touches only the menu");
+  expect(part).not.toContain("leaves free");
   expect(part).toContain("Task it comes from: `t1t1t1t1` — Fix refund");
   expect(part).toContain("Drifts it unites: `d3d3d3d3` — Coupon");
   expect(part).toContain("`trama drift show d1d1d1d1`");
-  expect(part).toContain("`trama task show t2t2t2t2`");
+  expect(part).not.toContain("trama task show t2t2t2t2");
   expect(part).toContain("`trama drift show d3d3d3d3`");
 });
 

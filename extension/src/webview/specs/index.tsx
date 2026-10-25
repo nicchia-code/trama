@@ -139,7 +139,7 @@ export function SpecsTab({ snapshot, proposalId, focus, onProposal, onFocus, ope
         }}
       >
         <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
-          <ProposalSelect label="Proposal to draw over the Specs" options={options} value={proposal ? proposal.id : null} onChange={onProposal} />
+          <ProposalSelect label="Proposal to draw over the Specs" options={options} value={proposal ? proposal.id : null} focused={focus !== null} onChange={onProposal} />
         </div>
         {found && focus ? (
           <FocusBar title={found.spec.title} stepName={found.steps[at]?.name ?? ""} index={at} count={found.steps.length} missing={found.missing} onPrevious={() => move(-1)} onNext={() => move(1)} onClear={() => onFocus(null)} />
@@ -188,8 +188,9 @@ export const mountSpecs: MountView = (slot, context) => {
         proposalId={proposalId}
         focus={focus}
         onProposal={(id) => {
+          // With a focus on the Proposal drawn stays until Clear or Esc takes the focus off.
+          if (focus) return;
           proposalId = id;
-          focus = null;
           render();
         }}
         onFocus={(next) => {

@@ -64,7 +64,6 @@ export function askMoreSubject(project: Project, kind: "task" | "proposal" | "dr
     should: sides?.should ?? "",
     where: sides?.where ?? null,
     refs: drift.data.refs,
-    notBlocking: drift.data.notBlocking,
     proposal: drift.data.proposal === null ? null : proposalLink(project, drift.data.proposal),
     task: drift.data.task === null ? null : taskLink(project, drift.data.task),
     previous: drift.data.previous.map((previous) => driftLink(project, previous)),

@@ -22,13 +22,13 @@ export interface RefineAllView {
   since?: number;
 }
 
-/** The Proposal refinement, as the host carries it with each picture. `enabled`: the setting `trama.autoUpdateStaleProposals` is on. `running`: the Proposals the agents refine now, in the order they started. `queued`: the Proposals waiting, in order, each with why. `refineAll`: the Refine All menu entry. `note`: the latest note of an agent, or null. `runInProgress`: a Run launched from this window is in progress, so Approve is disabled. `waiting`: the Proposals the refinement delivered and that are approved only when that Run ends. */
+/** The Proposal refinement, as the host carries it with each picture. `enabled`: the setting `trama.autoUpdateStaleProposals` is on. `running`: the Proposals the agents refine now, in the order they started. `queued`: the Proposals waiting, in order, each with why. `refineAll`: the Refine All menu entry. `notes`: the latest note the agent declared for each Proposal in `running`, by its identity; one whose agent declared none has no entry. `runInProgress`: a Run launched from this window is in progress, so Approve is disabled. `waiting`: the Proposals the refinement delivered and that are approved only when that Run ends. */
 export interface RefinementView {
   enabled: boolean;
   running: string[];
   queued: QueuedRefinement[];
   refineAll: RefineAllView;
-  note: string | null;
+  notes: Record<string, string>;
   runInProgress: boolean;
   waiting: string[];
 }
@@ -86,7 +86,8 @@ export interface FolderEntry {
 /** Webview -> host. The host validates everything: the webview is untrusted input. */
 export type ToHost =
   | { type: "ready" }
-  | { type: "launch"; action: AgentAction }
+  /** Every launch the panel sends but the scan of the System, which only Scan System of the side menu starts. */
+  | { type: "launch"; action: Exclude<AgentAction, { kind: "scan" }> }
   /** + Add Work Item: the host opens the Markdown document of a written design request. */
   | { type: "writeDesignRequest" }
   /** Ask more on a card of the Board's details windows: the host reads the card from its files at the click and opens a new chat about it. Never refused for other work. */
@@ -130,14 +131,24 @@ export type ToHost =
   | { type: "openTaskImage"; task: string; name: string }
   /** Import from Code or Start from Scratch on the Diagram with the empty Model: the host shows the Settings tab with the wizard in the Empty Model mode and that choice. */
   | { type: "openGuidedSetup"; choice: SetupChoice }
-  /** The wizard's omp step wants omp checked at `ompPath`; the host answers with `agentCheck`. */
-  | { type: "agentCheckWanted"; ompPath: string }
-  /** Install omp: the host opens a visible terminal with omp's official installer; the message has no data. */
-  | { type: "installOmp" }
-  /** Log in to a model provider: the host opens a visible terminal that runs `omp login <provider>`, `provider` being an id of `OMP_LOGIN_PROVIDERS`. Without `ompPath` the omp is the saved `trama.ompPath` (the Settings tab); with it, the wizard's omp step's path, saved or not. */
-  | { type: "ompLogin"; provider: string; ompPath?: string }
+  /** The wizard's omp step wants omp checked at `ompPath`; the host answers with `agentCheck`. `systemCertificates` is the step's value of System Certificates, which holds for this check (with its update) only; without it the saved setting counts. */
+  | { type: "agentCheckWanted"; ompPath: string; systemCertificates?: boolean }
+  /** Install omp: the host opens a visible terminal with omp's official installer. `systemCertificates` is the wizard step's value of System Certificates, for that terminal only; without it the saved setting counts. */
+  | { type: "installOmp"; systemCertificates?: boolean }
+  /** Log in to a model provider: the host opens a visible terminal that runs `omp login <provider>`, `provider` being an id of `OMP_LOGIN_PROVIDERS`. Without `ompPath` the omp is the saved `trama.ompPath` (the Settings tab); with it, the wizard's omp step's path, saved or not. `systemCertificates` as in `installOmp`. */
+  | { type: "ompLogin"; provider: string; ompPath?: string; systemCertificates?: boolean }
+  /** Log out of a model provider: after a modal confirmation the host has omp forget the accounts it stored for it (`omp auth-broker logout <provider>`, no terminal), `provider` being an id of `OMP_LOGIN_PROVIDERS`. `ompPath` as in `ompLogin`. */
+  | { type: "ompLogout"; provider: string; ompPath?: string }
+  /** The developer pressed Set/Change API key on the Cursor row: the host opens a masked input box, saves the key in the editor's secret storage and checks omp again. Without `ompPath` the omp is the saved `trama.ompPath`; with it, the wizard's omp step's path. The webview never has the key: no field carries it. */
+  | { type: "setCursorApiKey"; ompPath?: string }
+  /** The developer pressed Remove API key on the Cursor row: the host removes the saved key without asking and checks omp again. `ompPath` as in `setCursorApiKey`. */
+  | { type: "removeCursorApiKey"; ompPath?: string }
   /** The Settings tab became visible: the host sends `ompStatus`, and `modelSuggestions` from the same `omp models` call. */
   | { type: "ompStatusWanted" }
+  /** Refresh next to the System Certificates state of the Settings tab: the host exports the bundle again, only while the saved setting is on and no export is running. No data. */
+  | { type: "refreshSystemCertificates" }
+  /** The wizard's omp step has System Certificates checked and wants the bundle exported (it was just checked and the bundle is missing or old, or Refresh was pressed): the host exports it unless an export is running. No data: the step's value is the webview's. */
+  | { type: "systemCertificatesExport" }
   /** The wizard's omp step is shown: the host searches the agent instruction files of `root` (a workspace folder; absent means the project's folder) and answers with `instructionFiles`. */
   | { type: "instructionFilesWanted"; root?: string }
   /** The developer followed a file of the warning on the omp step: the host opens it only if it is in the last `instructionFiles` answer. */
@@ -200,6 +211,12 @@ export type ToWebview =
   | { type: "agentCheck"; ompPath: string; state: "done"; ok: boolean; missing: boolean; version?: string; models?: number; providers?: string[]; error?: string; updateError?: string; tooOld?: true }
   /** The state of omp for the Settings tab: being checked, or done with the `version` that answers and the number of `models` omp lists, or `error` saying why not (`missing` when the program was not found); `tooOld` says the version is older than the minimum. */
   | { type: "ompStatus"; state: "checking" | "done"; missing?: boolean; version?: string; models?: number; providers?: string[]; error?: string; tooOld?: true }
+  /** The state of the System Certificates bundle of this window: an export is running (`exporting`), the number of certificates (`count`) and the ISO time (`exportedAt`) of the bundle on disk, and why the last export failed (`error`). Sent at `ready`, when the Settings view becomes visible and at every change of the state. */
+  | { type: "systemCertificates"; exporting: boolean; count?: number; exportedAt?: string; error?: string }
+  /** Whether a Cursor API key is saved in the editor's secret storage, sent at `ready`, when the Settings tab becomes visible and after every change; never the key. */
+  | { type: "cursorApiKey"; saved: boolean }
+  /** Whether the logout of the provider `provider` is running (the command and the omp check that follows it), sent with `true` after the confirmation and with `false` when that check has answered. */
+  | { type: "ompLogoutState"; provider: string; running: boolean }
   /** The agent instruction files found for `root`, with `path` absolute and `label` as it is shown. No content is sent. */
   | { type: "instructionFiles"; root: string; files: InstructionFileView[] }
   /** The entries of one folder of the wizard's tree, without the ones named with a dot or ignored by git. */

@@ -15,7 +15,7 @@ import { tasksHeldByDrifts } from "./delete-task";
 import { syncShortNumbers } from "./short-numbers";
 import { readTaskImages, type TaskImage } from "./task-images";
 import { clearedSince, readLastScan } from "./last-scan";
-import { attachedDrift, closedUnchanged, type Column, type Drift, type DriftOption, type DriftSides, driftBody, driftOptions, driftSides, type FollowedDrift, followedDrifts, freedTasks, type FreedTask, listDrifts, listTasks, taskProgress, unifiedDrifts, unifiedInto } from "./work";
+import { attachedDrift, closedUnchanged, type Column, type Drift, type DriftOption, type DriftSides, driftBody, driftOptions, driftSides, type FollowedDrift, followedDrifts, listDrifts, listTasks, taskProgress, unifiedDrifts, unifiedInto } from "./work";
 import { preparedFlag, preparedStatus } from "./prepared";
 import { type Specs, type SpecsChange, specsChange } from "./specs";
 import { type HistoryFault, readHistory } from "./history";
@@ -95,8 +95,6 @@ export interface ProposalView {
   title: string;
   body: string;
   kind: ProposalKind;
-  /** A resolution the Drift blocker filed: its Drifts block no Task. Approving it changes nothing else. */
-  nonBlocking: boolean;
   /** A resolution born from the answer to a Drift's prepared question: it does not stop Resolve while it awaits a decision. */
   prepared: boolean;
   /** Set while a Draft is being refined by a rebase: it is drawn as a ghost until handed over again. */
@@ -155,8 +153,6 @@ export interface DriftView {
   unifiedInto: { id: string; title: string } | null;
   /** The fix Task that dismissed this Drift by closing without changes, with its note while Done; null otherwise. */
   closedUnchanged: { task: string; note: string | null } | null;
-  /** The Tasks this Drift leaves free, in the order named, each with its reason; the title is null for a Task that no longer exists. */
-  notBlocking: FreedTask[];
   body: string;
   /** The job of the agent terminal that filed the Drift; null when none. */
   job: string | null;
@@ -385,7 +381,6 @@ function proposalView(p: Project, project: ProjectModel, proposal: Proposal): Pr
     title: proposal.title,
     body: stripTitle(proposal.body),
     kind: proposal.data.kind,
-    nonBlocking: proposal.data.nonBlocking,
     prepared: proposal.data.prepared,
     refining: proposal.data.refining,
     tasks: coverage === null ? [] : proposal.tasks.map((t) => ({ id: t.id, title: t.title, body: stripTitle(t.body), technical: t.technical, refs: t.refs, images: readTaskImages(p, t.id) })),
@@ -436,7 +431,9 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
   const shownProposals = allProposals.filter((x) => x.data.status === "open" || (x.data.status === "draft" && x.data.refining)).map((proposal) => proposalView(p, project, proposal));
   const proposalById = new Map(allProposals.map((x) => [x.id, x]));
   // The developer does not see attached Proposals, so the ghost of a Proposal whose Draft is attached to an open Drift is drawn nowhere.
-  const announcements = listAnnouncements(p).filter((a) => !(a.kind === "proposal" && a.proposal !== null && attachedDrift(p, a.proposal)));
+  // The announcement of a refinement is bound to a Proposal that already has its card (Open, or a Draft left refining): its phase and notes show on that card, never as a ghost of its own.
+  const carded = new Set(shownProposals.map((x) => x.id));
+  const announcements = listAnnouncements(p).filter((a) => !(a.kind === "proposal" && a.proposal !== null && (attachedDrift(p, a.proposal) || carded.has(a.proposal))));
   const driftView = (d: Drift): DriftView => ({
     id: d.id,
     created: d.data.created,
@@ -447,7 +444,6 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
     unifies: unifiedDrifts(p, d),
     unifiedInto: unifiedInto(p, d),
     closedUnchanged: closedUnchanged(p, d),
-    notBlocking: freedTasks(d, tasks),
     body: driftBody(d),
     job: d.data.job,
     prepared: preparedFlag(preparedStatus(p, d, project)),

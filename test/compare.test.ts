@@ -38,20 +38,20 @@ const validComparison = JSON.stringify({
 
 describe("trama comparison new", () => {
   test("a Machine's briefing takes its whole scope by default and refuses references outside it, announcing nothing", () => {
-    const b = briefing(p, "order", [], false);
+    const b = briefing(p, "order", []);
     expect(b.scope).toContain("order");
     expect(b.scope).toContain("order/Paid");
-    expect(() => briefing(p, "nope", [], false)).toThrow(TramaError);
-    expect(() => briefing(p, "order", ["payment"], false)).toThrow(TramaError);
+    expect(() => briefing(p, "nope", [])).toThrow(TramaError);
+    expect(() => briefing(p, "order", ["payment"])).toThrow(TramaError);
     expect(listAnnouncements(p)).toEqual([]);
   });
 
-  test("the briefing lists the open Tasks on the references, and candidates name the Tasks a Drift would block", () => {
+  test("the briefing lists the open Tasks on the references and carries no candidates", () => {
     const t = newTask(p, { title: "Refund paid orders", refs: ["order/Paid"], technical: false });
-    const b = briefing(p, "order", ["order/Paid"], true);
+    const b = briefing(p, "order", ["order/Paid"]);
     expect(b.openTasks.map((x) => x.id)).toEqual([t.id]);
-    expect(b.candidates?.get("order/Paid")?.map((x) => x.id)).toEqual([t.id]);
-    expect(briefing(p, "order", ["order/Paid"], false).candidates).toBeNull();
+    expect(b).not.toHaveProperty("candidates");
+    expect(() => run(["--root", dir, "comparison", "new", "order", "--input", '{"candidates":true}'], dir, {})).toThrow();
   });
 
   test("the command announces the comparison of a terminal and prints its announcement first", () => {

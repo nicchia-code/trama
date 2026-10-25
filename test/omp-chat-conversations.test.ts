@@ -347,11 +347,16 @@ describe("Ask more's held instruction", () => {
     expect(announced).toEqual([]);
   });
 
-  test("a window closed before any message keeps nothing", async () => {
+  test("a window closed before any message ends it at once as Closed: its process stops, the tab goes and nothing is kept", async () => {
     const conversations = make();
     await conversations.open(held([]));
     await conversations.windowClosed();
+    expect(client.sessions[0]?.stops).toBe(1);
+    expect(client.sessions[0]?.stopOptions).toEqual([{ deactivating: true }]);
+    expect(view.closed).toEqual(["qqq111"]);
+    expect(conversations.has("qqq111")).toBe(false);
     expect(store.saved).toEqual([]);
+    expect(calls.ended).toEqual([]);
   });
 
   test("a failed start leaves no conversation: the tab closes and the reason goes back for the terminal", async () => {
@@ -750,6 +755,24 @@ describe("the resume", () => {
     expect(calls.ended).toEqual([{ id: "abc123", abnormal: "the agent's session could not be resumed" }]);
     expect(client.resumed).toEqual([]);
     expect(store.saved).toEqual([]);
+  });
+
+  test("a job's conversation without Trama's hook that was working comes back working: the fixed prompt, followed to its turn end, its job standing", async () => {
+    saveEntries(entry({ hook: false }));
+    const conversations = make();
+    await conversations.resume();
+    expect((client.sessions[0] as FakeSession).prompts).toEqual([{ text: RESUME_PROMPT, work: true }]);
+    expect(conversations.followsJob("abc123")).toBe(true);
+    expect(calls.restored).toEqual([{ id: "abc123", job: "job-1" }]);
+    client.sessions[0]?.turnEnd();
+    expect(calls.ended).toEqual([{ id: "abc123" }]);
+  });
+
+  test("a job's conversation without Trama's hook that was working when the window closed is saved as working", async () => {
+    const conversations = make();
+    await conversations.open({ ...spec, hook: false });
+    await conversations.windowClosed();
+    expect(store.saved.map((e) => [e.id, e.state, e.job?.id])).toEqual([["abc123", "running", "job-1"]]);
   });
 
   test("a working conversation with the hook and no job resumes working with the fixed prompt and is followed to its turn end", async () => {

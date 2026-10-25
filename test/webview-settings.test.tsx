@@ -292,7 +292,7 @@ test("the groups are the wizard's, each with its title and its sentence under it
   ]);
   const advanced = sections[3] as HTMLElement;
   expect(Array.from(advanced.querySelectorAll("h3")).map((h) => h.textContent)).toEqual(["Appearance", "Drifts", "Agents", "omp Chat"]);
-  expect(Array.from(advanced.querySelectorAll("section")).map((s) => s.querySelectorAll("label").length)).toEqual([1, 3, 3, 3]);
+  expect(Array.from(advanced.querySelectorAll("section")).map((s) => s.querySelectorAll("label").length)).toEqual([1, 2, 3, 3]);
   // Auto Exit and the language stay in omp, with the language enabled and no note; the group Features does not exist.
   const omp = sections[0] as HTMLElement;
   expect(within(omp).getByRole("checkbox", { name: "Auto Exit" })).not.toBeNull();
@@ -471,9 +471,10 @@ test("with omp answering, the Providers section sits under the status box and be
   expect(section.compareDocumentPosition(screen.getByRole("textbox", { name: "Omp Path" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(within(section).getByText("Log in to the model providers you use with omp.")).not.toBeNull();
   const rows = within(screen.getByRole("list", { name: "Providers" })).getAllByRole("listitem");
-  expect(rows.map((row) => within(row).getByRole("button").textContent)).toEqual(Array(7).fill("Log in"));
+  // Every row has Log in; the Cursor row, and only it, adds the key button.
+  expect(rows.map((row) => within(row).getAllByRole("button").map((button) => button.textContent))).toEqual([["Log in"], ["Log in"], ["Log in"], ["Log in"], ["Log in"], ["Log in", "Set API key"], ["Log in"]]);
   expect(rows.map((row) => row.querySelector("p")?.textContent)).toEqual(["ChatGPT", "Anthropic", "GitHub Copilot", "Google Gemini CLI", "Google Antigravity", "Cursor", "xAI Grok"]);
-  expect(rows.map((row) => row.querySelectorAll("p")[1]?.textContent)).toEqual(["Plus/Pro (Codex)", "Claude Pro/Max", "Copilot subscription", "Cloud Code Assist", "Gemini, Claude, GPT-OSS", "Cursor subscription", "SuperGrok or X Premium+"]);
+  expect(rows.map((row) => row.querySelectorAll("p")[1]?.textContent)).toEqual(["Plus/Pro (Codex)", "Claude Pro/Max", "Copilot subscription", "Cloud Code Assist", "Gemini, Claude, GPT-OSS", "Cursor subscription or API key", "SuperGrok or X Premium+"]);
 });
 
 test("a provider omp lists models of is Connected with Log in again, the others Not connected with Log in", () => {
@@ -484,7 +485,7 @@ test("a provider omp lists models of is Connected with Log in again, the others 
   expect(connected.map((row) => row.querySelector("p")?.textContent)).toEqual(["GitHub Copilot", "xAI Grok"]);
   for (const row of connected) {
     expect(row.querySelector("svg.lucide-circle-check")).not.toBeNull();
-    expect(within(row).getByRole("button").textContent).toBe("Log in again");
+    expect(within(row).getAllByRole("button").map((button) => button.textContent)).toEqual(["Log in again", "Log out"]);
   }
   expect(screen.getAllByText("Not connected")).toHaveLength(5);
   expect(screen.getByRole("button", { name: "Log in again to GitHub Copilot" })).not.toBeNull();
@@ -500,7 +501,7 @@ test("without providers (the list of models failed while omp answers) the rows h
   expect(rows).toHaveLength(7);
   expect(screen.queryByText("Connected")).toBeNull();
   expect(screen.queryByText("Not connected")).toBeNull();
-  expect(rows.map((row) => within(row).getByRole("button").textContent)).toEqual(Array(7).fill("Log in"));
+  expect(rows.map((row) => within(row).getAllByRole("button")[0]?.textContent)).toEqual(Array(7).fill("Log in"));
 });
 
 test("the rows keep their last states while omp is checked again, and take the new ones with the outcome", () => {
@@ -540,4 +541,183 @@ test("pressing a button sends ompLogin with the id of the provider and no ompPat
     { type: "ompLogin", provider: "openai-codex" },
     { type: "ompLogin", provider: "xai-oauth" },
   ]);
+});
+
+test("pressing Log out sends ompLogout with the id of the provider and no ompPath, only on Connected rows; ompLogoutState makes its row busy until it says it ended", () => {
+  const { status, posted, view } = mounted();
+  status({ state: "done", missing: false, version: "18.12.6", models: 2, providers: ["anthropic", "xai-oauth"] });
+  expect(screen.getAllByRole("button", { name: /^Log out of / })).toHaveLength(2);
+  fireEvent.click(screen.getByRole("button", { name: "Log out of Anthropic" }));
+  expect(posted.filter((message) => message.type === "ompLogout")).toEqual([{ type: "ompLogout", provider: "anthropic" }]);
+  const rows = within(screen.getByRole("list", { name: "Providers" })).getAllByRole("listitem");
+  act(() => view.receiveOmpLogoutState({ type: "ompLogoutState", provider: "anthropic", running: true }));
+  expect(rows[1]?.getAttribute("aria-busy")).toBe("true");
+  expect(rows[6]?.getAttribute("aria-busy")).toBeNull();
+  expect(within(rows[1] as HTMLElement).getByRole("button", { name: "Log in again to Anthropic" }).hasAttribute("disabled")).toBe(true);
+  expect(within(rows[6] as HTMLElement).getByRole("button", { name: "Log out of xAI Grok" }).hasAttribute("disabled")).toBe(false);
+  // The host answers the check, then says the logout ended; the row is free and the provider is gone.
+  status({ state: "checking" });
+  status({ state: "done", missing: false, version: "18.12.6", models: 1, providers: ["xai-oauth"] });
+  expect(rows[1]?.getAttribute("aria-busy")).toBe("true");
+  act(() => view.receiveOmpLogoutState({ type: "ompLogoutState", provider: "anthropic", running: false }));
+  expect(rows[1]?.getAttribute("aria-busy")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Log out of Anthropic" })).toBeNull();
+  expect(document.activeElement).toBe(within(rows[1] as HTMLElement).getByRole("button", { name: "Log in to Anthropic" }));
+});
+
+/** The host says whether a Cursor API key is saved. */
+const keyState = (view: ReturnType<typeof mounted>["view"], saved: boolean) => act(() => view.receiveCursorApiKey({ type: "cursorApiKey", saved }));
+const cursorRowOf = () => within(screen.getByRole("list", { name: "Providers" })).getAllByRole("listitem")[5] as HTMLElement;
+
+test("the Cursor row follows cursorApiKey: Set API key without a key, Change API key and Remove API key and the line API key saved with one", () => {
+  const { status, view } = mounted();
+  status({ state: "done", missing: false, version: "18.12.6", models: 1, providers: ["anthropic"] });
+  expect(within(cursorRowOf()).getByRole("button", { name: "Set Cursor API key" })).not.toBeNull();
+  expect(within(cursorRowOf()).queryByText("API key saved")).toBeNull();
+  keyState(view, true);
+  expect(within(cursorRowOf()).getByRole("button", { name: "Change Cursor API key" })).not.toBeNull();
+  expect(within(cursorRowOf()).getByRole("button", { name: "Remove Cursor API key" })).not.toBeNull();
+  expect(within(cursorRowOf()).getByText("API key saved")).not.toBeNull();
+  keyState(view, false);
+  expect(within(cursorRowOf()).getByRole("button", { name: "Set Cursor API key" })).not.toBeNull();
+  expect(within(cursorRowOf()).queryByRole("button", { name: "Remove Cursor API key" })).toBeNull();
+  expect(screen.queryByText("API key saved")).toBeNull();
+});
+
+test("a key state that arrives before omp answers shows in the row as soon as the section appears", () => {
+  const { status, view } = mounted();
+  keyState(view, true);
+  expect(providersList()).toBeNull();
+  status({ state: "done", missing: false, version: "18.12.6", models: 1, providers: [] });
+  expect(within(cursorRowOf()).getByText("API key saved")).not.toBeNull();
+});
+
+test("Set API key, Change API key and Remove API key send setCursorApiKey and removeCursorApiKey with no ompPath and no key, and ask no confirmation", () => {
+  const { status, view, posted } = mounted();
+  status({ state: "done", missing: false, version: "18.12.6", models: 1, providers: [] });
+  fireEvent.click(within(cursorRowOf()).getByRole("button", { name: "Set Cursor API key" }));
+  keyState(view, true);
+  fireEvent.click(within(cursorRowOf()).getByRole("button", { name: "Change Cursor API key" }));
+  fireEvent.click(within(cursorRowOf()).getByRole("button", { name: "Remove Cursor API key" }));
+  expect(posted.filter((message) => message.type === "setCursorApiKey" || message.type === "removeCursorApiKey")).toEqual([{ type: "setCursorApiKey" }, { type: "setCursorApiKey" }, { type: "removeCursorApiKey" }]);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+});
+
+test("the focus returns to the key button after the host answers a save or a removal, with no tooltip", async () => {
+  const { status, view } = mounted();
+  status({ state: "done", missing: false, version: "18.12.6", models: 1, providers: [] });
+  fireEvent.click(within(cursorRowOf()).getByRole("button", { name: "Set Cursor API key" }));
+  keyState(view, true);
+  await act(async () => undefined);
+  expect(document.activeElement).toBe(within(cursorRowOf()).getByRole("button", { name: "Change Cursor API key" }));
+  expect(screen.queryByRole("tooltip")).toBeNull();
+  fireEvent.click(within(cursorRowOf()).getByRole("button", { name: "Remove Cursor API key" }));
+  keyState(view, false);
+  await act(async () => undefined);
+  expect(document.activeElement).toBe(within(cursorRowOf()).getByRole("button", { name: "Set Cursor API key" }));
+});
+
+// ---- System Certificates ----
+
+function setupCertificates(values: Record<string, SettingsValues>, certificates: Extract<ToWebview, { type: "systemCertificates" }> | null) {
+  const posted: ToHost[] = [];
+  const state = certificates === null ? null : (({ type: _type, ...rest }) => rest)(certificates);
+  const utils = render(<SettingsPage schema={schema} values={values} generation={1} models={[]} listError={null} certificates={state} post={(message) => posted.push(message)} openLink={() => {}} />);
+  return { posted, ...utils };
+}
+
+const ON: Record<string, SettingsValues> = { "trama.systemCertificates": { user: true } };
+const WHEN = "2026-10-25T10:30:00.000Z";
+const label = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+
+test("System Certificates is the last setting of the omp group, a Checkbox off by default with the description of the manifest", () => {
+  setupCertificates({}, null);
+  const checkbox = screen.getByRole("checkbox", { name: "System Certificates" });
+  expect(checkbox.getAttribute("aria-checked")).toBe("false");
+  const omp = screen.getByRole("heading", { level: 2, name: "omp" }).closest("section") as HTMLElement;
+  const boxes = within(omp).getAllByRole("checkbox").map((box) => box.getAttribute("aria-label"));
+  expect(boxes.at(-1)).toBe("System Certificates");
+  expect(omp.textContent).toContain("On: omp and your agent's commands trust the certificates your system trusts, for proxies that inspect HTTPS.");
+});
+
+test("the state line and Refresh show only with the box checked", () => {
+  setupCertificates({}, { type: "systemCertificates", exporting: false, count: 3, exportedAt: WHEN });
+  expect(screen.queryByRole("button", { name: "Refresh system certificates" })).toBeNull();
+  expect(screen.queryByText(/certificates, exported/)).toBeNull();
+  cleanup();
+  setupCertificates(ON, { type: "systemCertificates", exporting: false, count: 3, exportedAt: WHEN });
+  expect(screen.getByRole("button", { name: "Refresh system certificates" })).not.toBeNull();
+  expect(screen.getByText(`3 certificates, exported ${label(WHEN)}.`)).not.toBeNull();
+});
+
+test("the four states read in words: exporting, ready, failed with an earlier bundle, failed without a bundle", () => {
+  const states: [Extract<ToWebview, { type: "systemCertificates" }>, string][] = [
+    [{ type: "systemCertificates", exporting: true }, "Exporting system certificates…"],
+    [{ type: "systemCertificates", exporting: false, count: 148, exportedAt: WHEN }, `148 certificates, exported ${label(WHEN)}.`],
+    [{ type: "systemCertificates", exporting: false, count: 148, exportedAt: WHEN, error: "security exited with code 44" }, `Could not export the system certificates (security exited with code 44). Using the ones exported ${label(WHEN)}.`],
+    [{ type: "systemCertificates", exporting: false, error: "no certificate bundle found" }, "Could not export the system certificates (no certificate bundle found). omp gets no certificates from Trama."],
+  ];
+  for (const [state, text] of states) {
+    setupCertificates(ON, state);
+    const line = screen.getByText(text).closest("[aria-live]") as HTMLElement;
+    expect(line.getAttribute("aria-live")).toBe("polite");
+    // The icon is decoration: the words carry the state.
+    expect(line.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+    cleanup();
+  }
+});
+
+test("the line is what the checkbox is described by", () => {
+  setupCertificates(ON, { type: "systemCertificates", exporting: false, count: 2, exportedAt: WHEN });
+  const checkbox = screen.getByRole("checkbox", { name: "System Certificates" });
+  const line = screen.getByText(`2 certificates, exported ${label(WHEN)}.`).closest("[aria-live]") as HTMLElement;
+  expect(line.id).not.toBe("");
+  expect((checkbox.getAttribute("aria-describedby") ?? "").split(" ")).toContain(line.id);
+});
+
+test("Refresh is disabled while an export runs and says why in its tooltip; otherwise a click sends refreshSystemCertificates", () => {
+  const exporting = setupCertificates(ON, { type: "systemCertificates", exporting: true });
+  const disabled = screen.getByRole("button", { name: "Refresh system certificates" }) as HTMLButtonElement;
+  expect(disabled.disabled).toBe(true);
+  fireEvent.click(disabled);
+  expect(exporting.posted).toEqual([]);
+  cleanup();
+  const ready = setupCertificates(ON, { type: "systemCertificates", exporting: false, count: 1, exportedAt: WHEN });
+  const button = screen.getByRole("button", { name: "Refresh system certificates" }) as HTMLButtonElement;
+  expect(button.disabled).toBe(false);
+  expect(button.textContent).toBe("Refresh");
+  fireEvent.click(button);
+  expect(ready.posted).toEqual([{ type: "refreshSystemCertificates" }]);
+});
+
+test("checking the box sends the setting and shows the line at once; the host's messages then change it", () => {
+  const { posted } = setupCertificates({}, null);
+  expect(screen.queryByRole("button", { name: "Refresh system certificates" })).toBeNull();
+  fireEvent.click(screen.getByRole("checkbox", { name: "System Certificates" }));
+  expect(posted).toEqual([{ type: "setSetting", key: "trama.systemCertificates", value: true }]);
+  expect(screen.getByText("Exporting system certificates…")).not.toBeNull();
+  expect(screen.getByRole("button", { name: "Refresh system certificates" })).not.toBeNull();
+});
+
+test("a certificate error from the host reads with its final full stop in the models list, and in the status box of omp", () => {
+  const text = "omp could not verify a server's certificate; a corporate proxy that inspects HTTPS traffic is the usual cause";
+  setup({}, [], text);
+  expect(screen.getAllByText(`${text}.`).length).toBeGreaterThan(0);
+  cleanup();
+  setup({}, [], "omp exited with code 3");
+  expect(screen.getAllByText("omp exited with code 3").length).toBeGreaterThan(0);
+});
+
+test("the Settings tab keeps the state the host sends and shows it under the checked box", () => {
+  document.body.className = "vscode-light";
+  const theme = startTheme();
+  const page = render(<></>);
+  const view = mountSettings((node) => page.rerender(<>{node}</>), { post: () => {}, navigate: () => {}, openLink: () => {} }, theme);
+  act(() => view.receive({ type: "settings", schema, values: ON }));
+  expect(screen.getByText("Exporting system certificates…")).not.toBeNull();
+  act(() => view.receiveSystemCertificates({ type: "systemCertificates", exporting: false, count: 5, exportedAt: WHEN }));
+  expect(screen.getByText(`5 certificates, exported ${label(WHEN)}.`)).not.toBeNull();
+  act(() => view.receiveSystemCertificates({ type: "systemCertificates", exporting: true, count: 5, exportedAt: WHEN }));
+  expect(screen.getByText("Exporting system certificates…")).not.toBeNull();
 });

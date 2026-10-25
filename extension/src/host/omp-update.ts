@@ -1,4 +1,7 @@
 import { execFile, type ExecFileException } from "node:child_process";
+import { certificateErrorText, isCertificateError } from "../certificate-errors";
+import { cursorKeyEnv } from "./cursor-api-key";
+import { savedSystemCertificates, systemCertificatesEnv } from "./system-certificates";
 import { access, constants } from "node:fs/promises";
 import { homedir } from "node:os";
 import { checkHolds, ompFileName, ompSearchFolders, readUpdateCheck, type StoredCheck } from "../../../src/core/omp-update";
@@ -84,15 +87,21 @@ async function runnable(file: string, windows: boolean): Promise<boolean> {
 
 type Run = { ok: true; stdout: string } | { ok: false; missing: boolean; reason: (what: string, limit: string) => string };
 
-function run(program: string, args: string[], timeoutMs: number, env: NodeJS.ProcessEnv): Promise<Run> {
+/**
+ * One run of omp, without a shell. The error output of a failed run (`stderr`, read only for this test) that says omp could not verify a certificate makes the reason the
+ * certificate error text for the mode `systemCertificates`.
+ */
+function run(program: string, args: string[], timeoutMs: number, env: NodeJS.ProcessEnv, systemCertificates: boolean): Promise<Run> {
   const { promise, resolve } = Promise.withResolvers<Run>();
-  execFile(program, args, { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, env: { ...env, PATH: ompPathVariable(program, env) } }, (error: ExecFileException | null, stdout) => {
+  execFile(program, args, { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, env: { ...env, ...cursorKeyEnv(), ...systemCertificatesEnv(systemCertificates), PATH: ompPathVariable(program, env) } }, (error: ExecFileException | null, stdout, stderr) => {
     if (error === null) return resolve({ ok: true, stdout });
     const timedOut = error.killed === true && error.code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
+    const certificate = error.code !== "ENOENT" && isCertificateError(String(stderr));
     resolve({
       ok: false,
       missing: error.code === "ENOENT",
-      reason: (what, limit) => (timedOut ? `${what} ${limit}` : typeof error.code === "number" ? `${what.split(" did not")[0]} exited with code ${error.code}` : `${what.split(" did not")[0]} gave an unexpected answer`),
+      reason: (what, limit) =>
+        certificate ? certificateErrorText(systemCertificates) : timedOut ? `${what} ${limit}` : typeof error.code === "number" ? `${what.split(" did not")[0]} exited with code ${error.code}` : `${what.split(" did not")[0]} gave an unexpected answer`,
     });
   });
   return promise;
@@ -123,7 +132,7 @@ const judged = (outcome: OmpUpdateOutcome): OmpUpdateOutcome => (ompMeetsMinimum
  * `onUpdating` hears the new version when the update starts. An omp older than the minimum, or whose version cannot be read, that the update does
  * not bring to the minimum comes back with `tooOld`.
  */
-export function ensureOmpUpdated(program: string, onUpdating?: (version: string) => void, env: NodeJS.ProcessEnv = process.env, now: () => number = Date.now): Promise<OmpUpdateOutcome> {
+export function ensureOmpUpdated(program: string, onUpdating?: (version: string) => void, env: NodeJS.ProcessEnv = process.env, now: () => number = Date.now, systemCertificates: boolean = savedSystemCertificates()): Promise<OmpUpdateOutcome> {
   const last = stored();
   if (last !== undefined && checkHolds(last, program, now())) {
     return Promise.resolve(judged(last.version === undefined ? {} : { version: last.version }));
@@ -139,7 +148,7 @@ export function ensureOmpUpdated(program: string, onUpdating?: (version: string)
   const entry: { promise: Promise<OmpUpdateOutcome>; listeners: Set<(version: string) => void>; updating?: string } = { promise: Promise.resolve({}), listeners: new Set(onUpdating === undefined ? [] : [onUpdating]) };
   entry.promise = (async (): Promise<OmpUpdateOutcome> => {
     const record = (version: string | undefined): void => save({ checkedAt: new Date(now()).toISOString(), omp: program, ...(version === undefined ? {} : { version }) });
-    const [checked, asked] = await Promise.all([run(program, ["update", "--check"], CHECK_TIMEOUT_MS, env), run(program, ["--version"], VERSION_TIMEOUT_MS, env)]);
+    const [checked, asked] = await Promise.all([run(program, ["update", "--check"], CHECK_TIMEOUT_MS, env, systemCertificates), run(program, ["--version"], VERSION_TIMEOUT_MS, env, systemCertificates)]);
     if ((!checked.ok && checked.missing) || (!asked.ok && asked.missing)) return { missing: true };
     const installed = asked.ok ? parseOmpVersion(asked.stdout) : undefined;
     const known = installed === undefined ? {} : { version: installed };
@@ -158,7 +167,7 @@ export function ensureOmpUpdated(program: string, onUpdating?: (version: string)
     }
     entry.updating = reading.version;
     for (const listener of entry.listeners) listener(reading.version);
-    const updated = await run(program, ["update"], UPDATE_TIMEOUT_MS, env);
+    const updated = await run(program, ["update"], UPDATE_TIMEOUT_MS, env, systemCertificates);
     if (!updated.ok) {
       record(installed);
       return judged({ updateError: updated.reason("omp update did not finish", "within 5 minutes"), ...known });
@@ -168,4 +177,17 @@ export function ensureOmpUpdated(program: string, onUpdating?: (version: string)
   })().finally(() => inFlight.delete(program));
   inFlight.set(program, entry);
   return entry.promise;
+}
+
+/**
+ * What General's start needs of omp: the version, judged against the minimum, and no check of updates and no update. The outcome of the last launch check of
+ * this editor for the same program, while it holds, gives the version; otherwise only `omp --version` runs, and nothing is saved.
+ */
+export async function ompVersionOnly(program: string, env: NodeJS.ProcessEnv = process.env, now: () => number = Date.now, systemCertificates: boolean = savedSystemCertificates()): Promise<OmpUpdateOutcome> {
+  const last = stored();
+  if (last !== undefined && checkHolds(last, program, now())) return judged(last.version === undefined ? {} : { version: last.version });
+  const asked = await run(program, ["--version"], VERSION_TIMEOUT_MS, env, systemCertificates);
+  if (!asked.ok && asked.missing) return { missing: true };
+  const installed = asked.ok ? parseOmpVersion(asked.stdout) : undefined;
+  return judged(installed === undefined ? {} : { version: installed });
 }

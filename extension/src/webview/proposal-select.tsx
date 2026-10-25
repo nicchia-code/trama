@@ -2,23 +2,29 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 
 const NONE = "none";
 
-/** The `Select` that picks the Proposal drawn over the Requirements or the Specs; disabled when there is none to pick. */
+/** Why the selector is disabled while a focus is on. */
+export const FOCUSED_REASON = "Clear the focus to choose another Proposal.";
+
+/** The `Select` that picks the Proposal drawn over the Requirements or the Specs; disabled when there is none to pick, and while a focus is on. */
 export function ProposalSelect({
   label,
   options,
   value,
+  focused = false,
   onChange,
 }: {
   label: string;
   options: { id: string; label: string }[];
   value: string | null;
+  /** A focus is on: the Proposal drawn stays as it is until Clear or Esc takes the focus off. */
+  focused?: boolean;
   onChange: (id: string | null) => void;
 }) {
   return (
     <label className="flex items-center gap-2">
       Proposal
-      <Select value={value ?? NONE} onValueChange={(next) => onChange(next === NONE ? null : next)} disabled={options.length === 0}>
-        <SelectTrigger aria-label={label} className="min-w-48">
+      <Select value={value ?? NONE} onValueChange={(next) => onChange(next === NONE ? null : next)} disabled={options.length === 0 || focused}>
+        <SelectTrigger aria-label={label} aria-description={focused ? FOCUSED_REASON : undefined} className="min-w-48">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

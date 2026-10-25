@@ -1,6 +1,6 @@
 ---
 created: 2026-10-24T08:36:37.977Z
-updated: 2026-10-24T08:36:37.977Z
+updated: 2026-10-24T20:56:01.898Z
 summary: Trama definisce il sotto-agente trama-implementer, prenota i file nell'hook, raggruppa i Task in task list, blocca l'approvazione durante i Run e chiude il check in parallelo.
 tasks:
   - e3faz1rk
@@ -9,6 +9,7 @@ tasks:
   - dij64jjz
   - 2oqwp35m
   - b9utedrb
+  - vd3lxgx4
 cleared:
   2oqwp35m:
     title: Approve fermo nei Run

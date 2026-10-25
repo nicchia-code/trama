@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { checkHolds, OMP_UPDATE_TTL_MS, ompSearchFolders, readUpdateCheck } from "../src/core/omp-update";
-import { ensureOmpUpdated, findConfiguredOmp, findOmp, forgetUpdateCheck, OMP_UPDATE_KEY, setUpdateStore } from "../extension/src/host/omp-update";
+import { certificateErrorText } from "../extension/src/certificate-errors";
+import { ensureOmpUpdated, findConfiguredOmp, findOmp, forgetUpdateCheck, OMP_UPDATE_KEY, ompVersionOnly, setUpdateStore } from "../extension/src/host/omp-update";
+import { bundlePath } from "../extension/src/host/system-certificates";
 
 const posix = process.platform !== "win32";
 let dir = "";
@@ -163,4 +165,63 @@ test("an omp whose version cannot be read counts as too old, and a failed check 
   forgetUpdateCheck();
   // A failed update check never stops an omp that is recent enough.
   expect(await ensureOmpUpdated(fakeOmp("x", 0, 4))).toEqual({ updateError: "omp update --check exited with code 4", version: "18.12.6" });
+});
+
+/** A fake omp that fails `update --check` with `stderr` (exit 1), answers `--version`, and records the certificate variable it received in the `env` file. */
+function certificateOmp(stderr: string): string {
+  const program = join(dir, "omp-cert");
+  writeFileSync(program, `#!/bin/sh\necho "\${NODE_EXTRA_CA_CERTS:-none}" >> "${join(dir, "env")}"\nif [ "$1" = "--version" ]; then printf '18.12.6'; exit 0; fi\necho '${stderr}' >&2\nexit 1\n`);
+  chmodSync(program, 0o755);
+  return program;
+}
+
+test("a check or an update that fails with a certificate error says so in plain words, whatever the mode; other failures keep their reason", async () => {
+  if (!posix) return;
+  const program = certificateOmp("Error: unable to get local issuer certificate");
+  expect(await ensureOmpUpdated(program, undefined, undefined, undefined, false)).toEqual({ updateError: certificateErrorText(false), version: "18.12.6" });
+  forgetUpdateCheck();
+  expect(await ensureOmpUpdated(program, undefined, undefined, undefined, true)).toEqual({ updateError: certificateErrorText(true), version: "18.12.6" });
+  forgetUpdateCheck();
+  expect(await ensureOmpUpdated(certificateOmp("disk full"), undefined, undefined, undefined, true)).toEqual({ updateError: "omp update --check exited with code 1", version: "18.12.6" });
+
+  // The update itself, after a check that found a newer version.
+  forgetUpdateCheck();
+  const updating = join(dir, "omp-updating");
+  writeFileSync(updating, `#!/bin/sh\nif [ "$1" = "--version" ]; then printf '18.12.6'; exit 0; fi\nif [ "$1 $2" = "update --check" ]; then printf 'Current version: 18.12.6\\nNew version available: 18.13.0\\n'; exit 0; fi\necho 'curl: (60) SSL certificate problem' >&2\nexit 1\n`);
+  chmodSync(updating, 0o755);
+  expect(await ensureOmpUpdated(updating, undefined, undefined, undefined, false)).toEqual({ updateError: certificateErrorText(false), version: "18.12.6" });
+});
+
+test("the check, the update and the version reading receive the bundle with System Certificates on and a bundle on disk, and nothing otherwise", async () => {
+  if (!posix) return;
+  const home = join(dir, "home");
+  mkdirSync(home, { recursive: true });
+  const saved = { HOME: process.env["HOME"], XDG_CACHE_HOME: process.env["XDG_CACHE_HOME"] };
+  process.env["HOME"] = home;
+  delete process.env["XDG_CACHE_HOME"];
+  try {
+    const program = certificateOmp("Error: CERT_HAS_EXPIRED");
+    await ensureOmpUpdated(program, undefined, { PATH: process.env["PATH"] ?? "" }, undefined, true);
+    expect(readFileSync(join(dir, "env"), "utf8").trim().split("\n")).toEqual(["none", "none"]);
+    const path = bundlePath();
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, "bundle\n");
+    forgetUpdateCheck();
+    rmSync(join(dir, "env"));
+    await ensureOmpUpdated(program, undefined, { PATH: process.env["PATH"] ?? "" }, undefined, true);
+    expect(readFileSync(join(dir, "env"), "utf8").trim().split("\n")).toEqual([path, path]);
+    forgetUpdateCheck();
+    rmSync(join(dir, "env"));
+    await ensureOmpUpdated(program, undefined, { PATH: process.env["PATH"] ?? "" }, undefined, false);
+    expect(readFileSync(join(dir, "env"), "utf8").trim().split("\n")).toEqual(["none", "none"]);
+    forgetUpdateCheck();
+    rmSync(join(dir, "env"));
+    await ompVersionOnly(program, { PATH: process.env["PATH"] ?? "" }, undefined, true);
+    expect(readFileSync(join(dir, "env"), "utf8").trim()).toBe(path);
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
 });

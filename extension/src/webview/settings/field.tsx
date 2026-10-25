@@ -1,14 +1,16 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { MODEL_ROLE_KEYS, settingValueError, type SettingSchema, type SettingsValues, type SettingValue } from "../../host/settings-schema";
 import type { ModelSuggestion } from "../../host/model-lists";
+import { reasonLine } from "../../certificate-errors";
 import { cn } from "../lib/utils";
 import { InlineMarkdown, Markdown, type OpenLink } from "../markdown";
 import { Checkbox } from "../ui/checkbox";
 import { ComboboxInput } from "../ui/combobox";
 import { Input } from "../ui/input";
+import { SystemCertificatesLine } from "../setup-shared";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
-import { composeRoleValue, DEFAULT_LEVEL, effectiveValue, modelOptions, numberFromText, splitRoleValue, thinkingLevels, withModel, workspaceOverride } from "./logic";
+import { type CertificatesState, composeRoleValue, SYSTEM_CERTIFICATES_KEY, DEFAULT_LEVEL, effectiveValue, modelOptions, numberFromText, splitRoleValue, thinkingLevels, withModel, workspaceOverride } from "./logic";
 import { ThinkingLevelSelect } from "./thinking-level";
 
 /**
@@ -49,13 +51,16 @@ export interface FieldProps {
   onInvalid?: (key: string, invalid: boolean) => void;
   /** A line in bold between the title and the explanation (the advice of a model role). */
   lead?: string;
+  /** The state of the System Certificates bundle and what `Refresh` does; only `trama.systemCertificates` uses it, and only while its box is checked. */
+  certificates?: { state: CertificatesState | null; onRefresh: () => void };
 }
+
 
 /**
  * One setting, as the setup wizard and the Settings tab show it: its title, its explanation under it, linked to the control with `aria-describedby`,
  * the control that fits it, for an enum the entry of the chosen value, and only the messages that are there. No «i» and no bubble.
  */
-export function SettingField({ setting, values, generation, models, listError, send, openLink, onInvalid, lead }: FieldProps) {
+export function SettingField({ setting, values, generation, models, listError, send, openLink, onInvalid, lead, certificates }: FieldProps) {
   const id = `st-${setting.key.replace(/\./g, "-")}`;
   const { key } = setting;
   const saved = effectiveValue(setting, values);
@@ -74,13 +79,16 @@ export function SettingField({ setting, values, generation, models, listError, s
   const modelRole = setting.control === "text" && MODEL_ROLE_KEYS.includes(key);
   const chosen = setting.control === "enum" ? String(picked ?? saved) : undefined;
   const override = workspaceOverride(setting, values);
-  const note = modelRole ? listError : null;
+  const note = modelRole && listError !== null ? reasonLine(listError) : null;
+  // The state line and `Refresh` show only while the box is checked.
+  const certificatesShown = key === SYSTEM_CERTIFICATES_KEY && certificates !== undefined && (picked ?? saved) === true;
   const role = modelRole ? splitRoleValue(savedText, models) : undefined;
   const levels = role === undefined ? [] : thinkingLevels(models, role.model);
   const levelChosen = typeof picked === "string" ? picked : (role?.level ?? DEFAULT_LEVEL);
 
   const describedBy = [
     `${id}-explain`,
+    certificatesShown ? `${id}-certificates` : null,
     chosen !== undefined && setting.values?.includes(chosen) ? `${id}-value-${setting.values.indexOf(chosen)}` : null,
     editable.error !== null ? `${id}-error` : null,
     note !== null ? `${id}-note` : null,
@@ -260,6 +268,7 @@ export function SettingField({ setting, values, generation, models, listError, s
             <InlineMarkdown source={setting.descriptions?.[chosenIndex] ?? ""} openLink={openLink} />
           </p>
         ) : null}
+        {certificatesShown && certificates !== undefined ? <SystemCertificatesLine id={`${id}-certificates`} state={certificates.state} onRefresh={certificates.onRefresh} /> : null}
         {messages}
       </div>
     </div>

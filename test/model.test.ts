@@ -111,3 +111,10 @@ describe("parsing", () => {
     expect(model.machines.get("m")?.states[0]?.transitions.map((t) => t.target)).toEqual(["B", "C"]);
   });
 });
+
+test("only system, feature, actors and requirements are reserved: constructor is a valid Feature, Machine and Actor ID", () => {
+  expect(errors(files({ "constructor/feature.md": "# C\n\nA feature.\n" }))).toEqual([]);
+  expect(errors(files({ "feat/constructor.md": machine(GOOD_STATES) }))).toEqual([]);
+  expect(errors(files({ "actors/constructor.md": "# C\n\nSomeone.\n" }))).toEqual([]);
+  for (const id of ["system", "actors", "requirements"]) expect(errors(files({ [`feat/${id}.md`]: machine(GOOD_STATES) }))).toContain(`"${id}" is a reserved name`);
+});

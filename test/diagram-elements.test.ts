@@ -177,7 +177,7 @@ test("from a Feature level a Machine of another Feature opens that Feature, and 
 
 test("a Drift's Requirement references resolve to an existing Area or section; only a missing one is marked", () => {
   const refs = ["requirements/ui", "requirements/ui#order/Paid", "requirements/ui#General", "requirements/ui#nope", "requirements/nope", "order/Nope"];
-  const drift = { id: "0001", title: "t", body: "", refs, proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, rework: null, notBlocking: [] };
+  const drift = { id: "0001", title: "t", body: "", refs, proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, rework: null };
   const items = detailOfDrift(scene, drift as never).sections[0]?.items ?? [];
   expect(items.map((i) => [i.text, i.ref !== null, i.note])).toEqual([
     ["requirements/ui", true, ""],
@@ -189,12 +189,9 @@ test("a Drift's Requirement references resolve to an existing Area or section; o
   ]);
 });
 
-test("a Drift's details list the Tasks it leaves free after Points at, each with its reason; a Task that is gone says so", () => {
-  const drift = { id: "0001", title: "t", body: "", refs: ["order/Paid"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, rework: null, notBlocking: [{ task: "0012", title: "Refunds", reason: "Only the wording." }, { task: "0013", title: null, reason: "Gone." }] };
-  const headings = detailOfDrift(scene, drift as never).sections.map((s) => s.heading);
-  expect(headings).toEqual(["Points at", "Not blocking"]);
-  const section = detailOfDrift(scene, drift as never).sections[1];
-  expect(section?.items.map((i) => [i.text, i.note])).toEqual([["0012 Refunds", "Only the wording."], ["0013 (no longer exists)", "Gone."]]);
+test("a Drift's details hold only its references: no freed Tasks, whatever an old file named", () => {
+  const drift = { id: "0001", title: "t", body: "", refs: ["order/Paid"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, rework: null };
+  expect(detailOfDrift(scene, drift as never).sections.map((s) => s.heading)).toEqual(["Points at"]);
 });
 
 test("a State of another Machine, reached from a Machine's level, opens that Machine's level with the State selected", () => {

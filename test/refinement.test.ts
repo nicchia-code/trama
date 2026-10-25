@@ -23,6 +23,7 @@ import {
   refineAllClicked,
   refineAllPick,
   refinementEnd,
+  refinementNotes,
   refinementView,
   switchedOff,
   withdraw,
@@ -395,7 +396,7 @@ describe("refinable and view", () => {
   test("the view lists the refinements at work in the order they started, the queue with its reasons and the Refine All entry", () => {
     const state = refineAllClicked(beginRefinement(beginRefinement(enqueue(NO_REFINEMENT, ["c", "d"]), job("b")), job("a")), 4242);
     const waits = new Map([["c", { waiting: "chain" as const, on: "b" }]]);
-    const view = refinementView({ state: { ...state, waiting: ["w"] }, enabled: true, runInProgress: true, waits, count: 2 });
+    const view = refinementView({ state: { ...state, waiting: ["w"] }, enabled: true, runInProgress: true, waits, count: 2, notes: { b: "Reading the order" } });
     expect(view.running).toEqual(["b", "a"]);
     expect(view.queued).toEqual([
       { proposal: "c", waiting: "chain", on: "b" },
@@ -403,13 +404,28 @@ describe("refinable and view", () => {
     ]);
     expect(view.waiting).toEqual(["w"]);
     expect(view.runInProgress).toBe(true);
-    expect(view.note).toBeNull();
+    expect(view.notes).toEqual({ b: "Reading the order" });
     expect(view.refineAll).toEqual({ mode: "cancel", count: 2, blockers: [], since: 4242 });
   });
 
   test("without Refine All in progress the entry is refine, with no instant, and carries its reasons", () => {
-    const view = refinementView({ state: NO_REFINEMENT, enabled: false, runInProgress: false, waits: new Map(), count: 0 });
+    const view = refinementView({ state: NO_REFINEMENT, enabled: false, runInProgress: false, waits: new Map(), count: 0, notes: {} });
     expect(view.refineAll).toEqual({ mode: "refine", count: 0, blockers: [REFINE_ALL_OFF, REFINE_ALL_NONE] });
     expect("since" in view.refineAll).toBe(false);
+  });
+
+  test("the notes of the refinements at work are the latest note of the announcement bound to each Proposal", () => {
+    const at = "2026-10-01T10:00:00.000Z";
+    const notes = refinementNotes(
+      [
+        { kind: "proposal", proposal: "a", notes: [{ at, text: "Reading" }, { at, text: "Rewriting the files" }] },
+        { kind: "proposal", proposal: "b", notes: [] },
+        { kind: "proposal", proposal: "gone", notes: [{ at, text: "Not at work" }] },
+        { kind: "work", proposal: null, notes: [{ at, text: "Importing" }] },
+        { kind: "drift", proposal: "a", notes: [{ at, text: "Not a Proposal's" }] },
+      ],
+      ["a", "b"],
+    );
+    expect(notes).toEqual({ a: "Rewriting the files" });
   });
 });

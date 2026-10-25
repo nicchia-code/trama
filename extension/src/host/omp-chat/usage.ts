@@ -1,4 +1,7 @@
 import { execFile, type ExecFileException } from "node:child_process";
+import { certificateErrorText, isCertificateError } from "../../certificate-errors";
+import { cursorKeyEnv } from "../cursor-api-key";
+import { savedSystemCertificates, systemCertificatesEnv } from "../system-certificates";
 import { parseUsageReport, type UsageReport } from "../../../../src/core/omp-usage";
 import type { ToChatWebview } from "../../omp-chat-protocol";
 import { ompPathVariable } from "../model-lists";
@@ -26,9 +29,10 @@ const USAGE_TIMEOUT_MS = 30_000;
 const USAGE_MAX_BUFFER = 16 * 1024 * 1024;
 const UNREADABLE = "omp usage did not return a valid report";
 
-/** The reason a run of `omp usage --json` failed, in English as the dialog shows it. */
-function failureReason(error: ExecFileException, program: string, timeoutMs: number): string {
+/** The reason a run of `omp usage --json` failed, in English as the dialog shows it; the certificate error text, for the mode `systemCertificates`, when its error output (`stderr`, read only for this test) says omp could not verify a certificate. */
+function failureReason(error: ExecFileException, program: string, timeoutMs: number, stderr: string, systemCertificates: boolean): string {
   if (error.code === "ENOENT") return `omp not found at ${program}`;
+  if (isCertificateError(stderr)) return certificateErrorText(systemCertificates);
   if (error.code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" && error.killed === true) return `omp did not answer within ${timeoutMs / 1000} s`;
   if (typeof error.code === "number") return `omp exited with code ${error.code}`;
   return error.message;
@@ -56,8 +60,9 @@ export function ompUsageRunner(deps: UsageRunnerDeps, timeoutMs = USAGE_TIMEOUT_
     if (program === undefined) throw new Error(`omp not found at ${wanted === "" ? "the editor PATH" : wanted}`);
     const cwd = deps.folder();
     const { promise, resolve, reject } = Promise.withResolvers<string>();
-    const options = { timeout: timeoutMs, maxBuffer: USAGE_MAX_BUFFER, env: { ...env, PATH: ompPathVariable(program, env) }, ...(cwd === undefined ? {} : { cwd }) };
-    execFile(program, ["usage", "--json"], options, (error, stdout) => (error === null ? resolve(stdout) : reject(new Error(failureReason(error, program, timeoutMs)))));
+    const systemCertificates = savedSystemCertificates();
+    const options = { timeout: timeoutMs, maxBuffer: USAGE_MAX_BUFFER, env: { ...env, ...cursorKeyEnv(), ...systemCertificatesEnv(systemCertificates), PATH: ompPathVariable(program, env) }, ...(cwd === undefined ? {} : { cwd }) };
+    execFile(program, ["usage", "--json"], options, (error, stdout, stderr) => (error === null ? resolve(stdout) : reject(new Error(failureReason(error, program, timeoutMs, String(stderr), systemCertificates)))));
     return promise;
   };
 }

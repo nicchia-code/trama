@@ -18,7 +18,6 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   title: "Returns",
   body: "",
   kind: "change",
-  nonBlocking: false,
   prepared: false,
   resolves: [],
   requires: [],
@@ -38,7 +37,7 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   specsChange: { entries: [], notesBefore: null }, scope: [],
   ...over,
 });
-const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", created: null, job: null, prepared: null, title: "Code refunds late", body: "line one\n\nline two\nline three", previous: [], origin: [], task: null, unifies: [], unifiedInto: null, refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, notBlocking: [], ...over });
+const drift = (over: Partial<DriftView> = {}): DriftView => ({ id: "0003", created: null, job: null, prepared: null, title: "Code refunds late", body: "line one\n\nline two\nline three", previous: [], origin: [], task: null, unifies: [], unifiedInto: null, refs: ["order/Shipped"], proposal: null, sides: null, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, ...over });
 const task = (over: Partial<TaskView> = {}): TaskView => ({ id: "0012", created: null, title: "Refunds", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTag: null, agent: false, progress: null, finished: null, unchanged: null, blockedBy: [], heldByDrift: false, file: "tasks/0012-refunds.md", images: [], ...over });
 const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], resolutionDrifts: [], drifts: [], unifiedDrifts: [], finishingDrifts: [], finishingProposals: [], finishingTasks: [], tasks: [], tasksSinceScan: 0, announcements: [], numbers: { proposal: {}, task: {}, drift: {} }, specs: EMPTY_SPECS, specsPresent: false, history: [], historyFaults: [], ...over });
 const file = (change: FileChange["change"], details: string[], path = "checkout/order.md"): FileChange => ({ path, change, details });
@@ -59,7 +58,7 @@ test("groups the snapshot into card columns: Backlog holds the Proposals and the
 });
 
 test("a handed-over resolution replaces only its listed open Drift cards", () => {
-  const resolution = proposal({ id: "res", created: "2026-10-02T10:00:00.000Z", kind: "resolution", resolves: [{ drift: "0003", title: "Code refunds late", previous: [], unifies: [], decision: "Closed, nothing changes", note: null, notBlocking: [] }] });
+  const resolution = proposal({ id: "res", created: "2026-10-02T10:00:00.000Z", kind: "resolution", resolves: [{ drift: "0003", title: "Code refunds late", previous: [], unifies: [], decision: "Closed, nothing changes", note: null }] });
   const board = buildBoard(snapshot({ proposals: [proposal({ id: "before", created: "2026-10-01T10:00:00.000Z" }), resolution], drifts: [drift({ id: "0003", created: "2026-09-30T10:00:00.000Z" }), drift({ id: "0004", created: "2026-10-03T10:00:00.000Z" })] }));
   const cards = board[0]!.cards;
   expect(cards[1]).toMatchObject({ kind: "proposal", resolution: true, heading: "Resolution Proposal res", resolves: [{ drift: "0003" }] });
@@ -184,7 +183,7 @@ test("every written tooltip and disabling reason of a Proposal stays within abou
     const lines = text.split("\n");
     return lines.length > 2 ? [lines[0], lines[lines.length - 1]].join(" ") : text;
   };
-  const problems = proposal({ stale: ["a.md"], unbased: ["b.md"], errors: [{ file: "a.md", line: 1, message: "bad" }], unfixable: ["Drift D3 no longer exists"], kind: "import", nonBlocking: true });
+  const problems = proposal({ stale: ["a.md"], unbased: ["b.md"], errors: [{ file: "a.md", line: 1, message: "bad" }], unfixable: ["Drift D3 no longer exists"], kind: "import" });
   for (const badge of proposalBadges(problems)) expect(outside(badge.tooltip).length).toBeLessThanOrEqual(LIMIT);
   for (const part of [{ stale: ["a.md"] }, { unbased: ["a.md"] }, { errors: [{ file: "a.md", line: 1, message: "bad" }] }, { unfixable: ["Drift D3 no longer exists"] }]) {
     const text = approveBlocker(proposal(part));
@@ -196,7 +195,7 @@ test("every written tooltip and disabling reason of a Proposal stays within abou
 });
 
 /** A refinement picture with Refine All idle and nothing at work, changed by `patch`. */
-const refinementOf = (patch: Partial<RefinementView> = {}): RefinementView => ({ enabled: true, running: [], queued: [], refineAll: { mode: "refine", count: 0, blockers: [] }, note: null, runInProgress: false, waiting: [], ...patch });
+const refinementOf = (patch: Partial<RefinementView> = {}): RefinementView => ({ enabled: true, running: [], queued: [], refineAll: { mode: "refine", count: 0, blockers: [] }, notes: {}, runInProgress: false, waiting: [], ...patch });
 
 test("the refinement: off keeps the stale Proposal as it was; on, it refines before Approve", () => {
   const stale = proposal({ id: "0007", stale: ["a.md"] });
@@ -217,12 +216,14 @@ test("the refinement: off keeps the stale Proposal as it was; on, it refines bef
 
 test("the refinement: running and queued Proposals wait, a stopped one resumes on Approve", () => {
   const stale = proposal({ id: "0007", stale: ["a.md"] });
-  const running = proposalCard(stale, NUMBERS, new Map(), [], NO_MODELS, undefined, null, refinementOf({ running: ["0007"], note: "Reading the order" }), true);
+  const running = proposalCard(stale, NUMBERS, new Map(), [], NO_MODELS, undefined, null, refinementOf({ running: ["0007", "0009"], notes: { "0007": "Reading the order" } }), true);
   expect(running.refine).toBe("running");
   expect(running.blocker).toBe(REFINING_REASON);
   expect(running.rejectBlocker).toBe(REFINING_REASON);
   expect(running.refinePhase).toBe("Waiting for your answers");
   expect(running.refineNote).toBe("Reading the order");
+  // Each refinement at work shows its own note, and none when its agent declared none.
+  expect(proposalCard(proposal({ id: "0009", stale: ["a.md"] }), NUMBERS, new Map(), [], NO_MODELS, undefined, null, refinementOf({ running: ["0007", "0009"], notes: { "0007": "Reading the order" } }), true).refineNote).toBeNull();
   expect(running.badges[0]).toMatchObject({ label: "refining", tone: "info", tooltip: "The agent is refining this Proposal on the current Model" });
   const queued = proposalCard(proposal({ id: "0008", stale: ["a.md"] }), NUMBERS, new Map(), [], NO_MODELS, undefined, null, refinementOf({ running: ["0007"], queued: [{ proposal: "0008", waiting: "chain", on: "0007" }] }));
   expect(queued.refine).toBe("queued");
@@ -318,7 +319,7 @@ test("a Task waiting for a fix Task stays in Active with the fix Task, and no ca
 });
 
 test("the number of cards that wait for a decision counts the Backlog cards (Proposals and red Drift cards), not Active, or the Drifts a delivered resolution lists", () => {
-  const resolution = proposal({ id: "res", created: "2026-10-02T10:00:00.000Z", kind: "resolution", resolves: [{ drift: "0005", title: "Code refunds late", previous: [], unifies: [], decision: "Closed, nothing changes", note: null, notBlocking: [] }] });
+  const resolution = proposal({ id: "res", created: "2026-10-02T10:00:00.000Z", kind: "resolution", resolves: [{ drift: "0005", title: "Code refunds late", previous: [], unifies: [], decision: "Closed, nothing changes", note: null }] });
   const fix: TaskView["blockedBy"] = [{ kind: "fix", task: "0009", title: "Fix refunds", drift: "0004", driftTitle: "Refunds differ" }];
   const snap = snapshot({
     proposals: [proposal({ id: "0007", created: "2026-10-01T10:00:00.000Z" }), resolution],
@@ -464,7 +465,7 @@ test("a resolution's card has one row per Drift, written by number, with the dec
     snapshot({
       numbers: NUMBERS,
       proposals: [
-        proposal({ id: "0007", kind: "resolution", resolves: [{ drift: "0003", title: "Late refunds", previous: [], unifies: [], decision: "Code fixed with option Fix the code", note: "do it today", notBlocking: [] }, { drift: "0044", title: "Old", previous: [], unifies: [], decision: "(already resolved)", note: null, notBlocking: [] }] }),
+        proposal({ id: "0007", kind: "resolution", resolves: [{ drift: "0003", title: "Late refunds", previous: [], unifies: [], decision: "Code fixed with option Fix the code", note: "do it today" }, { drift: "0044", title: "Old", previous: [], unifies: [], decision: "(already resolved)", note: null }] }),
         proposal({ id: "0009" }),
       ],
     }),
@@ -481,7 +482,7 @@ test("a resolution's card has one row per Drift, written by number, with the dec
 test("an open resolution's rows list its Drifts, and no card is made for those Drifts", () => {
   const cards = buildBoard(
     snapshot({
-      proposals: [proposal({ id: "0007", kind: "resolution", resolves: [{ drift: "0003", title: "Late refunds", previous: [], unifies: [], decision: "Code fixed with option Fix the code", note: null, notBlocking: [] }, { drift: "0044", title: "Old", previous: [], unifies: [], decision: "(already resolved)", note: null, notBlocking: [] }] })],
+      proposals: [proposal({ id: "0007", kind: "resolution", resolves: [{ drift: "0003", title: "Late refunds", previous: [], unifies: [], decision: "Code fixed with option Fix the code", note: null }, { drift: "0044", title: "Old", previous: [], unifies: [], decision: "(already resolved)", note: null }] })],
       drifts: [drift({ id: "0003" })],
     }),
   )[0]?.cards ?? [];
@@ -517,7 +518,7 @@ test("blockers, requirements and the reasons that name them use the numbers, whi
   expect(blockedReason([], [])).toBeNull();
 
   const requires: ProposalView["requires"] = [{ id: "0007", title: "Base", status: "open" }];
-  const base = { stale: [], unbased: [], errors: [], unfixable: [], requires, nonBlocking: false };
+  const base = { stale: [], unbased: [], errors: [], unfixable: [], requires };
   expect(proposalBadges({ ...base, kind: "change" }, NUMBERS)[0]).toMatchObject({ label: "requires P1", tooltip: 'Proposal P1 "Base" is not approved yet' });
   expect(approveBlocker(base, NUMBERS)).toContain('Proposal P1 "Base" is not approved yet');
 });
@@ -608,13 +609,6 @@ test("the Resolving badge names an agent working on a Drift, and the Drift stays
   const board = buildBoard(snapshot({ drifts: [drift({ id: "0003" })] }), { blocker: null, drifts: {}, resolving: ["0003"] });
   const card = board.flatMap((c) => c.cards).find((c): c is DriftCard => c.kind === "drift");
   expect(card?.resolving).toBe(true);
-});
-
-test("a Drift's card names the Tasks it leaves free by number, and leaves out those that no longer exist", () => {
-  const free = drift({ id: "0003", notBlocking: [{ task: "0012", title: "Refunds", reason: "Only the wording." }, { task: "0013", title: null, reason: "Gone." }] });
-  const numbers = { proposal: {}, task: { "0012": "T2" }, drift: {} };
-  const [card] = buildBoard(snapshot({ drifts: [free], numbers }))[0]?.cards ?? [];
-  expect(card).toMatchObject({ kind: "drift", notBlocking: [{ name: { text: "T2", isNumber: true }, reason: "Only the wording." }] });
 });
 
 test("a card has a View button only for the tab that would show a step of its focus, on the current picture", () => {

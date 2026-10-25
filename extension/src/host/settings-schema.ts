@@ -68,7 +68,7 @@ export interface SettingGroup {
  * `Advanced`, which is cut into the subgroups `Appearance`, `Drifts`, `Agents` and `omp Chat`. Every key in the manifest must appear once.
  */
 export const SETTING_GROUPS: readonly SettingGroup[] = [
-  { title: "omp", keys: ["trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles", "trama.autoExit", "trama.language"] },
+  { title: "omp", keys: ["trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles", "trama.autoExit", "trama.language", "trama.systemCertificates"] },
   { title: "Models", keys: ["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"] },
   { title: "Project", keys: ["trama.skillsDir"] },
   {
@@ -76,7 +76,7 @@ export const SETTING_GROUPS: readonly SettingGroup[] = [
     keys: [],
     subgroups: [
       { title: "Appearance", keys: ["trama.theme"] },
-      { title: "Drifts", keys: ["trama.driftBlocker", "trama.advisorScanner", "trama.asyncDriftResolver"] },
+      { title: "Drifts", keys: ["trama.advisorScanner", "trama.asyncDriftResolver"] },
       { title: "Agents", keys: ["trama.parallelExecution", "trama.subagentsContextSharing", "trama.autoUpdateStaleProposals"] },
       { title: "omp Chat", keys: ["trama.ompChat", "trama.ompChatApproval", "trama.ompChatIntentTracing"] },
     ],

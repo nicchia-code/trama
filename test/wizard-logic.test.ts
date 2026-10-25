@@ -106,12 +106,12 @@ test("Next of Path needs a path, Next of Models a valid number of sub-agents, Ne
 
 test("Skip brings the keys of Advanced back to the values the step started with, then goes to the summary", () => {
   let state: WizardState = { ...open("settings", { "trama.theme": { user: "dark" } }), step: "Advanced" };
-  state = setValue(setValue(state, "trama.theme", "light"), "trama.driftBlocker", true);
+  state = setValue(setValue(state, "trama.theme", "light"), "trama.advisorScanner", false);
   state = setValue(state, "trama.scan", "gpt-5");
   const skipped = skipAdvanced(state);
   expect(skipped.step).toBe("Summary");
   expect(skipped.values["trama.theme"]).toBe("dark");
-  expect(skipped.values["trama.driftBlocker"]).toBeUndefined();
+  expect(skipped.values["trama.advisorScanner"]).toBeUndefined();
   expect(skipped.values["trama.scan"]).toBe("gpt-5");
 });
 
@@ -125,7 +125,7 @@ test("a new folder to initialize forgets the exclusions and the folders read", (
 });
 
 test("the keys of each step are always shown: the omp step asks the language, never Auto Exit", () => {
-  expect(STEP_KEYS.omp).toEqual(["trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles", "trama.language"]);
+  expect(STEP_KEYS.omp).toEqual(["trama.ompPath", "trama.terminalLocation", "trama.ignoreInstructionFiles", "trama.language", "trama.systemCertificates"]);
   expect(STEP_KEYS.Models).toEqual(["trama.analysis", "trama.scan", "trama.execution", "trama.maxParallelAgents"]);
   expect(STEP_KEYS.Project).toEqual(["trama.skillsDir"]);
   expect(STEP_KEYS.Advanced?.[0]).toBe("trama.theme");
@@ -138,13 +138,13 @@ test("Advanced has four subgroups with their subtitles, in order, from the schem
   expect(advancedSubgroups(schema)).toEqual((advanced?.subgroups ?? []).map((sub) => ({ title: sub.title, keys: [...sub.keys] })));
   expect(advancedSubgroups(schema).map((group) => [group.title, group.keys])).toEqual([
     ["Appearance", ["trama.theme"]],
-    ["Drifts", ["trama.driftBlocker", "trama.advisorScanner", "trama.asyncDriftResolver"]],
+    ["Drifts", ["trama.advisorScanner", "trama.asyncDriftResolver"]],
     ["Agents", ["trama.parallelExecution", "trama.subagentsContextSharing", "trama.autoUpdateStaleProposals"]],
     ["omp Chat", ["trama.ompChat", "trama.ompChatApproval", "trama.ompChatIntentTracing"]],
   ]);
   expect(STEP_KEYS.Advanced).toEqual(advancedSubgroups(schema).flatMap((group) => group.keys));
   const rows = summaryRows(schema, open("settings"), {}, []).filter((row) => row.step === "Advanced");
-  expect(rows.map((row) => row.group)).toEqual(["Appearance", "Drifts", "Drifts", "Drifts", "Agents", "Agents", "Agents", "omp Chat", "omp Chat", "omp Chat"]);
+  expect(rows.map((row) => row.group)).toEqual(["Appearance", "Drifts", "Drifts", "Agents", "Agents", "Agents", "omp Chat", "omp Chat", "omp Chat"]);
   expect(summaryRows(schema, open("settings"), {}, []).filter((row) => row.step !== "Advanced").every((row) => row.group === null)).toBe(true);
 });
 
@@ -214,12 +214,14 @@ test("the keys of omp are always in the summary and the writes", () => {
 
 test("the writes are the changed keys in the order of the steps; a repeated confirmation writes only what still differs", () => {
   let state = open("settings");
-  state = setValue(state, "trama.driftBlocker", true);
+  state = setValue(state, "trama.advisorScanner", false);
   state = setValue(state, "trama.skillsDir", ".claude/skills");
   state = setValue(state, "trama.scan", "gpt-5");
-  expect(changedWrites(schema, state, {}).map((w) => w.key)).toEqual(["trama.scan", "trama.skillsDir", "trama.driftBlocker"]);
+  expect(changedWrites(schema, state, {}).map((w) => w.key)).toEqual(["trama.scan", "trama.skillsDir", "trama.advisorScanner"]);
   const afterFailure = { "trama.scan": { user: "gpt-5" }, "trama.skillsDir": { user: ".claude/skills" } } satisfies Record<string, SettingsValues>;
-  expect(changedWrites(schema, state, afterFailure)).toEqual([{ key: "trama.driftBlocker", value: true }]);
+  expect(changedWrites(schema, state, afterFailure)).toEqual([{ key: "trama.advisorScanner", value: false }]);
+  // Ticking On is the default: nothing to write.
+  expect(changedWrites(schema, setValue(open("settings"), "trama.advisorScanner", true), {})).toEqual([]);
 });
 
 test("the summary shows the path, the folder only with several folders, and the excluded folders", () => {

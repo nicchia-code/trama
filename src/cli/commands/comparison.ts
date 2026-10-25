@@ -15,11 +15,10 @@ const create = defineCommand({
   mode: "immediate",
   summary: "Announce a comparison of a Machine and print its briefing.",
   description:
-    "Announces the comparison and prints its ID first, then the references to compare (`refs` limits them to those of the Machine; without it, the whole Machine), their States, Events and Transitions, the Requirements that apply, the analysis, the open Tasks and Drifts on the same thing, and the resolved or dismissed Drifts on the same references. `candidates: true` adds the Tasks a Drift on each reference would block. Keep the ID: `comparison move` takes it. Without `TRAMA_TERMINAL` the briefing is the same but no announcement, and so no ghost, is made: the comparison data stay in a file of their own that `comparison move <id> delivered` deletes.",
+    "Announces the comparison and prints its ID first, then the references to compare (`refs` limits them to those of the Machine; without it, the whole Machine), their States, Events and Transitions, the Requirements that apply, the analysis, the open Tasks and Drifts on the same thing, and the resolved or dismissed Drifts on the same references. Keep the ID: `comparison move` takes it. Without `TRAMA_TERMINAL` the briefing is the same but no announcement, and so no ghost, is made: the comparison data stay in a file of their own that `comparison move <id> delivered` deletes.",
   positionals: [{ name: "machine", description: "The Machine to compare." }],
   input: z.strictObject({
     refs: z.array(z.string().min(1)).optional().describe("Only these references, which must be of the Machine."),
-    candidates: z.boolean().optional().describe("Add the Tasks a Drift on each reference would block."),
   }),
   output: z.object({
     announcement: z.string(),
@@ -29,14 +28,13 @@ const create = defineCommand({
     openTasks: z.array(cardLine.extend({ column: z.string() })),
     openDrifts: z.array(cardLine.extend({ refs: z.array(z.string()) })),
     closedDrifts: z.array(cardLine.extend({ resolution: z.string().nullable(), note: z.string().nullable() })),
-    candidates: z.record(z.string(), z.array(cardLine)).nullable(),
   }),
-  example: { refs: ["order/Paid"], candidates: true },
+  example: { refs: ["order/Paid"] },
   exampleArgs: ["order"],
   effects: { writes: true, activity: true },
   run(ctx, input, [machine]) {
     const project = ctx.project();
-    const b = briefing(project, machine as string, input.refs ?? [], input.candidates === true);
+    const b = briefing(project, machine as string, input.refs ?? []);
     const code = codeFingerprint(project.root);
     const texts = code === null ? {} : briefedTexts(b);
     // Without a terminal no ghost is made: a ghost with no terminal would be withdrawn as an orphan, and nothing could say whose it is.
@@ -55,7 +53,7 @@ const move = defineCommand({
   mode: "immediate",
   summary: "Deliver a comparison: file its Tasks and Drifts in one go.",
   description:
-    "The input is what the comparison found: an optional `design` (the Proposal every Task is linked to), `tasks` (each `title`, `refs`, `body`, optional `technical`) and `drifts` (each `title`, `refs`, `happens`, `should`, `where`, `options` as a list of `{title, text}`, and optional `previous`, `proposal`, `notBlocking` as a list of `{task, reason}`); both lists may be empty. Every card follows the rules of `task new` and `drift new`. All cards are checked before any is written: if one is not valid nothing is written and every problem is listed per card. Otherwise the cards are created in order, the comparison is delivered and it is recorded as compared on this code.",
+    "The input is what the comparison found: an optional `design` (the Proposal every Task is linked to), `tasks` (each `title`, `refs`, `body`, optional `technical`) and `drifts` (each `title`, `refs`, `happens`, `should`, `where`, `options` as a list of `{title, text}`, and optional `previous`, `proposal`); both lists may be empty. Every card follows the rules of `task new` and `drift new`. All cards are checked before any is written: if one is not valid nothing is written and every problem is listed per card. Otherwise the cards are created in order, the comparison is delivered and it is recorded as compared on this code.",
   positionals: [{ name: "id", description: "The comparison: the ID printed by `comparison new`." }, { name: "state", description: "Where the comparison goes.", choices: ["delivered"] }],
   input: z.strictObject({
     design: z.string().optional().describe("The Proposal every Task is linked to."),

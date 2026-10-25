@@ -33,6 +33,7 @@ export type GeneralEffect =
   | "discard"
   | "withdraw"
   | "save"
+  | "unsave"
   | "deliver"
   | "wait"
   | "cancel"
@@ -94,7 +95,7 @@ function transition({ phase, session }: GeneralMachine, event: GeneralEvent): Ge
       if (event.type === "stop") return stay({ phase, session }, "cancel");
       if (event.type === "clear") return to("starting", false, "stop", "discard", "withdraw", "cleared", "start");
       if (event.type === "exited") return to("stopped", session, "withdraw", "exited");
-      if (event.type === "settings" && !event.usable) return event.inTurn ? to("kept", session) : to("absent", false, "stop", "discard", "withdraw");
+      if (event.type === "settings" && !event.usable) return event.inTurn ? to("kept", session, "unsave") : to("absent", false, "stop", "discard", "withdraw");
       if (event.type === "windowClosed") return to("waiting", true, "stop", "withdraw");
       return stay({ phase, session });
     case "stopped":
@@ -116,7 +117,7 @@ function transition({ phase, session }: GeneralMachine, event: GeneralEvent): Ge
       if (event.type === "stop") return stay({ phase, session }, "cancel");
       if (event.type === "close") return to("absent", false, "stop", "discard", "withdraw");
       if (event.type === "exited") return to("absent", false, "withdraw", "discard");
-      if (event.type === "settings" && event.usable) return to("starting", false, "stop", "discard", "withdraw", "cleared", "start");
+      if (event.type === "settings" && event.usable) return to("ready", session, "save");
       if (event.type === "windowClosed") return to("absent", false, "stop", "discard", "withdraw");
       return stay({ phase, session });
   }

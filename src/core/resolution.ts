@@ -3,7 +3,7 @@ import { joinReasons, RUN_IN_PROGRESS } from "./design";
 import { copyProposalFiles, type DriftDecision, type DriftDecisionKind, discardProposal, getProposal, listProposals, newProposal, type Proposal, requireEditable, resolutionHolding, save, submitProposal, touch, withProposalLock } from "./proposals";
 import { cardName } from "./short-numbers";
 import type { Project } from "./store";
-import { chosenOption, driftOptions, fixCodeRefusal, followedDrifts, type FreedTask, freedTasks, getDrift, listDrifts, listTasks, unifiedDrifts } from "./work";
+import { chosenOption, driftOptions, fixCodeRefusal, followedDrifts, getDrift, listDrifts, unifiedDrifts } from "./work";
 
 /**
  * Records, replaces or (`remove`) removes the decision on `driftId` in a resolution Proposal, a Draft or an open one;
@@ -206,18 +206,15 @@ export interface ResolvedDrift {
   unifies: { id: string; title: string }[];
   decision: string;
   note: string | null;
-  /** The Tasks the Drift leaves free, each with its reason: the card shows them under the row. */
-  notBlocking: FreedTask[];
 }
 
 /** The Drifts a resolution lists, in creation order, read from the files at each call. Empty for any other Proposal. */
 export function resolvedDrifts(p: Project, proposal: Proposal): ResolvedDrift[] {
-  const tasks = listTasks(p);
   return listDrifts(p).flatMap((drift) => {
     const d = proposal.data.drifts.find((x) => x.drift === drift.id);
     if (!d) return [];
     const already = drift.data.status === "resolved" && drift.data.resolvedBy !== proposal.id;
     const option = d.option === undefined ? undefined : driftOptions(drift)[d.option - 1]?.title;
-    return [{ drift: drift.id, title: drift.title, previous: followedDrifts(p, drift), unifies: unifiedDrifts(p, drift), decision: already ? "(already resolved)" : decisionText(d.decision, option), note: already ? null : (d.note ?? null), notBlocking: freedTasks(drift, tasks) }];
+    return [{ drift: drift.id, title: drift.title, previous: followedDrifts(p, drift), unifies: unifiedDrifts(p, drift), decision: already ? "(already resolved)" : decisionText(d.decision, option), note: already ? null : (d.note ?? null) }];
   });
 }

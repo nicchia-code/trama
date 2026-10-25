@@ -15,8 +15,8 @@ test("accepts every well-formed message of the contract", () => {
   expect(ok({ type: "ready" })).toEqual({ type: "ready" });
   expect(ok({ type: "writeDesignRequest" })).toEqual({ type: "writeDesignRequest" });
   expect(parseToHost({ type: "openQuickTask" })).toEqual({ ok: false, reason: 'unknown message type "openQuickTask"' });
-  expect(parseToHost({ type: "launch", action: { kind: "scan", feature: "checkout" } })).toEqual({ ok: false, reason: "scan takes no Feature" });
-  expect(ok({ type: "launch", action: { kind: "scan" } })).toEqual({ type: "launch", action: { kind: "scan" } });
+  expect(parseToHost({ type: "launch", action: { kind: "scan" } })).toEqual({ ok: false, reason: 'unknown action "scan"' });
+  expect(parseToHost({ type: "launch", action: { kind: "scan", feature: "checkout" } })).toEqual({ ok: false, reason: 'unknown action "scan"' });
   expect(ok({ type: "launch", action: { kind: "implement", task: "0003" } })).toEqual({ type: "launch", action: { kind: "implement", task: "0003" } });
   expect(ok({ type: "launch", action: { kind: "implement-all" } })).toEqual({ type: "launch", action: { kind: "implement-all" } });
   expect(parseToHost({ type: "launch", action: { kind: "resolve-drifts" } })).toEqual({ ok: false, reason: "resolve-drifts needs a valid Drift ID" });
@@ -119,6 +119,56 @@ test("ompLogin is accepted only with a provider of the fixed list and an omp pat
   expect(OMP_LOGIN_PROVIDERS.map((provider) => provider.id)).toEqual(["openai-codex", "anthropic", "github-copilot", "google-gemini-cli", "google-antigravity", "cursor", "xai-oauth"]);
 });
 
+test("ompLogout is accepted only with a provider of the fixed list and an omp path that is text, when there is one", () => {
+  for (const { id } of OMP_LOGIN_PROVIDERS) expect(ok({ type: "ompLogout", provider: id })).toEqual({ type: "ompLogout", provider: id });
+  expect(ok({ type: "ompLogout", provider: "anthropic", ompPath: "/opt/omp" })).toEqual({ type: "ompLogout", provider: "anthropic", ompPath: "/opt/omp" });
+  expect(ok({ type: "ompLogout", provider: "anthropic", ompPath: "" })).toEqual({ type: "ompLogout", provider: "anthropic", ompPath: "" });
+  for (const provider of ["openai", "xai", "ANTHROPIC", "anthropic; rm -rf /", "", undefined, 3, null, "constructor"]) expect(parseToHost({ type: "ompLogout", provider }).ok).toBe(false);
+  for (const ompPath of [3, null, ["x"]]) expect(parseToHost({ type: "ompLogout", provider: "anthropic", ompPath }).ok).toBe(false);
+  // Nothing else survives: the id is the one of the list, whatever else the message carries.
+  expect(ok({ type: "ompLogout", provider: "anthropic", extra: "x" })).toEqual({ type: "ompLogout", provider: "anthropic" });
+});
+
+test("setCursorApiKey and removeCursorApiKey carry at most an omp path as text, and no other field survives, never a key", () => {
+  for (const type of ["setCursorApiKey", "removeCursorApiKey"] as const) {
+    expect(ok({ type })).toEqual({ type });
+    expect(ok({ type, ompPath: "/opt/omp" })).toEqual({ type, ompPath: "/opt/omp" });
+    expect(ok({ type, ompPath: "" })).toEqual({ type, ompPath: "" });
+    // A key (or any other field) sent along is dropped: the message has no field for it.
+    expect(ok({ type, ompPath: "/opt/omp", key: "sk-secret", apiKey: "sk-secret", value: "sk-secret" })).toEqual({ type, ompPath: "/opt/omp" });
+    expect(ok({ type, key: "sk-secret" })).toEqual({ type });
+    for (const ompPath of [3, null, ["x"], { path: "x" }, "x".repeat(100_000)]) expect(parseToHost({ type, ompPath }).ok).toBe(false);
+  }
+});
+
+test("agentCheckWanted, installOmp and ompLogin carry the wizard step's systemCertificates only as a boolean, and the two requests of the state carry no data", () => {
+  for (const systemCertificates of [true, false]) {
+    expect(ok({ type: "agentCheckWanted", ompPath: "/bin/omp", systemCertificates })).toEqual({ type: "agentCheckWanted", ompPath: "/bin/omp", systemCertificates });
+    expect(ok({ type: "installOmp", systemCertificates })).toEqual({ type: "installOmp", systemCertificates });
+    expect(ok({ type: "ompLogin", provider: "anthropic", systemCertificates })).toEqual({ type: "ompLogin", provider: "anthropic", systemCertificates });
+    expect(ok({ type: "ompLogin", provider: "anthropic", ompPath: "/opt/omp", systemCertificates })).toEqual({ type: "ompLogin", provider: "anthropic", ompPath: "/opt/omp", systemCertificates });
+  }
+  for (const systemCertificates of ["true", 1, null, {}, []]) {
+    expect(parseToHost({ type: "agentCheckWanted", ompPath: "", systemCertificates }).ok).toBe(false);
+    expect(parseToHost({ type: "installOmp", systemCertificates }).ok).toBe(false);
+    expect(parseToHost({ type: "ompLogin", provider: "anthropic", systemCertificates }).ok).toBe(false);
+  }
+  expect(ok({ type: "installOmp" })).toEqual({ type: "installOmp" });
+  expect(ok({ type: "agentCheckWanted", ompPath: "" })).toEqual({ type: "agentCheckWanted", ompPath: "" });
+  // Neither request carries a field that could choose the sources, the path or the processes: whatever else is sent is dropped.
+  for (const type of ["refreshSystemCertificates", "systemCertificatesExport"] as const) {
+    expect(ok({ type })).toEqual({ type });
+    expect(ok({ type, path: "/tmp/x.pem", source: "login", systemCertificates: true })).toEqual({ type });
+  }
+});
+
+test("trama.systemCertificates is a boolean setting of the manifest: setSetting takes a boolean only", () => {
+  const manifest = JSON.parse(readFileSync(join(import.meta.dir, "../extension/package.json"), "utf8"));
+  const schema = settingsSchema(manifest);
+  expect(parseToHost({ type: "setSetting", key: "trama.systemCertificates", value: true }, schema)).toEqual({ ok: true, message: { type: "setSetting", key: "trama.systemCertificates", value: true } });
+  for (const value of ["true", 1, null]) expect(parseToHost({ type: "setSetting", key: "trama.systemCertificates", value }, schema).ok).toBe(false);
+});
+
 test("the messages of the setup wizard are checked: the choice, the agent, the folder and the paths", () => {
   expect(ok({ type: "openGuidedSetup", choice: "import" })).toEqual({ type: "openGuidedSetup", choice: "import" });
   expect(ok({ type: "openGuidedSetup", choice: "scratch" })).toEqual({ type: "openGuidedSetup", choice: "scratch" });
@@ -163,6 +213,9 @@ test("confirmSetup carries the mode, the path, the folder, only wizard keys that
   expect(parse({ mode: "other", choice: "import" }).ok).toBe(false);
   // The language is a wizard key now (its step asks it), so it is accepted; autoExit stays out of the wizard, an unknown key and a value that does not conform are refused.
   expect(parse({ mode: "settings", values: [{ key: "trama.language", value: "Italian" }] }).ok).toBe(true);
+  // System Certificates is a key of the omp step: a boolean is accepted, anything else is refused.
+  expect(parse({ mode: "settings", values: [{ key: "trama.systemCertificates", value: true }] }).ok).toBe(true);
+  expect(parse({ mode: "settings", values: [{ key: "trama.systemCertificates", value: "yes" }] }).ok).toBe(false);
   expect(parse({ mode: "settings", values: [{ key: "trama.autoExit", value: true }] }).ok).toBe(false);
   expect(parse({ mode: "settings", values: [{ key: "trama.nope", value: 1 }] }).ok).toBe(false);
   expect(parse({ mode: "settings", values: [{ key: "trama.maxParallelAgents", value: 0 }] }).ok).toBe(false);

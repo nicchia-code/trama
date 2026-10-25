@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { startCursorApiKey } from "../extension/src/host/cursor-api-key";
 
 // A minimal editor: one webview panel that records what it is sent, user settings in memory, and the modal dialog answers.
 const messages: Record<string, unknown>[] = [];
@@ -11,7 +12,13 @@ let failOn: string | undefined;
 let workspaceFolders: { name: string; uri: { fsPath: string; scheme: string } }[] = [];
 let receive: ((raw: unknown) => void) | undefined;
 let modalAnswer: string | undefined;
+/** Called with every message the panel is sent, so a test can wait for one instead of guessing a delay. */
+const postListeners = new Set<(message: Record<string, unknown>) => void>();
 const modals: string[] = [];
+/** What the editor showed outside the panel: information and error messages, and the modal dialogs with their options and buttons. */
+const infos: string[] = [];
+const errors: string[] = [];
+const warnings: { message: string; options: unknown; items: string[] }[] = [];
 const opened: { path: string; options: unknown }[] = [];
 /** Every login terminal the controller opened: what it ran and the callback that tells its command ended. */
 const logins: { program: string; provider: { id: string; name: string }; finish: () => void }[] = [];
@@ -33,16 +40,18 @@ mock.module("vscode", () => ({
         },
         postMessage: async (message: Record<string, unknown>) => {
           messages.push(message);
+          for (const listener of [...postListeners]) listener(message);
           return true;
         },
       },
     }),
-    showInformationMessage: async () => undefined,
-    showWarningMessage: async (message: string) => {
+    showInformationMessage: async (message: string) => void infos.push(message),
+    showWarningMessage: async (message: string, options?: unknown, ...items: string[]) => {
       modals.push(message);
+      warnings.push({ message, options, items });
       return modalAnswer;
     },
-    showErrorMessage: async () => undefined,
+    showErrorMessage: async (message: string) => void errors.push(message),
     showTextDocument: async (document: { fsPath: string }, options: unknown) => void opened.push({ path: document.fsPath, options }),
   },
   workspace: {
@@ -106,6 +115,9 @@ beforeEach(() => {
   writes.length = 0;
   launched.length = 0;
   modals.length = 0;
+  infos.length = 0;
+  errors.length = 0;
+  warnings.length = 0;
   opened.length = 0;
   modalAnswer = undefined;
   failOn = undefined;
@@ -196,8 +208,8 @@ test("the developer who declines to overwrite customised skills gets no message,
 });
 
 test("a confirmation of the mode Settings only saves the keys and answers with the result", async () => {
-  await send(confirm({ mode: "settings", choice: undefined, root: undefined, values: [{ key: "trama.driftBlocker", value: true }] }));
-  expect(userSettings.get("driftBlocker")).toBe(true);
+  await send(confirm({ mode: "settings", choice: undefined, root: undefined, values: [{ key: "trama.advisorScanner", value: false }] }));
+  expect(userSettings.get("advisorScanner")).toBe(false);
   expect(existsSync(join(root, ".trama"))).toBe(false);
   expect(launched).toEqual([]);
   expect(results()).toEqual([{ type: "guidedSetupResult", ok: true, error: null }]);
@@ -312,6 +324,176 @@ test("ompLogin without a path takes trama.ompPath, and a provider outside the li
   for (const provider of ["openai", "", 3, undefined]) await send({ type: "ompLogin", provider });
   await send({ type: "ompLogin", provider: "anthropic", ompPath: 3 });
   expect(logins).toHaveLength(1);
+});
+
+/**
+ * An up-to-date omp that lists the models of `models.json` (in its folder) and, asked `auth-broker logout <id>`, appends its arguments and `CURSOR_ACCESS_TOKEN` to `logout-calls`, prints
+ * `logout-stderr` on its error output, replaces `models.json` by `models-after` when the file exists and the exit code is 0, and exits with the code in `logout-exit` (0 by default).
+ */
+function fakeLoggingOutOmp(models: string): { program: string; calls: () => string[]; set: (name: string, text: string) => void } {
+  const program = join(root, "omp");
+  const file = (name: string) => join(root, name);
+  writeFileSync(file("models.json"), models);
+  writeFileSync(
+    program,
+    `#!/bin/sh
+case "$1" in
+  models) cat '${file("models.json")}' ;;
+  update) echo 'Current version: 18.12.6'; echo 'Already up to date' ;;
+  auth-broker)
+    echo "$*|$CURSOR_ACCESS_TOKEN" >> '${file("logout-calls")}'
+    [ -f '${file("logout-stderr")}' ] && cat '${file("logout-stderr")}' >&2
+    code=0
+    [ -f '${file("logout-exit")}' ] && code=$(cat '${file("logout-exit")}')
+    [ "$code" = 0 ] && [ -f '${file("models-after")}' ] && cp '${file("models-after")}' '${file("models.json")}'
+    exit $code ;;
+  *) echo 'omp/18.12.6' ;;
+esac
+`,
+    { mode: 0o755 },
+  );
+  return {
+    program,
+    calls: () => (existsSync(file("logout-calls")) ? readFileSync(file("logout-calls"), "utf8").split("\n").filter((line) => line !== "") : []),
+    set: (name, text) => writeFileSync(file(name), text),
+  };
+}
+
+const ANTHROPIC_ONLY = '{"models":[{"selector":"a/b","provider":"anthropic"},{"selector":"c/d","provider":"cursor"}]}';
+const CURSOR_ONLY = '{"models":[{"selector":"c/d","provider":"cursor"}]}';
+const logoutStates = () => messages.filter((m) => m["type"] === "ompLogoutState").map((m) => `${m["provider"]} ${m["running"]}`);
+
+/** Sends a confirmed `ompLogout` and waits until the host says the logout ended: the fake omp takes a while to run the first time. */
+async function loggedOut(message: Record<string, unknown>): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  const listener = (sent: Record<string, unknown>) => {
+    if (sent["type"] === "ompLogoutState" && sent["running"] === false) resolve();
+  };
+  postListeners.add(listener);
+  try {
+    await send(message);
+    await promise;
+    await settled();
+  } finally {
+    postListeners.delete(listener);
+  }
+}
+
+test.skipIf(process.platform === "win32")("ompLogout asks a modal confirmation first, and closing it does nothing at all", async () => {
+  const { program, calls } = fakeLoggingOutOmp(ANTHROPIC_ONLY);
+  userSettings.set("ompPath", program);
+  for (const answer of [undefined, "Cancel"]) {
+    modalAnswer = answer;
+    await send({ type: "ompLogout", provider: "anthropic" });
+  }
+  expect(warnings).toHaveLength(2);
+  expect(warnings[0]).toEqual({
+    message: "Log out of Anthropic?",
+    options: { modal: true, detail: "omp forgets every account of Anthropic it stored. Credentials in environment variables, `.env` files or `models.yml` stay." },
+    items: ["Log out"],
+  });
+  expect(calls()).toEqual([]);
+  expect(messages.filter((m) => m["type"] === "ompLogoutState" || m["type"] === "agentCheck" || m["type"] === "ompStatus")).toEqual([]);
+  expect(errors).toEqual([]);
+  expect(infos).toEqual([]);
+  // A provider outside the list and a path that is not text never reach the confirmation.
+  for (const provider of ["openai", "", 3, undefined]) await send({ type: "ompLogout", provider });
+  await send({ type: "ompLogout", provider: "anthropic", ompPath: 3 });
+  expect(warnings).toHaveLength(2);
+});
+
+test.skipIf(process.platform === "win32")("a confirmed logout runs auth-broker logout with the id of the list for the omp of the message (or of trama.ompPath), then checks omp again, and tells nothing when the provider is gone", async () => {
+  const { program, calls, set } = fakeLoggingOutOmp(ANTHROPIC_ONLY);
+  set("models-after", CURSOR_ONLY);
+  userSettings.set("ompPath", join(root, "saved-omp"));
+  modalAnswer = "Log out";
+  await loggedOut({ type: "ompLogout", provider: "anthropic", ompPath: program });
+  expect(calls()).toEqual(["auth-broker logout anthropic|"]);
+  expect(logoutStates()).toEqual(["anthropic true", "anthropic false"]);
+  const kinds = messages.map((m) => m["type"]);
+  expect(messages[0]).toEqual({ type: "ompLogoutState", provider: "anthropic", running: true });
+  expect(messages.at(-1)).toEqual({ type: "ompLogoutState", provider: "anthropic", running: false });
+  // The wizard's check, with the program used by the logout, and the Settings tab's check, both answered before the row is free again.
+  expect(messages.filter((m) => m["type"] === "agentCheck")).toEqual([{ type: "agentCheck", ompPath: program, state: "done", ok: true, missing: false, version: "18.12.6", models: 1, providers: ["cursor"] }]);
+  expect(kinds.lastIndexOf("agentCheck")).toBeLessThan(kinds.length - 1);
+  expect(messages.some((m) => m["type"] === "ompStatus" && m["state"] === "checking")).toBe(true);
+  expect(kinds.lastIndexOf("ompStatus")).toBeLessThan(kinds.length - 1);
+  // No message confirms a logout that disconnected the provider.
+  expect(infos).toEqual([]);
+  expect(errors).toEqual([]);
+
+  // Without a path in the message the omp is the saved one.
+  messages.length = 0;
+  userSettings.set("ompPath", program);
+  await loggedOut({ type: "ompLogout", provider: "cursor" });
+  expect(calls()).toEqual(["auth-broker logout anthropic|", "auth-broker logout cursor|"]);
+  expect(messages.filter((m) => m["type"] === "agentCheck").map((m) => m["ompPath"])).toEqual([program]);
+});
+
+test.skipIf(process.platform === "win32")("after a success, a provider the check still lists as Connected is told once to be reachable through another credential; the Cursor text names the saved key, which stays", async () => {
+  const { program, calls } = fakeLoggingOutOmp(ANTHROPIC_ONLY);
+  userSettings.set("ompPath", program);
+  modalAnswer = "Log out";
+  await loggedOut({ type: "ompLogout", provider: "anthropic" });
+  expect(calls()).toEqual(["auth-broker logout anthropic|"]);
+  expect(infos).toEqual(["Trama: Anthropic is still connected through another credential (environment variable, `.env` file or `models.yml`). Remove it there to disconnect."]);
+
+  // A saved Cursor API key goes to omp in the environment, never in the arguments, and is not removed.
+  let stored: string | undefined = "  sk-cursor  ";
+  const secrets = { get: async () => stored, store: async (_k: string, v: string) => void (stored = v), delete: async () => void (stored = undefined), onDidChange: () => ({ dispose() {} }) };
+  const following = await startCursorApiKey(secrets as never, () => {});
+  try {
+    infos.length = 0;
+    await loggedOut({ type: "ompLogout", provider: "cursor" });
+    expect(calls().at(-1)).toBe("auth-broker logout cursor|sk-cursor");
+    expect(infos).toEqual(["Trama: Cursor is still connected through the Cursor API key saved in Trama or another credential. Remove them to disconnect."]);
+    expect(stored).toBe("  sk-cursor  ");
+    // Another provider's logout with the key saved keeps the generic text.
+    infos.length = 0;
+    await loggedOut({ type: "ompLogout", provider: "anthropic" });
+    expect(infos).toEqual(["Trama: Anthropic is still connected through another credential (environment variable, `.env` file or `models.yml`). Remove it there to disconnect."]);
+  } finally {
+    following.dispose();
+  }
+  expect(errors).toEqual([]);
+});
+
+test.skipIf(process.platform === "win32")("with the models list in error after a success, no notice shows", async () => {
+  const { program, set } = fakeLoggingOutOmp(ANTHROPIC_ONLY);
+  set("models-after", "not json");
+  userSettings.set("ompPath", program);
+  modalAnswer = "Log out";
+  await loggedOut({ type: "ompLogout", provider: "anthropic" });
+  expect(messages.filter((m) => m["type"] === "agentCheck").at(-1)).toMatchObject({ state: "done", ok: false });
+  expect(infos).toEqual([]);
+  expect(errors).toEqual([]);
+  expect(logoutStates()).toEqual(["anthropic true", "anthropic false"]);
+});
+
+test.skipIf(process.platform === "win32")("a failed logout shows the editor error with the last line of omp's error output or its exit code, no notice, and omp is checked again anyway", async () => {
+  const { program, set } = fakeLoggingOutOmp(ANTHROPIC_ONLY);
+  userSettings.set("ompPath", program);
+  modalAnswer = "Log out";
+  set("logout-exit", "3");
+  set("logout-stderr", "first\n\n  could not reach the broker  \n\n");
+  await loggedOut({ type: "ompLogout", provider: "anthropic" });
+  expect(errors).toEqual(["Trama: could not log out of Anthropic: could not reach the broker."]);
+  expect(messages.filter((m) => m["type"] === "agentCheck")).toHaveLength(1);
+  expect(messages.some((m) => m["type"] === "ompStatus" && m["state"] === "done")).toBe(true);
+  expect(logoutStates()).toEqual(["anthropic true", "anthropic false"]);
+
+  errors.length = 0;
+  set("logout-stderr", "");
+  await loggedOut({ type: "ompLogout", provider: "anthropic" });
+  expect(errors).toEqual(["Trama: could not log out of Anthropic: exit code 3."]);
+  // The provider is still Connected, but only a success tells so.
+  expect(infos).toEqual([]);
+
+  // An omp that cannot be started is a failure too, and the row is free again.
+  errors.length = 0;
+  await loggedOut({ type: "ompLogout", provider: "anthropic", ompPath: join(root, "missing", "omp") });
+  expect(errors).toEqual(["Trama: could not log out of Anthropic: could not start omp."]);
+  expect(logoutStates().at(-1)).toBe("anthropic false");
 });
 
 test("the Settings tab asking for the model names and for the status together runs `omp models` once", async () => {

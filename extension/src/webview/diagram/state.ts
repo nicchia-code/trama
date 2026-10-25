@@ -30,6 +30,8 @@ export interface DiagramState {
   fit: number;
   /** The nodes and edges the next fit is limited to; null fits the whole level. */
   fitTo: string[] | null;
+  /** Whether the next fit slides the view (a step of the focus) instead of jumping. */
+  fitSmooth: boolean;
   /** The reason Resolve Drifts is unavailable now, from the snapshot the Board also reads; null when it is available. */
   resolveBlocker: string | null;
   /** The Proposal refinement, as the host carries it; off when absent. */
@@ -45,7 +47,7 @@ export interface DiagramStore {
   setLevel(target: Level): void;
   select(id: string | null): void;
   toggleState(state: string): void;
-  /** The developer's choice in the Diagram's own selector: the Model is drawn with that Proposal, and a level it no longer has falls back. */
+  /** The developer's choice in the Diagram's own selector: the Model is drawn with that Proposal, and a level it no longer has falls back. Ignored while a focus is on. */
   chooseProposal(id: string | null): void;
   /** Goes to the level that shows the element, selects it and fits the view to it. */
   navigateRef(ref: string): void;
@@ -76,6 +78,7 @@ export function createDiagramStore(): DiagramStore {
     focus: null,
     fit: 0,
     fitTo: null,
+    fitSmooth: false,
     resolveBlocker: null,
     refinement: REFINEMENT_OFF,
   };
@@ -84,7 +87,7 @@ export function createDiagramStore(): DiagramStore {
   const listeners = new Set<() => void>();
 
   const emit = (patch: Partial<DiagramState>, fit = false) => {
-    state = { ...state, ...patch, fit: fit ? state.fit + 1 : state.fit, fitTo: fit ? (patch.fitTo ?? null) : state.fitTo };
+    state = { ...state, ...patch, fit: fit ? state.fit + 1 : state.fit, fitTo: fit ? (patch.fitTo ?? null) : state.fitTo, fitSmooth: fit ? (patch.fitSmooth ?? false) : state.fitSmooth };
     for (const listener of listeners) listener();
   };
 
@@ -115,7 +118,8 @@ export function createDiagramStore(): DiagramStore {
 
   /**
    * Opens the level of the first element like a link, selects it (unless `select` is false) and fits the view to all `refs` that this level
-   * draws. `level` forces the level, as a step of the focus does; without it the level stays when it already shows the element.
+   * draws. `level` forces the level, as a step of the focus does, and then the view slides to the elements instead of jumping; without it the
+   * level stays when it already shows the element.
    */
   function openRefs(refs: string[], options: { drift?: string; select?: boolean; level?: Level } = {}) {
     const { drift, select = true } = options;
@@ -140,7 +144,7 @@ export function createDiagramStore(): DiagramStore {
     if (!graph) return;
     const selected = drift !== undefined && graph.nodes.some((n) => n.id === `d:${drift}`) ? `d:${drift}` : select ? selectionFor(graph, element) : null;
     const fitTo = drift !== undefined ? null : [...new Set(elements.map((e) => selectionFor(graph, e)).filter((id): id is string => id !== null))];
-    emit({ ...next, selected, fitTo }, true);
+    emit({ ...next, selected, fitTo, fitSmooth: options.level !== undefined }, true);
   }
 
   const navigateRef = (ref: string, drift?: string) => openRefs([ref], { drift });
@@ -222,7 +226,9 @@ export function createDiagramStore(): DiagramStore {
       redraw({}, true);
     },
     chooseProposal(id) {
-      redraw({ proposalId: id, focusRequest: null });
+      // With a focus on the choice is not a transition: the focus and the Proposal drawn stay until Clear or Esc takes the focus off.
+      if (state.focusRequest) return;
+      redraw({ proposalId: id });
     },
     focusOn,
     stepFocus(delta) {

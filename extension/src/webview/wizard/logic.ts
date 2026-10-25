@@ -2,7 +2,7 @@ import type { SetupChoice, SetupMode, ToWebview } from "../../protocol";
 import { ompTooOldText } from "../../../../src/core/omp-version";
 import { groupKeys, MODEL_ROLE_KEYS, SETTING_GROUPS, type SettingSchema, type SettingsValues, type SettingValue, settingValueError, storedValue } from "../../host/settings-schema";
 import type { ModelSuggestion } from "../../host/model-lists";
-import { ompAnsweredText, ompFailureText, roleLabel } from "../settings/logic";
+import { type CertificatesState, ompAnsweredText, ompFailureText, roleLabel, SYSTEM_CERTIFICATES_KEY } from "../settings/logic";
 
 /** Which wizard is open: the first setup of a folder without a project (Get Started), the settings of a project, or a project with an empty Model that carries on with a path. */
 export type WizardMode = SetupMode;
@@ -98,6 +98,22 @@ export const stepsOf = (state: WizardState): WizardStep[] => stepsFor(state.mode
 /** The wizard value of `key` as the field shows it: the default when there is no value. */
 export const wizardValue = (setting: SettingSchema, state: WizardState): unknown => state.values[setting.key] ?? setting.default;
 
+
+/** How old the bundle may be before checking the box in the step exports it again: 24 hours. */
+const BUNDLE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/** The step's value of System Certificates: it counts at once, before the confirmation, for what the step itself starts (the check of omp, the installer and the login terminals). */
+export function chosenSystemCertificates(schema: readonly SettingSchema[], state: WizardState): boolean {
+  const setting = schema.find((s) => s.key === SYSTEM_CERTIFICATES_KEY);
+  return setting !== undefined && wizardValue(setting, state) === true;
+}
+
+/** Whether the bundle is missing or was written more than 24 hours before `now`, by the host's last `systemCertificates` (null: none yet, so nothing is known to exist): checking the box then asks for an export. */
+export function bundleNeedsExport(state: CertificatesState | null, now: number): boolean {
+  if (state === null || state.exportedAt === undefined) return true;
+  const written = Date.parse(state.exportedAt);
+  return Number.isNaN(written) || now - written > BUNDLE_MAX_AGE_MS;
+}
 
 /** The path of omp the wizard has chosen, trimmed; empty means omp from the editor's PATH. */
 export function chosenOmpPath(schema: readonly SettingSchema[], state: WizardState): string {
@@ -255,8 +271,9 @@ export function ompAnswers(check: AgentCheckResult | null): boolean {
 export function nextBlock(schema: readonly SettingSchema[], state: WizardState, check: AgentCheckResult | null): string | null {
   switch (state.step) {
     case "omp": {
-      // Only an answer that says omp responds, for the path of the step, with at least one usable model of any provider, lets Next go; a failed update does not stop it.
+      // Only an answer that says omp responds, for the path of the step, from an omp that is not older than the minimum and has at least one usable model of any provider, lets Next go; a failed update does not stop it.
       if (check === null || check.state !== "done" || !check.ok || check.ompPath !== chosenOmpPath(schema, state)) return OMP_MUST_ANSWER;
+      if (check.tooOld === true) return ompTooOldText(check.version);
       return (check.models ?? 0) > 0 ? null : OMP_HAS_NO_MODELS;
     }
     case "Path":

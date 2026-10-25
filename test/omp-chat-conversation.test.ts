@@ -122,6 +122,10 @@ describe("Agent idle", () => {
     expect(conversationStep("idle", { type: "omp-acp.EXITED", code: 1, signal: null }, false)).toEqual({ state: "closed", effects: [{ effect: "end-work" }, { effect: "stop-process" }, { effect: "close" }] });
     expect(conversationStep("idle", { type: "editor.WINDOW_CLOSED" }, false).state).toBe("waiting");
   });
+
+  test("an Ask more with no message yet goes to Closed when the window closes: its process stops and nothing is kept", () => {
+    expect(conversationStep("idle", { type: "editor.WINDOW_CLOSED" }, false, true)).toEqual({ state: "closed", effects: [{ effect: "stop-process-for-window" }, { effect: "close" }] });
+  });
 });
 
 describe("Waiting for the window", () => {
@@ -221,6 +225,8 @@ describe("saved conversations", () => {
   test("the resume decision: a working conversation gets the notice and the fixed prompt, a resting one only its history", () => {
     expect(resumeDecision({ state: "running", hook: true })).toEqual({ wasRunning: true, notice: RESUME_NOTICE, prompt: RESUME_PROMPT });
     expect(resumeDecision({ state: "running", hook: false })).toEqual({ wasRunning: false });
+    // A job's conversation continues its work with or without the hook; the entry of a conversation that is not a job's carries no job.
+    expect(resumeDecision({ state: "running", hook: false, job: entry.job })).toEqual({ wasRunning: true, notice: RESUME_NOTICE, prompt: RESUME_PROMPT });
     expect(resumeDecision({ state: "idle", hook: true })).toEqual({ wasRunning: false });
     expect(RESUME_NOTICE).toBe("The window reloaded; the agent continues its work.");
     expect(RESUME_PROMPT).toBe("The editor window reloaded and stopped your work. Continue it from where it stopped.");

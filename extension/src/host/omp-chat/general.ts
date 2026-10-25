@@ -1,8 +1,10 @@
 import { newTerminalId } from "../../../../src/core/announcements";
 import { ompTooOldText } from "../../../../src/core/omp-version";
+import { certificateReason } from "../../certificate-errors";
+import { savedSystemCertificates } from "../system-certificates";
 import { GENERAL_ID } from "../../../../src/core/omp-chat-view";
 import { drawnPhase, GENERAL_INITIAL, type GeneralEffect, type GeneralEvent, type GeneralMachine, GeneralQueue, generalStep, returnedText } from "../../../../src/core/omp-chat-general";
-import { exitReason, savedEnv } from "../../../../src/core/omp-chat-conversation";
+import { closeDialog, exitReason, savedEnv } from "../../../../src/core/omp-chat-conversation";
 import type { GeneralError } from "../../omp-chat-protocol";
 import { type ChatViewPort, type Disposable, type OmpClientPort, type OmpExit, type OmpLaunch, type OmpSessionPort, OmpStartFailure, type OutgoingMessage } from "./ports";
 import type { ConversationStore } from "./conversations";
@@ -49,7 +51,7 @@ export interface GeneralDeps {
   ompPath(): string;
   /** The program omp runs as, undefined when omp is not installed. */
   findOmp(ompPath: string): Promise<string | undefined>;
-  /** The check of omp's version and of updates, and the update that may follow, for `program` (`checkedOmp`): omp missing, or older than the minimum, stops General's start with its error line. */
+  /** The omp version General's start needs (`ompVersionOnly`): no check of updates and no update, and no notice; omp missing, or older than the minimum, stops General's start with its error line. */
   checkOmp(program: string): Promise<{ missing?: true; tooOld?: true; version?: string }>;
   /** The launch of a new session: `omp [--model m] acp [--yolo]` with Trama's environment for `terminalId`. */
   launch(root: string, terminalId: string): Promise<OmpLaunch>;
@@ -177,7 +179,8 @@ export class GeneralConversation implements Disposable {
   private close(): void {
     if (this.machine.phase !== "kept") return;
     void (async () => {
-      if (this.session?.inTurn === true && !(await this.deps.confirm(CLEAR_MESSAGE, CLEAR_DETAIL, CLEAR_BUTTON))) return;
+      const dialog = closeDialog("General");
+      if (this.session?.inTurn === true && !(await this.deps.confirm(dialog.message, dialog.detail, dialog.button))) return;
       this.dispatch({ type: "close" });
     })();
   }
@@ -221,6 +224,10 @@ export class GeneralConversation implements Disposable {
         return;
       case "save":
         if (this.record !== undefined) void this.deps.store.update(GENERAL_KEY, this.record);
+        return;
+      case "unsave":
+        // General stays after the switch-off: its saved entry goes at once, so a window that opens meanwhile never resumes it. The entry is written again if General returns to Ready.
+        void this.deps.store.update(GENERAL_KEY, undefined);
         return;
       case "deliver":
         this.deliver();
@@ -361,7 +368,9 @@ export class GeneralConversation implements Disposable {
     this.exitListener = undefined;
     this.session = undefined;
     this.deps.view.setGeneralSession(undefined);
-    this.pendingFailure = { kind: "exited", reason: exitReason(exit.code, exit.signal) ?? "omp exited", ...(exit.details === undefined ? {} : { details: exit.details }) };
+    const reason = exitReason(exit.code, exit.signal) ?? "omp exited";
+    // A certificate error in omp's error output is told in plain words as the reason; omp's own lines follow as `details`.
+    this.pendingFailure = { kind: "exited", reason: certificateReason(reason, [reason, exit.details], savedSystemCertificates()), ...(exit.details === undefined ? {} : { details: exit.details }) };
     this.dispatch({ type: "exited" });
   }
 

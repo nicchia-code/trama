@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, mock, test } from "bun:test";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -137,11 +137,28 @@ test("an omp whose version cannot be read stops the launch, saying the installed
   expect(warnings).toEqual([]);
 });
 
-test("checkedOmp is the check General uses: it shows no notice of its own for a missing or too old omp", async () => {
+test("ompVersionOnly is the check General uses: it reads the version only, with no update check and no notice", async () => {
   if (!posix) return;
-  const { checkedOmp } = await import("../extension/src/host/omp-launch");
-  expect(await checkedOmp(fakeOmp("Current version: 18.12.5\nAlready up to date", 0, "18.12.5"))).toEqual({ version: "18.12.5", tooOld: true });
-  expect(await checkedOmp(join(dir, "no-such-omp"))).toEqual({ missing: true });
+  const { ompVersionOnly } = await import("../extension/src/host/omp-update");
+  const marker = join(dir, "touched");
+  const program = join(dir, "omp");
+  writeFileSync(program, `#!/bin/sh\nif [ "$1" = "--version" ]; then printf '%s' '18.12.5'; exit 0; fi\ntouch '${marker}'\nexit 1\n`);
+  chmodSync(program, 0o755);
+  expect(await ompVersionOnly(program)).toEqual({ version: "18.12.5", tooOld: true });
+  expect(existsSync(marker)).toBe(false);
+  expect(await ompVersionOnly(join(dir, "no-such-omp"))).toEqual({ missing: true });
   expect(warnings).toEqual([]);
   expect(infos).toEqual([]);
+  expect(progress).toEqual([]);
+});
+
+test("ompVersionOnly uses the outcome of the last launch check while it holds", async () => {
+  if (!posix) return;
+  const { ompBeforeLaunch } = await import("../extension/src/host/omp-launch");
+  const { ompVersionOnly } = await import("../extension/src/host/omp-update");
+  const program = fakeOmp("Current version: 18.12.6\nAlready up to date");
+  expect(await ompBeforeLaunch(program)).toBe(program);
+  // The program now answers a version the check did not see: the held outcome is the one used.
+  writeFileSync(program, "#!/bin/sh\nexit 1\n");
+  expect(await ompVersionOnly(program)).toEqual({ version: "18.12.6" });
 });

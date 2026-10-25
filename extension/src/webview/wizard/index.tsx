@@ -5,6 +5,7 @@ import { cn } from "../lib/utils";
 import type { OpenLink } from "../markdown";
 import { Column, InstructionFiles, OmpStatusBox, ignoresInstructionFiles, Providers, ROLE_ADVICE, STEP_SENTENCES, Subgroups } from "../setup-shared";
 import { SettingField } from "../settings/field";
+import { SYSTEM_CERTIFICATES_KEY } from "../settings/logic";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
@@ -211,7 +212,7 @@ function OmpStatus({ controller, snapshot }: Pick<BodyProps, "controller" | "sna
   return (
     <>
       <OmpStatusBox tone={check.tone} text={check.text} missing={ompMissing(snapshot.check)} onInstall={() => controller.installOmp()} />
-      {snapshot.providers === null ? null : <Providers connected={snapshot.providers.connected} onLogin={(provider) => controller.login(provider)} />}
+      {snapshot.providers === null ? null : <Providers connected={snapshot.providers.connected} onLogin={(provider) => controller.login(provider)} onLogout={(provider) => controller.logout(provider)} loggingOut={snapshot.loggingOut} apiKey={{ ...snapshot.cursorKey, onSet: () => controller.setCursorKey(), onRemove: () => controller.removeCursorKey() }} />}
     </>
   );
 }
@@ -233,6 +234,7 @@ function SettingsBody({ controller, snapshot, state, openLink, step }: BodyProps
         openLink={openLink}
         onInvalid={(invalidKey, invalid) => controller.setInvalid(invalidKey, invalid)}
         lead={ROLE_ADVICE[key]}
+        {...(key === SYSTEM_CERTIFICATES_KEY ? { certificates: { state: snapshot.certificates, onRefresh: () => controller.refreshCertificates() } } : {})}
       />
     );
   };

@@ -1,3 +1,4 @@
+import type { Announcement } from "../../../src/core/announcements";
 import type { QueuedRefinement, RefinementView } from "../protocol";
 import { shareSeats } from "./run-groups";
 
@@ -291,18 +292,28 @@ export function refinable(facts: { kind: string; attached: boolean; open: boolea
   return facts.draftRefining && !facts.writing;
 }
 
+/** The latest note the agent declared for each Proposal in `running`, from the announcements bound to them (the notes are oldest first); a Proposal whose agent declared none has no entry. */
+export function refinementNotes(announcements: readonly Pick<Announcement, "kind" | "proposal" | "notes">[], running: readonly string[]): Record<string, string> {
+  const notes: Record<string, string> = {};
+  for (const announcement of announcements) {
+    const text = announcement.notes[announcement.notes.length - 1]?.text;
+    if (announcement.kind === "proposal" && announcement.proposal !== null && text !== undefined && running.includes(announcement.proposal)) notes[announcement.proposal] = text;
+  }
+  return notes;
+}
+
 /**
- * The Board's view of the refinement. `plan` is the plan of the queue now (its `waits` say why each queued Proposal waits); `refineAll` the count of what a click takes and
- * its reasons. `runInProgress`: a Run of this window is in progress. `note` is not tracked yet, so it is null.
+ * The Board's view of the refinement. `waits` say why each queued Proposal waits; `count` is what a click on Refine All takes now and `refineAll` carries its
+ * reasons. `runInProgress`: a Run of this window is in progress. `notes`: the latest note of the agent of each Proposal at work (`refinementNotes`).
  */
-export function refinementView(input: { state: RefinementState; enabled: boolean; runInProgress: boolean; waits: ReadonlyMap<string, QueueWait>; count: number }): RefinementView {
+export function refinementView(input: { state: RefinementState; enabled: boolean; runInProgress: boolean; waits: ReadonlyMap<string, QueueWait>; count: number; notes: Readonly<Record<string, string>> }): RefinementView {
   const { state } = input;
   const since = state.refineAllSince;
   return {
     enabled: input.enabled,
     running: [...state.running.keys()],
     queued: state.queued.map((proposal): QueuedRefinement => ({ proposal, ...(input.waits.get(proposal) ?? { waiting: "slot" }) })),
-    note: null,
+    notes: { ...input.notes },
     runInProgress: input.runInProgress,
     waiting: state.waiting,
     refineAll: { mode: since === null ? "refine" : "cancel", count: input.count, blockers: refineAllBlockers(input.enabled, input.count), ...(since === null ? {} : { since }) },

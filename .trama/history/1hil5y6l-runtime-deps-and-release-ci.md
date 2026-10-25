@@ -1,11 +1,12 @@
 ---
 created: 2026-10-18T21:22:37.097Z
-updated: 2026-10-20T17:56:47.342Z
+updated: 2026-10-24T20:56:02.021Z
 summary: Simple Icons is no longer a runtime dependency, and the Windows tests block the release workflow.
 tasks:
   - 1tlibd6x
   - hffgpwvx
   - iwvkflf8
+  - qny1in1b
 cleared:
   iwvkflf8:
     title: Release senza blocchi

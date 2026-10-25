@@ -35,9 +35,8 @@ function noticeStopped(message: string): void {
 }
 
 /**
- * The check of the version and of updates, and the update of omp, for `program`, behind the progress notification of an update. Launches add their notices to it;
- * General uses it as it is and shows no editor notice. The outcome says whether omp is missing, or older than the minimum (or of a version that cannot be read)
- * after the update that could be done.
+ * The check of the version and of updates, and the update of omp, for `program`, behind the progress notification of an update. Launches add their notices to it.
+ * The outcome says whether omp is missing, or older than the minimum (or of a version that cannot be read) after the update that could be done.
  */
 export async function checkedOmp(program: string): Promise<OmpUpdateOutcome> {
   const settled = Promise.withResolvers<void>();

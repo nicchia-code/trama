@@ -1,9 +1,10 @@
 ---
 created: 2026-10-24T07:19:11.102Z
-updated: 2026-10-24T07:19:11.102Z
+updated: 2026-10-24T20:56:02.145Z
 summary: The Board shows a stale Proposal being refined as queued, running or stopped, with reasons on Approve and a Cancel button for queued ones.
 tasks:
   - o1b3e307
+  - 29oktgs5
 cleared:
   o1b3e307:
     title: Scheda da raffinare

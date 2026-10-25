@@ -111,39 +111,13 @@ Run **`trama question new --root <project> --input -`** with the JSON request on
 
 If the developer said not to ask, use your recommendations and list them in the report.
 
-## Drift blocker
-
-This section applies only when the instruction says "The Drift blocker is on". Without that sentence, never name a Task in `notBlocking`, and skip this section.
-
-When it applies, do this before each `trama drift new`:
-
-1. Ask for the candidates with the references you will file with: `trama drift new --input -` with `{"refs":["<ref>"],"dryRun":true}`. It lists the Tasks that Drift would block, the origin included, and writes nothing. If it lists none, file the Drift as usual.
-2. Judge each candidate: does the difference you found touch that Task, its references or what it changes? Leave free only the Tasks the difference does not touch, with a one-line reason for each, in Italian. Judging only removes blocks: never leave free a Task the difference touches, and never name a Task the command did not list.
-3. Pass each Task you leave free in `notBlocking`, a list of `{"task":"<permanent ID>","reason":"<reason>"}`. Pass none when the difference touches every candidate.
-
-The judgement is made once, at filing: a Drift keeps the Tasks it leaves free and blocks every other one, including the Tasks created later about the same thing.
-
-When you start sub-agents, pass them the sentence "The Drift blocker is on" together with this section, and ask each one to report the permanent IDs of the Drifts it registered and, for each, whether it blocks any Task.
-
-### Final resolution of the Drifts that block nothing
-
-Keep the permanent ID of each Drift you file that blocks no Task: it blocks none when every candidate was left free, or when there was no candidate. Sub-agents report the same, as above.
-
-When the import is over, gather those Drifts into one resolution, unless none is left:
-
-1. Leave out a recurring Drift (it follows one or more earlier Drifts: `previous` is always a list in `--json`): the developer decides it, seeing the chains of its predecessors. A Drift left out stays open.
-2. For each remaining Drift, record the recommended decision: when it has an attached Proposal, `proposal`, and the resolution carries that Proposal's changes as the trama-resolve-drifts skill describes; otherwise `fix-code` with option 1.
-3. Announce it with `trama announcement new --input -` with `{"kind":"proposal","title":"<title>"}`, write it with `trama proposal new --input -` and `{"title":"<title>","kind":"resolution","nonBlocking":true,"announcement":"<id>","body":"<what is resolved and why>"}`, and record each decision with `trama proposal edit <proposal id> --input -` and `{"drifts":[{"drift":"<drift id>","decision":"<decision>","option":1}]}` (`option` only with `fix-code`). Hand it over with `trama proposal move <id> open` and read its output.
-
-Never approve or reject this resolution, and never start a Run because of it: the developer decides it, as any manual resolution.
-
 ## Async Drift Resolver
 
 This section applies only when the instruction says "The Async Drift Resolver is on: …". Without that sentence, skip it.
 
-With it, at the very end of the work (after the last archiving and the `nonBlocking` resolution of the Drift blocker, if any, and before the final report), you prepare the question of every Drift this work filed, so Resolve opens at once. You alone do this, never a sub-agent that compares or implements.
+With it, at the very end of the work (after the last archiving, and before the final report), you prepare the question of every Drift this work filed, so Resolve opens at once. You alone do this, never a sub-agent that compares or implements.
 
-1. **Find the Drifts.** Run `trama drift list --input -` with `{"currentJob":true,"unprepared":true}`; never read `TRAMA_JOB` by hand: the command reads it itself. It lists the open Drifts of this work, the advisor's included, with no valid prepared question and outside every resolution. A Drift already in a resolution (the `nonBlocking` one) is left out.
+1. **Find the Drifts.** Run `trama drift list --input -` with `{"currentJob":true,"unprepared":true}`; never read `TRAMA_JOB` by hand: the command reads it itself. It lists the open Drifts of this work, the advisor's included, with no valid prepared question and outside every resolution.
 2. **Prepare each.** Follow "Writing a prepared question" in the `trama-resolve-drifts` skill (read it first) for each Drift, with the sub-agents you have: hand the exploration to at most `trama.maxParallelAgents` of them at once (the number the instruction gives, 20 when it gives none), one Drift (or a few that concern the same thing) each, and have each record its questions with `trama drift edit`. Without sub-agents, one Drift at a time. A sub-agent asks the developer nothing and registers no other card.
 3. **Report.** The final report says how many Drifts were prepared and which were not (with the reason).
 

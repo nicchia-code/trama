@@ -28,7 +28,7 @@ export function preflightCompared(p: Project, refs: string[]): { remaining: stri
   });
 }
 
-/** The briefing of a comparison: references, what concerns them, the analysis, and the candidates. */
+/** The briefing of a comparison: references, what concerns them, and the analysis. */
 export function briefingView(p: Project, b: Briefing, announcement: string): Result {
   const n = syncShortNumbers(p);
   const cardLine = (kind: "task" | "drift", card: Task | Drift) => ({ id: card.id, number: n.label(kind, card.id), title: card.title });
@@ -38,8 +38,6 @@ export function briefingView(p: Project, b: Briefing, announcement: string): Res
   const tasks = b.openTasks.map((t) => `- Task ${n.name("task", t.id)} (${t.data.column}): ${t.title}`);
   const drifts = b.openDrifts.map((d) => `- Drift ${n.name("drift", d.id)}: ${d.title}`);
   const closed = b.closedDrifts.map((d) => `- Drift ${n.name("drift", d.id)} (${d.data.resolution ?? "resolved"}): ${d.title}${d.data.note ? `\n${quoteLines(d.data.note)}` : ""}`);
-  const candidates = b.candidates === null ? null : Object.fromEntries([...b.candidates].map(([ref, tasks]) => [ref, tasks.map((t) => cardLine("task", t))]));
-  const candidateLines = b.candidates === null ? [] : [...b.candidates].map(([ref, list]) => `- \`${ref}\`: ${list.length === 0 ? "_no Task_" : list.map((t) => `Task ${n.name("task", t.id)}`).join(", ")}`);
   const md = [
     announcement,
     `## Machine \`${b.machine.id}\` (${b.machine.name})`,
@@ -54,7 +52,6 @@ export function briefingView(p: Project, b: Briefing, announcement: string): Res
     drifts.join("\n") || "_None._",
     "### Resolved or dismissed Drifts on the same references",
     closed.join("\n") || "_None._",
-    ...(candidates === null ? [] : ["### Candidates", candidateLines.join("\n") || "_No reference._"]),
   ].join("\n\n");
   return {
     md,
@@ -66,7 +63,6 @@ export function briefingView(p: Project, b: Briefing, announcement: string): Res
       openTasks: b.openTasks.map((t) => ({ ...cardLine("task", t), column: t.data.column })),
       openDrifts: b.openDrifts.map((d) => ({ ...cardLine("drift", d), refs: d.data.refs })),
       closedDrifts: b.closedDrifts.map((d) => ({ ...cardLine("drift", d), resolution: d.data.resolution, note: d.data.note })),
-      candidates,
     },
   };
 }

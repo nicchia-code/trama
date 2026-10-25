@@ -9,7 +9,7 @@ import { type ShortNumbers, syncShortNumbers } from "../core/short-numbers";
 import { formatDiagnostic } from "../core/model";
 import { type Blocker, concernSameThing } from "../core/blocking";
 import { TramaError, UsageError } from "../core/errors";
-import { attachedDrift, BATCH_DEFAULT, blockedTasks, closedUnchanged, COLUMNS, type Drift, driftBody, driftCandidates, driftOptions, driftSides, freedTasks, type FreedTask, getTask, listDrifts, listTasks, nextTask, type ProposalFilter, type Task, taskProgress, unifiedCandidates, withoutPrepared } from "../core/work";
+import { attachedDrift, BATCH_DEFAULT, blockedTasks, closedUnchanged, COLUMNS, type Drift, driftBody, driftCandidates, driftOptions, driftSides, getTask, listDrifts, listTasks, nextTask, type ProposalFilter, type Task, taskProgress, unifiedCandidates, withoutPrepared } from "../core/work";
 import { type PreparedDecision, preparedFlag, type PreparedStatus, preparedStatus, preparedStatusText, unpreparedDrifts } from "../core/prepared";
 import type { Result } from "./result";
 import type { AgentOrigin } from "../core/announcements";
@@ -19,10 +19,10 @@ import { parallelGroups } from "../core/groups";
 /** One-line summary of a Proposal for lists and the board. `number` is its short number (`P3`) while it is live, otherwise null. */
 export function proposalSummary(p: Project, proposal: Proposal, numbers: ShortNumbers) {
   const h = proposal.data.status === "draft" || proposal.data.status === "open" ? health(p, proposal) : { stale: [], unbased: [], requires: [] };
-  return { id: proposal.id, number: numbers.label("proposal", proposal.id), title: proposal.title, status: proposal.data.status, kind: proposal.data.kind, nonBlocking: proposal.data.nonBlocking, prepared: proposal.data.prepared, stale: h.stale.length > 0, refining: proposal.data.refining, requires: h.requires.map((r) => r.id), attachedTo: attachedDrift(p, proposal.id)?.id ?? null, resolves: proposal.data.kind === "resolution" ? proposal.data.drifts.length : null };
+  return { id: proposal.id, number: numbers.label("proposal", proposal.id), title: proposal.title, status: proposal.data.status, kind: proposal.data.kind, prepared: proposal.data.prepared, stale: h.stale.length > 0, refining: proposal.data.refining, requires: h.requires.map((r) => r.id), attachedTo: attachedDrift(p, proposal.id)?.id ?? null, resolves: proposal.data.kind === "resolution" ? proposal.data.drifts.length : null };
 }
 
-const resolvesMark = (i: { resolves: number | null; nonBlocking: boolean }) => (i.resolves === null ? "" : ` (resolves ${i.resolves} Drift${i.resolves === 1 ? "" : "s"})${i.nonBlocking ? " (blocks nothing)" : ""}`);
+const resolvesMark = (i: { resolves: number | null }) => (i.resolves === null ? "" : ` (resolves ${i.resolves} Drift${i.resolves === 1 ? "" : "s"})`);
 
 export function proposalListView(p: Project, all: boolean): Result {
   const numbers = syncShortNumbers(p);
@@ -105,7 +105,6 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
       reworks: proposal.data.reworks,
       status: proposal.data.status,
       kind: proposal.data.kind,
-      nonBlocking: proposal.data.nonBlocking,
       prepared: proposal.data.prepared,
       refining: proposal.data.refining,
       drifts: proposal.data.drifts,
@@ -165,7 +164,7 @@ function withCheckNote(task: Task): string {
   return [...lines.slice(0, title + 1), "", "Closed without changes.", "", "## Check note", "", task.data.unchanged, ...lines.slice(title + 1)].join("\n");
 }
 
-const driftSummary = (d: Drift, numbers: ShortNumbers, closed: { task: string; note: string | null } | null, freed: FreedTask[]) => ({ id: d.id, number: numbers.label("drift", d.id), title: d.title, status: d.data.status, resolution: d.data.resolution, refs: d.data.refs, proposal: d.data.proposal, task: d.data.task, origin: d.data.origin, previous: d.data.previous, unifies: d.data.unifies, unifiedInto: d.data.unifiedInto, job: d.data.job, closedUnchanged: closed, notBlocking: freed.map((f) => ({ task: f.task, number: numbers.label("task", f.task), title: f.title, reason: f.reason })) });
+const driftSummary = (d: Drift, numbers: ShortNumbers, closed: { task: string; note: string | null } | null) => ({ id: d.id, number: numbers.label("drift", d.id), title: d.title, status: d.data.status, resolution: d.data.resolution, refs: d.data.refs, proposal: d.data.proposal, task: d.data.task, origin: d.data.origin, previous: d.data.previous, unifies: d.data.unifies, unifiedInto: d.data.unifiedInto, job: d.data.job, closedUnchanged: closed });
 
 function refsBlock(project: ProjectModel, refs: string[], full = false): string {
   return bullets(refs.map((r) => `- \`${r}\`\n${describeRef(project, r, full).split("\n").map((l) => `  > ${l}`).join("\n")}`), "_No references._");
@@ -291,7 +290,6 @@ export function driftShowView(p: Project, drift: Drift): Result {
   const sides = driftSides(drift);
   const closed = closedUnchanged(p, drift);
   const tasks = listTasks(p);
-  const freed = freedTasks(drift, tasks);
   // A Task deleted with Clear is shown by its permanent identity and `no longer exists`.
   const taskName = (id: string): string => (tasks.some((t) => t.id === id) ? numbers.name("task", id) : `${id} (no longer exists)`);
   const bodyText = driftBody(drift);
@@ -348,7 +346,6 @@ export function driftShowView(p: Project, drift: Drift): Result {
     ...(followsLines.length === 0 ? [] : [...followsLines, ""]),
     ...description,
     ...unifiesBlock,
-    ...(freed.length === 0 ? [] : ["", "## Not blocking", "", ...freed.map((f) => `- ${numbers.name("task", f.task)} ${f.title ?? "(no longer exists)"}: ${f.reason}`)]),
     ...decision,
     "",
     `Status: **${drift.data.status}**${drift.data.resolution ? ` (${drift.data.resolution})` : ""}`,
@@ -361,7 +358,7 @@ export function driftShowView(p: Project, drift: Drift): Result {
     refsBlock(project, drift.data.refs),
     ...(hasRequirements(project) ? ["", "## Requirements", requirementsBlock(project, drift.data.refs)] : []),
   ].join("\n");
-  return { md, json: { ...driftSummary(drift, numbers, closed, freed), prepared: prepared.json, preparedStatus: status === null ? null : preparedStatusText(status), body: withoutPrepared(drift.body).trim(), happens: sides?.happens ?? null, should: sides?.should ?? null, where: sides?.where ?? null, options, option: drift.data.option, note: drift.data.note, proposalBlock: block, ...resolutionJson } };
+  return { md, json: { ...driftSummary(drift, numbers, closed), prepared: prepared.json, preparedStatus: status === null ? null : preparedStatusText(status), body: withoutPrepared(drift.body).trim(), happens: sides?.happens ?? null, should: sides?.should ?? null, where: sides?.where ?? null, options, option: drift.data.option, note: drift.data.note, proposalBlock: block, ...resolutionJson } };
 }
 
 export function driftListView(p: Project, all: boolean, refs: string[] = [], filter: { job?: string; unprepared?: boolean } = {}): Result {
@@ -383,7 +380,7 @@ export function driftListView(p: Project, all: boolean, refs: string[] = [], fil
     drifts.map((d) => `- ${numbers.name("drift", d.id)} [${d.data.status}] ${d.title}${d.data.previous.length === 0 ? "" : " (recurring)"}${d.data.unifies.length === 0 ? "" : ` (unifies ${d.data.unifies.length})`}${d.data.unifiedInto === null ? "" : ` (unified into ${numbers.name("drift", d.data.unifiedInto)})`}${closedUnchanged(p, d, tasks) ? " (dismissed, no changes)" : ""}${d.data.proposal ? ` (Proposal ${numbers.name("proposal", d.data.proposal)})` : ""}`),
     "_No Drifts._",
   );
-  return { md: `# Drifts\n\n${md}`, json: { drifts: drifts.map((d) => ({ ...driftSummary(d, numbers, closedUnchanged(p, d, tasks), freedTasks(d, tasks)), prepared: preparedFlag(preparedStatus(p, d, model)) })) } };
+  return { md: `# Drifts\n\n${md}`, json: { drifts: drifts.map((d) => ({ ...driftSummary(d, numbers, closedUnchanged(p, d, tasks)), prepared: preparedFlag(preparedStatus(p, d, model)) })) } };
 }
 
 /** The Tasks a new Drift with these references and this origin would block, by number or identity and title; writes nothing. */
@@ -417,8 +414,7 @@ export function boardView(p: Project): Result {
   const open = listDrifts(p).filter((d) => d.data.status === "open");
   // The open Drifts an open resolution lists are shown inside its row, not as rows of their own.
   const inResolution = new Set(allProposals.filter((x) => x.data.kind === "resolution" && x.data.status === "open").flatMap((x) => x.data.drifts.map((d) => d.drift)));
-  const allTasks = listTasks(p);
-  const drifts = open.filter((d) => !inResolution.has(d.id)).map((d) => driftSummary(d, numbers, null, freedTasks(d, allTasks)));
+  const drifts = open.filter((d) => !inResolution.has(d.id)).map((d) => driftSummary(d, numbers, null));
   const openById = new Map(open.map((d) => [d.id, d]));
   // A Proposal attached to an open Drift stays under that Drift's line, also when a resolution lists the Drift.
   const attachedLine = (proposalId: string | null, indent: string) => {

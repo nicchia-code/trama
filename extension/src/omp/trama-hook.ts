@@ -1,3 +1,5 @@
+import { statSync } from "node:fs";
+import { resolve } from "node:path";
 import { ADVISOR_AGENT, type Claim, type ClaimRole, type ClaimWriter, checkWrites, namedPaths, PARALLEL_ENV, PARALLEL_ON, projectPathOf, projectRootOf, releaseAgentClaims, RUN_ENV, RUN_ON, TASK_ENV } from "../../../src/core/claims";
 import { QUESTION_TOOL_REFUSAL } from "../../../src/core/questions";
 
@@ -15,9 +17,16 @@ interface Pi {
 // The tools that write files: in a Run, the files they name are claimed before they run.
 const WRITE_TOOLS: Record<string, true> = { write: true, edit: true, apply_patch: true, ast_edit: true };
 
-// `ast_edit` names files by glob patterns, expanded where the agent works.
+// `ast_edit` names files by path or by glob pattern. A name that is a file of its own is claimed as written, whatever characters it has (`routes/[id].ts`); only a name that is no file and has a wildcard is expanded where the agent works.
+const isFile = (path: string, cwd: string): boolean => {
+  try {
+    return statSync(resolve(cwd, path)).isFile();
+  } catch {
+    return false;
+  }
+};
 const expandGlob = (pattern: string, cwd: string): string[] =>
-  /[*?[{]/.test(pattern)
+  /[*?[{]/.test(pattern) && !isFile(pattern, cwd)
     ? Array.from(new Bun.Glob(pattern).scanSync({ cwd, onlyFiles: true })).filter((path) => !/(^|\/)(node_modules|\.git)(\/|$)/.test(path))
     : [pattern];
 

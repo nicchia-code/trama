@@ -185,3 +185,10 @@ test("without a folder the sentence is hidden in icon-only mode, and Open Folder
   expect(screen.queryByRole("tooltip")).toBeNull();
   expect(screen.getAllByText("Open a folder to use Trama.").length).toBe(1);
 });
+
+test("Open Folder keeps its accessible name in icon-only mode, where its text is hidden", () => {
+  setup({ ...project(), situation: "noFolder" });
+  const open = screen.getByRole("button", { name: "Open Folder" });
+  expect(within(open).getByText("Open Folder").className).toContain("@max-[56px]:hidden");
+  expect(open.getAttribute("aria-label")).toBe("Open Folder");
+});

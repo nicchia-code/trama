@@ -30,10 +30,10 @@ afterEach(cleanup);
 
 const FOLDER = { name: "app", root: "/work/app", hasFiles: true };
 
-function setup(options: { mode?: "first" | "settings" | "empty-model"; choice?: "import" | "scratch"; values?: Record<string, SettingsValues>; folders?: (typeof FOLDER)[] } = {}) {
+function setup(options: { mode?: "first" | "settings" | "empty-model"; choice?: "import" | "scratch"; values?: Record<string, SettingsValues>; folders?: (typeof FOLDER)[]; now?: () => number } = {}) {
   const posted: ToHost[] = [];
   const closed: string[] = [];
-  const controller = new WizardController({ post: (message) => posted.push(message), onClose: (reason, mode) => closed.push(`${reason}:${mode}`) });
+  const controller = new WizardController({ post: (message) => posted.push(message), onClose: (reason, mode) => closed.push(`${reason}:${mode}`) }, options.now);
   const utils = render(<Wizard controller={controller} openLink={() => {}} notice={<p>The notice</p>} />);
   const mode = options.mode ?? "first";
   act(() => {
@@ -146,7 +146,7 @@ test("the step indicator leads back to any earlier step with its tooltip and nam
   // On omp nothing is a button: the current and the next steps are not stops of the Tab.
   expect(within(nav()).queryAllByRole("button")).toEqual([]);
   advanceTo(controller, "Advanced");
-  fireEvent.click(screen.getByRole("checkbox", { name: "Drift Blocker" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Advisor Scanner" }));
   expect(within(nav()).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["Go back to omp", "Go back to Models", "Go back to Project"]);
   expect(nav().querySelector('[aria-current="step"]')?.textContent).toBe("4Advanced");
   // Back over several steps at once.
@@ -156,7 +156,7 @@ test("the step indicator leads back to any earlier step with its tooltip and nam
   expect(within(nav()).queryAllByRole("button")).toEqual([]);
   // The choices are kept, and the steps after are reached only with Next.
   advanceTo(controller, "Advanced");
-  expect((screen.getByRole("checkbox", { name: "Drift Blocker" }) as HTMLElement).getAttribute("aria-checked")).toBe("true");
+  expect((screen.getByRole("checkbox", { name: "Advisor Scanner" }) as HTMLElement).getAttribute("aria-checked")).toBe("false");
   fireEvent.click(within(nav()).getByRole("button", { name: "Go back to Models" }));
   expect(heading()).toBe("Models");
   act(() => controller.openStep("Summary"));
@@ -236,7 +236,7 @@ test("the omp step moves the focus to its title, checks omp and shows the answer
   press("Next");
   expect(heading()).toBe("omp");
   expect(document.activeElement).toBe(screen.getByRole("heading", { level: 2 }));
-  expect(posted).toContainEqual({ type: "agentCheckWanted", ompPath: "" });
+  expect(posted).toContainEqual({ type: "agentCheckWanted", ompPath: "", systemCertificates: false });
   expect(screen.getByText("Checking omp…")).not.toBeNull();
 });
 
@@ -244,7 +244,7 @@ test("an answer of the check for another omp path is ignored; Next waits for omp
   const { controller, posted } = setup({ mode: "settings", values: { "trama.ompPath": { user: "/x/omp" } } });
   const next = () => screen.getByRole("button", { name: "Next" }) as HTMLButtonElement;
   expect(heading()).toBe("omp");
-  expect(posted).toContainEqual({ type: "agentCheckWanted", ompPath: "/x/omp" });
+  expect(posted).toContainEqual({ type: "agentCheckWanted", ompPath: "/x/omp", systemCertificates: false });
   expect(next().disabled).toBe(true);
   expect(next().getAttribute("aria-describedby")).not.toBeNull();
   answered(controller, "");
@@ -263,6 +263,27 @@ test("an answer of the check for another omp path is ignored; Next waits for omp
   expect(next().disabled).toBe(false);
   answered(controller, "/x/omp");
   expect(screen.getByText("omp 18.12.6 answered with 3 models.")).not.toBeNull();
+});
+
+test("an omp older than the minimum keeps Next unavailable and says why with the sentence of the warning", () => {
+  const { controller } = setup({ mode: "settings" });
+  const next = () => screen.getByRole("button", { name: "Next" }) as HTMLButtonElement;
+  act(() => controller.receiveAgentCheck({ type: "agentCheck", ompPath: "", state: "done", ok: true, missing: false, version: "18.12.5", models: 12, tooOld: true }));
+  expect(next().disabled).toBe(true);
+  const reason = next().getAttribute("aria-describedby");
+  expect(reason).not.toBeNull();
+  expect(document.getElementById(reason as string)?.textContent).toContain("Trama needs omp 18.12.6 or later; the installed omp is 18.12.5.");
+});
+
+test("an answer for another path after the step's own answer checks the path on view again", () => {
+  const { controller, posted } = setup({ mode: "settings", values: { "trama.ompPath": { user: "/x/omp" } } });
+  act(() => controller.receiveAgentCheck({ type: "agentCheck", ompPath: "/x/omp", state: "done", ok: false, missing: true, error: "omp not found at /x/omp" }));
+  expect(posted.filter((m) => m.type === "agentCheckWanted")).toHaveLength(1);
+  // The installer ended: the host checked the saved path, which is not the one on view.
+  answered(controller, "");
+  expect(posted.filter((m) => m.type === "agentCheckWanted")).toHaveLength(2);
+  expect(posted.filter((m) => m.type === "agentCheckWanted").at(-1)).toEqual({ type: "agentCheckWanted", ompPath: "/x/omp", systemCertificates: false });
+  expect(screen.getByText("Checking omp…")).not.toBeNull();
 });
 
 test("leaving the omp step and coming back checks omp again", () => {
@@ -293,7 +314,7 @@ test("the omp step shows the Providers section under the status box only when om
   const rows = within(screen.getByRole("list", { name: "Providers" })).getAllByRole("listitem");
   expect(rows.map((row) => row.querySelector("p")?.textContent)).toEqual(["ChatGPT", "Anthropic", "GitHub Copilot", "Google Gemini CLI", "Google Antigravity", "Cursor", "xAI Grok"]);
   expect(within(rows[1] as HTMLElement).getByText("Connected")).not.toBeNull();
-  expect(within(rows[1] as HTMLElement).getByRole("button").textContent).toBe("Log in again");
+  expect(within(rows[1] as HTMLElement).getAllByRole("button").map((button) => button.textContent)).toEqual(["Log in again", "Log out"]);
   expect(within(rows[0] as HTMLElement).getByText("Not connected")).not.toBeNull();
   expect(within(rows[0] as HTMLElement).getByRole("button").textContent).toBe("Log in");
   checked(controller, "/x/omp", { ok: false, missing: false, error: "omp exited with code 1" });
@@ -339,10 +360,163 @@ test("pressing Log in sends ompLogin with the omp path of the step, saved or not
   press("Log in again to Anthropic");
   press("Log in to Cursor");
   expect(posted.filter((m) => m.type === "ompLogin")).toEqual([
-    { type: "ompLogin", provider: "anthropic", ompPath: "/typed/omp" },
-    { type: "ompLogin", provider: "cursor", ompPath: "/typed/omp" },
+    { type: "ompLogin", provider: "anthropic", ompPath: "/typed/omp", systemCertificates: false },
+    { type: "ompLogin", provider: "cursor", ompPath: "/typed/omp", systemCertificates: false },
   ]);
   expect((screen.getByLabelText("Omp Path") as HTMLInputElement).value).toBe("/typed/omp");
+});
+
+test("pressing Log out sends ompLogout with the omp path of the step, saved or not, and ompLogoutState makes its row busy; the choices of the wizard stay", () => {
+  const { controller, posted } = setup({ mode: "settings", values: { "trama.ompPath": { user: "/x/omp" } } });
+  checked(controller, "/x/omp", { ok: true, models: 2, providers: ["anthropic"] });
+  act(() => controller.setValue(schema.find((s) => s.key === "trama.ompPath") as never, "/typed/omp"));
+  checked(controller, "/typed/omp", { ok: true, models: 2, providers: ["anthropic", "cursor"] });
+  expect(screen.queryByRole("button", { name: "Log out of ChatGPT" })).toBeNull();
+  press("Log out of Anthropic");
+  expect(posted.filter((m) => m.type === "ompLogout")).toEqual([{ type: "ompLogout", provider: "anthropic", ompPath: "/typed/omp" }]);
+  act(() => controller.receiveLogoutState({ type: "ompLogoutState", provider: "anthropic", running: true }));
+  const rows = within(providersList() as HTMLElement).getAllByRole("listitem");
+  expect(rows[1]?.getAttribute("aria-busy")).toBe("true");
+  expect(within(rows[5] as HTMLElement).getByRole("button", { name: "Log out of Cursor" }).hasAttribute("disabled")).toBe(false);
+  // The wizard's own check answers, then the host says the logout ended: the row is free, the provider gone, and Next follows the check as for any other.
+  checked(controller, "/typed/omp", { ok: true, models: 1, providers: ["cursor"] });
+  act(() => controller.receiveLogoutState({ type: "ompLogoutState", provider: "anthropic", running: false }));
+  expect(rows[1]?.getAttribute("aria-busy")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Log out of Anthropic" })).toBeNull();
+  expect((screen.getByLabelText("Omp Path") as HTMLInputElement).value).toBe("/typed/omp");
+});
+
+const keySaved = (controller: WizardController, saved: boolean) => act(() => controller.receiveCursorApiKey({ type: "cursorApiKey", saved }));
+const cursorRow = () => within(providersList() as HTMLElement).getAllByRole("listitem")[5] as HTMLElement;
+
+test("the Cursor row of the omp step offers the API key as the Settings tab does, and only while omp answers", () => {
+  const { controller } = setup({ mode: "settings", values: { "trama.ompPath": { user: "/x/omp" } } });
+  expect(screen.queryByRole("button", { name: /Cursor API key/ })).toBeNull();
+  checked(controller, "/x/omp", { ok: false, missing: true, error: "omp not found at /x/omp" });
+  expect(screen.queryByRole("button", { name: /Cursor API key/ })).toBeNull();
+  checked(controller, "/x/omp", { ok: true, models: 1, providers: ["anthropic"] });
+  expect(within(cursorRow()).getByText("Cursor subscription or API key")).not.toBeNull();
+  expect(within(cursorRow()).getByRole("button", { name: "Set Cursor API key" }).textContent).toBe("Set API key");
+  expect(within(cursorRow()).queryByRole("button", { name: "Remove Cursor API key" })).toBeNull();
+  expect(within(cursorRow()).queryByText("API key saved")).toBeNull();
+  keySaved(controller, true);
+  expect(within(cursorRow()).getByRole("button", { name: "Change Cursor API key" }).textContent).toBe("Change API key");
+  expect(within(cursorRow()).getByRole("button", { name: "Remove Cursor API key" })).not.toBeNull();
+  expect(within(cursorRow()).getByText("API key saved")).not.toBeNull();
+  // The next check leaves the row as it is, with the key.
+  checked(controller, "/x/omp", { ok: true, models: 2, providers: ["anthropic", "cursor"] });
+  expect(within(cursorRow()).getByText("Connected")).not.toBeNull();
+  expect(within(cursorRow()).getByText("API key saved")).not.toBeNull();
+});
+
+test("Set, Change and Remove API key send the messages with the omp path of the step, saved or not, and keep the choices of the wizard", () => {
+  const { controller, posted } = setup({ mode: "settings", values: { "trama.ompPath": { user: "/x/omp" } } });
+  checked(controller, "/x/omp", { ok: true, models: 2, providers: ["anthropic"] });
+  act(() => controller.setValue(schema.find((s) => s.key === "trama.ompPath") as never, "/typed/omp"));
+  checked(controller, "/typed/omp", { ok: true, models: 2, providers: ["anthropic"] });
+  press("Set Cursor API key");
+  keySaved(controller, true);
+  press("Change Cursor API key");
+  press("Remove Cursor API key");
+  expect(posted.filter((m) => m.type === "setCursorApiKey" || m.type === "removeCursorApiKey")).toEqual([
+    { type: "setCursorApiKey", ompPath: "/typed/omp" },
+    { type: "setCursorApiKey", ompPath: "/typed/omp" },
+    { type: "removeCursorApiKey", ompPath: "/typed/omp" },
+  ]);
+  expect((screen.getByLabelText("Omp Path") as HTMLInputElement).value).toBe("/typed/omp");
+  expect(controller.getSnapshot().state?.step).toBe("omp");
+});
+
+test("a key change that this wizard asked for is checked once, by the host: the wizard does not ask for the check again", () => {
+  const { controller, posted } = setup({ mode: "settings", values: { "trama.ompPath": { user: "/x/omp" } } });
+  checked(controller, "/x/omp", { ok: true, models: 1, providers: [] });
+  const checks = () => posted.filter((m) => m.type === "agentCheckWanted").length;
+  const before = checks();
+  press("Set Cursor API key");
+  keySaved(controller, true);
+  expect(checks()).toBe(before);
+  press("Remove Cursor API key");
+  keySaved(controller, false);
+  expect(checks()).toBe(before);
+});
+
+test("after Esc or a failed keychain the host answers with the state as it is: the wizard stops waiting, and a later change from another window is checked", () => {
+  const { controller, posted } = setup({ mode: "settings", values: { "trama.ompPath": { user: "/x/omp" } } });
+  checked(controller, "/x/omp", { ok: true, models: 1, providers: [] });
+  const checks = () => posted.filter((m) => m.type === "agentCheckWanted").length;
+  const before = checks();
+  press("Set Cursor API key");
+  keySaved(controller, false);
+  expect(checks()).toBe(before);
+  keySaved(controller, true);
+  expect(checks()).toBe(before + 1);
+});
+
+test("a key saved, changed or removed in another window updates the row and, on the omp step, asks for the check again with the path of the step, as if it were made here", () => {
+  const { controller, posted } = setup({ mode: "settings", values: { "trama.ompPath": { user: "/x/omp" } } });
+  checked(controller, "/x/omp", { ok: true, models: 1, providers: ["anthropic"] });
+  act(() => controller.setValue(schema.find((s) => s.key === "trama.ompPath") as never, "/typed/omp"));
+  checked(controller, "/typed/omp", { ok: true, models: 1, providers: ["anthropic"] });
+  const wanted = () => posted.filter((m) => m.type === "agentCheckWanted");
+  const before = wanted().length;
+  keySaved(controller, true);
+  expect(within(cursorRow()).getByText("API key saved")).not.toBeNull();
+  expect(wanted().slice(before)).toEqual([{ type: "agentCheckWanted", ompPath: "/typed/omp", systemCertificates: false }]);
+  // The key replaced, then removed: each change is checked, and the row follows.
+  keySaved(controller, true);
+  keySaved(controller, false);
+  expect(wanted().slice(before)).toHaveLength(3);
+  expect(within(cursorRow()).queryByText("API key saved")).toBeNull();
+  // The wizard's choices stay as they were.
+  expect((screen.getByLabelText("Omp Path") as HTMLInputElement).value).toBe("/typed/omp");
+});
+
+test("a key change in another window asks for no check when the wizard is not on the omp step", () => {
+  const { controller, posted } = setup({ mode: "settings" });
+  answered(controller);
+  press("Next");
+  expect(heading()).toBe("Models");
+  const before = posted.filter((m) => m.type === "agentCheckWanted").length;
+  keySaved(controller, true);
+  expect(posted.filter((m) => m.type === "agentCheckWanted")).toHaveLength(before);
+  expect(controller.getSnapshot().cursorKey.saved).toBe(true);
+});
+
+test("the key is no choice of the wizard: not in the summary, not in the confirmation, and Cancel neither removes nor sends anything about it", () => {
+  const { controller, posted } = setup({ mode: "settings" });
+  checked(controller, "", { ok: true, models: 1, providers: ["cursor"] });
+  keySaved(controller, true);
+  advanceTo(controller, "Summary");
+  expect(screen.queryByText(/API key/)).toBeNull();
+  press("Save settings");
+  expect(posted.at(-1)).toEqual({ type: "confirmSetup", mode: "settings", values: [], excluded: [] });
+  expect(JSON.stringify(posted)).not.toContain("saved");
+  expect(posted.some((m) => m.type === "removeCursorApiKey")).toBe(false);
+});
+
+test("Cancel of the wizard leaves a saved key where it is", () => {
+  const { controller, posted, closed } = setup({ mode: "settings" });
+  checked(controller, "", { ok: true, models: 1, providers: [] });
+  press("Set Cursor API key");
+  keySaved(controller, true);
+  press("Cancel");
+  expect(closed).toEqual(["cancel:settings"]);
+  expect(posted.filter((m) => m.type === "removeCursorApiKey" || m.type === "confirmSetup")).toEqual([]);
+  expect(controller.getSnapshot().cursorKey.saved).toBe(true);
+});
+
+test("a Cursor key that gives omp one usable model is enough for Next to go to the Models step", () => {
+  const { controller } = setup({ mode: "settings" });
+  const next = () => screen.getByRole("button", { name: "Next" }) as HTMLButtonElement;
+  checked(controller, "", { ok: true, models: 0, providers: [] });
+  expect(next().disabled).toBe(true);
+  press("Set Cursor API key");
+  keySaved(controller, true);
+  // The host checks omp again with the key and omp lists a cursor model.
+  checked(controller, "", { ok: true, models: 1, providers: ["cursor"] });
+  expect(next().disabled).toBe(false);
+  press("Next");
+  expect(heading()).toBe("Models");
 });
 
 test("Next of the omp step stays disabled with omp answering with no model, saying to log in or set an API key, and opens when a login brings a model", () => {
@@ -380,14 +554,14 @@ test("Skip on Advanced goes back to the values of the start and shows the summar
   const { controller } = setup({ mode: "settings", values: { "trama.theme": { user: "dark" } } });
   advanceTo(controller, "Advanced");
   expect(heading()).toBe("Advanced");
-  fireEvent.click(screen.getByRole("checkbox", { name: "Drift Blocker" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Advisor Scanner" }));
   press("Skip");
   expect(heading()).toBe("Summary");
   expect(screen.getByText("Check your choices, then confirm.")).not.toBeNull();
   expect(screen.queryByText("changed")).toBeNull();
   press("Back");
   expect(heading()).toBe("Advanced");
-  expect((screen.getByRole("checkbox", { name: "Drift Blocker" }) as HTMLElement).getAttribute("aria-checked")).toBe("false");
+  expect((screen.getByRole("checkbox", { name: "Advisor Scanner" }) as HTMLElement).getAttribute("aria-checked")).toBe("true");
 });
 
 test("Skip is not primary and sits left of Next on Advanced, and only there", () => {
@@ -402,7 +576,7 @@ test("Skip is not primary and sits left of Next on Advanced, and only there", ()
 test("the summary has a card for each step with its Edit, the rows with the changed ones marked, and Edit goes back to its step", () => {
   const { controller } = setup({ mode: "settings", values: { "trama.scan": { user: "gpt-5" } } });
   advanceTo(controller, "Advanced");
-  fireEvent.click(screen.getByRole("checkbox", { name: "Drift Blocker" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Advisor Scanner" }));
   press("Next");
   expect(heading()).toBe("Summary");
   const cards = Array.from(document.querySelectorAll("[data-slot='card']")) as HTMLElement[];
@@ -411,10 +585,10 @@ test("the summary has a card for each step with its Edit, the rows with the chan
   // Advanced shows its four subgroups with their subtitles.
   expect(Array.from(card("Advanced").querySelectorAll("h4")).map((h) => h.textContent)).toEqual(["Appearance", "Drifts", "Agents", "omp Chat"]);
   const row = (step: string, title: string) => within(card(step)).getByText(title).closest("div") as HTMLElement;
-  expect(row("Advanced", "Drift Blocker").textContent).toContain("On");
-  expect(row("Advanced", "Drift Blocker").textContent).toContain("changed");
-  expect(row("Advanced", "Drift Blocker").textContent).toContain("was Off");
-  expect(row("Advanced", "Drift Blocker").className).toContain("bg-primary/10");
+  expect(row("Advanced", "Advisor Scanner").textContent).toContain("Off");
+  expect(row("Advanced", "Advisor Scanner").textContent).toContain("changed");
+  expect(row("Advanced", "Advisor Scanner").textContent).toContain("was On");
+  expect(row("Advanced", "Advisor Scanner").className).toContain("bg-primary/10");
   expect(row("Models", "Scan").textContent).toContain("gpt-5");
   expect(row("Models", "Scan").textContent).not.toContain("changed");
   expect(row("Models", "Scan").querySelector(".font-mono")?.textContent).toBe("gpt-5");
@@ -432,10 +606,10 @@ test("the summary has a card for each step with its Edit, the rows with the chan
 test("the confirmation sends only the changed keys, disables every button while it runs and, when it fails, shows the reason and keeps its text", () => {
   const { controller, posted } = setup({ mode: "settings" });
   advanceTo(controller, "Advanced");
-  fireEvent.click(screen.getByRole("checkbox", { name: "Drift Blocker" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Advisor Scanner" }));
   press("Next");
   press("Save settings");
-  expect(posted.at(-1)).toEqual({ type: "confirmSetup", mode: "settings", values: [{ key: "trama.driftBlocker", value: true }], excluded: [] });
+  expect(posted.at(-1)).toEqual({ type: "confirmSetup", mode: "settings", values: [{ key: "trama.advisorScanner", value: false }], excluded: [] });
   // Every button of the wizard, the ones of the indicator and the «Edit» too, and the confirmation turns.
   const buttons = screen.getAllByRole("button") as HTMLButtonElement[];
   expect(buttons.length).toBeGreaterThan(8);
@@ -552,6 +726,27 @@ test("Get Started mounts the wizard in the first-setup mode only without a proje
   expect(heading()).toBe("Path");
 });
 
+test("the Get Started wizard takes the key state of the host too: its omp step shows the saved key and checks omp again for a change from another window", () => {
+  const posted: ToHost[] = [];
+  const page = render(<></>);
+  const view = mountGetStarted((node) => page.rerender(<>{node}</>), { post: (message) => posted.push(message), navigate: () => {}, openLink: () => {} });
+  act(() => {
+    view.projectPresent(false);
+    view.receiveSettings({ type: "settings", schema, values: {} });
+    view.receiveFolders({ type: "workspaceFolders", folders: [FOLDER] });
+    view.receiveCursorApiKey({ type: "cursorApiKey", saved: true });
+  });
+  fireEvent.click(screen.getByRole("radio", { name: /Import from Code/ }));
+  press("Next");
+  expect(heading()).toBe("omp");
+  act(() => view.receiveAgentCheck({ type: "agentCheck", ompPath: "", state: "done", ok: true, missing: false, version: "18.12.6", models: 1, providers: [] }));
+  expect(within(cursorRow()).getByText("API key saved")).not.toBeNull();
+  const before = posted.filter((m) => m.type === "agentCheckWanted").length;
+  act(() => view.receiveCursorApiKey({ type: "cursorApiKey", saved: false }));
+  expect(posted.filter((m) => m.type === "agentCheckWanted").slice(before)).toEqual([{ type: "agentCheckWanted", ompPath: "", systemCertificates: false }]);
+  expect(within(cursorRow()).queryByText("API key saved")).toBeNull();
+});
+
 const FILES = [
   { label: "AGENTS.md", path: "/work/app/AGENTS.md" },
   { label: "~/.claude/CLAUDE.md", path: "/home/me/.claude/CLAUDE.md" },
@@ -622,7 +817,7 @@ test("Advanced has its four subgroups with their subtitles, in order, each with 
   advanceTo(controller, "Advanced");
   const groups = Array.from(document.querySelectorAll("section[aria-label]")) as HTMLElement[];
   expect(groups.map((group) => group.querySelector("h3")?.textContent)).toEqual(["Appearance", "Drifts", "Agents", "omp Chat"]);
-  expect(groups.map((group) => group.querySelectorAll("label").length)).toEqual([1, 3, 3, 3]);
+  expect(groups.map((group) => group.querySelectorAll("label").length)).toEqual([1, 2, 3, 3]);
 });
 
 test("the omp step shows the state of the check in a bordered live region at the top, before the settings, with Install omp inside it when omp is missing", () => {
@@ -645,7 +840,7 @@ test("the omp step shows the state of the check in a bordered live region at the
 test("the omp step asks the language as an editable text field, with the explanation of the Settings tab, and never Auto Exit; the value is kept for the summary", () => {
   const { controller } = setup({ mode: "settings", values: { "trama.language": { user: "Italian" } } });
   expect(screen.queryByRole("checkbox", { name: "Auto Exit" })).toBeNull();
-  expect(Array.from(document.querySelectorAll("label[for^='st-']")).map((label) => label.textContent)).toEqual(["Omp Path", "Terminal Location", "Ignore Instruction Files", "Language"]);
+  expect(Array.from(document.querySelectorAll("label[for^='st-']")).map((label) => label.textContent)).toEqual(["Omp Path", "Terminal Location", "Ignore Instruction Files", "Language", "System Certificates"]);
   const field = screen.getByRole("textbox", { name: "Language" }) as HTMLInputElement;
   expect(field.disabled).toBe(false);
   expect(field.value).toBe("Italian");
@@ -732,4 +927,146 @@ test("the search is asked again each time the omp step is shown; in the first se
   expect(heading()).toBe("omp");
   expect(wanted(posted)).toHaveLength(2);
   expect(screen.queryByText(/Agent instruction files found/)).toBeNull();
+});
+
+
+// ---- System Certificates in the omp step ----
+
+const WHEN = "2026-10-25T10:30:00.000Z";
+const NOW = Date.parse(WHEN);
+const label = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+const box = () => screen.getByRole("checkbox", { name: "System Certificates" });
+const certificates = (state: { exporting: boolean; count?: number; exportedAt?: string; error?: string }) => ({ type: "systemCertificates" as const, ...state });
+const checksWanted = (posted: ToHost[]) => posted.filter((m) => m.type === "agentCheckWanted");
+const exportsAsked = (posted: ToHost[]) => posted.filter((m) => m.type === "systemCertificatesExport");
+
+test("System Certificates is the last setting of the omp step, off by default, and its line and Refresh show only with the box checked in the step", () => {
+  const { controller } = setup({ mode: "settings" });
+  expect(box().getAttribute("aria-checked")).toBe("false");
+  act(() => controller.receiveSystemCertificates(certificates({ exporting: false, count: 3, exportedAt: WHEN })));
+  expect(screen.queryByRole("button", { name: "Refresh system certificates" })).toBeNull();
+  fireEvent.click(box());
+  expect(screen.getByRole("button", { name: "Refresh system certificates" })).not.toBeNull();
+  expect(screen.getByText(`3 certificates, exported ${label(WHEN)}.`)).not.toBeNull();
+  fireEvent.click(box());
+  expect(screen.queryByRole("button", { name: "Refresh system certificates" })).toBeNull();
+});
+
+test("the four states of the bundle read in the step as in the Settings tab", () => {
+  const { controller } = setup({ mode: "settings", values: { "trama.systemCertificates": { user: true } } });
+  const cases: [Parameters<typeof certificates>[0], string][] = [
+    [{ exporting: true }, "Exporting system certificates…"],
+    [{ exporting: false, count: 12, exportedAt: WHEN }, `12 certificates, exported ${label(WHEN)}.`],
+    [{ exporting: false, count: 12, exportedAt: WHEN, error: "security exited with code 44" }, `Could not export the system certificates (security exited with code 44). Using the ones exported ${label(WHEN)}.`],
+    [{ exporting: false, error: "no certificate bundle found" }, "Could not export the system certificates (no certificate bundle found). omp gets no certificates from Trama."],
+  ];
+  for (const [state, text] of cases) {
+    act(() => controller.receiveSystemCertificates(certificates(state)));
+    expect(screen.getByText(text).closest("[aria-live]")?.getAttribute("aria-live")).toBe("polite");
+  }
+});
+
+test("checking the box with no bundle asks the host for an export, and the step checks omp again with the bundle when the export ends, successful or not", () => {
+  const { controller, posted } = setup({ mode: "settings", now: () => NOW });
+  const before = checksWanted(posted).length;
+  fireEvent.click(box());
+  expect(exportsAsked(posted)).toHaveLength(1);
+  // Nothing is checked while the export runs.
+  expect(checksWanted(posted)).toHaveLength(before);
+  act(() => controller.receiveSystemCertificates(certificates({ exporting: true })));
+  expect(checksWanted(posted)).toHaveLength(before);
+  act(() => controller.receiveSystemCertificates(certificates({ exporting: false, count: 4, exportedAt: new Date(NOW).toISOString() })));
+  expect(checksWanted(posted).slice(before)).toEqual([{ type: "agentCheckWanted", ompPath: "", systemCertificates: true }]);
+  // A failed export ends the same way.
+  act(() => controller.receiveSystemCertificates(certificates({ exporting: true, count: 4, exportedAt: WHEN })));
+  act(() => controller.receiveSystemCertificates(certificates({ exporting: false, count: 4, exportedAt: WHEN, error: "no certificate authority found" })));
+  expect(checksWanted(posted).slice(before)).toHaveLength(2);
+  expect(checksWanted(posted).at(-1)).toEqual({ type: "agentCheckWanted", ompPath: "", systemCertificates: true });
+  expect(exportsAsked(posted)).toHaveLength(1);
+});
+
+test("a bundle of the last 24 hours is not exported again when the box is checked: omp is checked again at once; an older one is exported", () => {
+  const fresh = setup({ mode: "settings", now: () => NOW + 23 * 3600_000 });
+  act(() => fresh.controller.receiveSystemCertificates(certificates({ exporting: false, count: 4, exportedAt: WHEN })));
+  const before = checksWanted(fresh.posted).length;
+  fireEvent.click(box());
+  expect(exportsAsked(fresh.posted)).toEqual([]);
+  expect(checksWanted(fresh.posted).slice(before)).toEqual([{ type: "agentCheckWanted", ompPath: "", systemCertificates: true }]);
+  cleanup();
+  const old = setup({ mode: "settings", now: () => NOW + 25 * 3600_000 });
+  act(() => old.controller.receiveSystemCertificates(certificates({ exporting: false, count: 4, exportedAt: WHEN })));
+  fireEvent.click(box());
+  expect(exportsAsked(old.posted)).toHaveLength(1);
+});
+
+test("unchecking the box checks omp again at once, without the bundle and without asking for an export", () => {
+  const { controller, posted } = setup({ mode: "settings", values: { "trama.systemCertificates": { user: true } } });
+  act(() => controller.receiveSystemCertificates(certificates({ exporting: false, count: 4, exportedAt: WHEN })));
+  const before = checksWanted(posted).length;
+  fireEvent.click(box());
+  expect(checksWanted(posted).slice(before)).toEqual([{ type: "agentCheckWanted", ompPath: "", systemCertificates: false }]);
+  expect(exportsAsked(posted)).toEqual([]);
+  // An export that ends with the box unchecked does not check anything.
+  act(() => controller.receiveSystemCertificates(certificates({ exporting: true, count: 4, exportedAt: WHEN })));
+  act(() => controller.receiveSystemCertificates(certificates({ exporting: false, count: 4, exportedAt: WHEN })));
+  expect(checksWanted(posted)).toHaveLength(before + 1);
+});
+
+test("Refresh in the step asks the host for an export, disabled while one runs; when it ends the step checks omp again and the wizard's choices stay", () => {
+  const { controller, posted } = setup({ mode: "settings", values: { "trama.systemCertificates": { user: true }, "trama.ompPath": { user: "/typed/omp" } } });
+  act(() => controller.receiveSystemCertificates(certificates({ exporting: false, count: 4, exportedAt: WHEN })));
+  const before = checksWanted(posted).length;
+  fireEvent.click(screen.getByRole("button", { name: "Refresh system certificates" }));
+  expect(exportsAsked(posted)).toHaveLength(1);
+  act(() => controller.receiveSystemCertificates(certificates({ exporting: true, count: 4, exportedAt: WHEN })));
+  const refresh = screen.getByRole("button", { name: "Refresh system certificates" }) as HTMLButtonElement;
+  expect(refresh.disabled).toBe(true);
+  controller.refreshCertificates();
+  expect(exportsAsked(posted)).toHaveLength(1);
+  act(() => controller.receiveSystemCertificates(certificates({ exporting: false, count: 5, exportedAt: WHEN })));
+  expect(checksWanted(posted).slice(before)).toEqual([{ type: "agentCheckWanted", ompPath: "/typed/omp", systemCertificates: true }]);
+  expect((screen.getByLabelText("Omp Path") as HTMLInputElement).value).toBe("/typed/omp");
+  expect(box().getAttribute("aria-checked")).toBe("true");
+});
+
+test("the step's value reaches the check, the installer and the login terminals, and the saved setting is not touched", () => {
+  const { controller, posted } = setup({ mode: "settings", now: () => NOW });
+  const missing = () => act(() => controller.receiveAgentCheck({ type: "agentCheck", ompPath: "", state: "done", ok: false, missing: true, error: "omp not found at the editor PATH" }));
+  act(() => controller.receiveSystemCertificates(certificates({ exporting: false, count: 4, exportedAt: new Date(NOW).toISOString() })));
+  missing();
+  press("Install omp");
+  expect(posted.filter((m) => m.type === "installOmp")).toEqual([{ type: "installOmp", systemCertificates: false }]);
+  fireEvent.click(box());
+  missing();
+  press("Install omp");
+  expect(posted.filter((m) => m.type === "installOmp").at(-1)).toEqual({ type: "installOmp", systemCertificates: true });
+  answered(controller);
+  press("Log in to Anthropic");
+  expect(posted.filter((m) => m.type === "ompLogin").at(-1)).toEqual({ type: "ompLogin", provider: "anthropic", ompPath: "", systemCertificates: true });
+  fireEvent.click(box());
+  answered(controller);
+  press("Log in to Anthropic");
+  expect(posted.filter((m) => m.type === "ompLogin").at(-1)).toEqual({ type: "ompLogin", provider: "anthropic", ompPath: "", systemCertificates: false });
+  expect(posted.some((m) => m.type === "setSetting" || m.type === "confirmSetup")).toBe(false);
+});
+
+test("the value is saved with the other choices at the confirmation and shows in the summary; cancelling saves nothing", () => {
+  const { controller, posted, closed } = setup({ mode: "settings" });
+  fireEvent.click(box());
+  advanceTo(controller, "Summary");
+  const row = screen.getByText("System Certificates").closest("li, tr, div") as HTMLElement;
+  expect(row.textContent).toContain("On");
+  press("Save settings");
+  const confirm = posted.find((m) => m.type === "confirmSetup");
+  expect(confirm).toMatchObject({ type: "confirmSetup", mode: "settings", values: [{ key: "trama.systemCertificates", value: true }] });
+  expect(closed).toEqual([]);
+});
+
+test("cancelling the wizard leaves the saved value as it was and sends no confirmation", () => {
+  const { controller, posted, closed } = setup({ mode: "settings" });
+  fireEvent.click(box());
+  press("Cancel");
+  expect(closed).toEqual(["cancel:settings"]);
+  expect(posted.some((m) => m.type === "confirmSetup" || m.type === "setSetting")).toBe(false);
+  expect(controller.isOpen()).toBe(false);
 });

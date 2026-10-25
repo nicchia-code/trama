@@ -222,6 +222,17 @@ describe("the write tools of a Run claim the files they write", () => {
     expect(hook.write(sub(root, "b"), "src/b.ts")).toEqual(blockedBy("a"));
   });
 
+  test("ast_edit claims a file whose own name has pattern characters, as written", () => {
+    const root = projectRoot();
+    mkdirSync(join(root, "routes"));
+    writeFileSync(join(root, "routes", "[id].ts"), "");
+    writeFileSync(join(root, "routes", "i.ts"), "");
+    const hook = hookOf();
+    expect(hook.tool(sub(root, "a"), "ast_edit", { ops: [{ pat: "x", out: "y" }], paths: ["routes/[id].ts"] })).toBeUndefined();
+    expect(hook.write(sub(root, "b"), "routes/[id].ts")).toEqual(blockedBy("a"));
+    expect(hook.write(sub(root, "b"), "routes/i.ts")).toBeUndefined();
+  });
+
   test("a path outside the project is claimed by nobody", () => {
     const root = projectRoot();
     const hook = hookOf();

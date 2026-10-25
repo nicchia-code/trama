@@ -2,6 +2,7 @@ import { type KeyboardEvent, type RefObject, useEffect, useRef, useState, useSyn
 import { cardLabel, noNumbers } from "../../../../src/core/card-names";
 import { REFINEMENT_OFF, refineStatus } from "../board/logic";
 import { FocusBar } from "../focus/bar";
+import { FOCUSED_REASON } from "../proposal-select";
 import type { MountView, ViewContext } from "../types";
 import { Button } from "../ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
@@ -69,12 +70,12 @@ function DiagramCanvas({ store, stage, canvasRef }: { store: DiagramStore; stage
   }, [state.selected, canvasRef]);
 
   useEffect(() => {
-    const { graph, fit, fitTo, focus } = state;
+    const { graph, fit, fitTo, fitSmooth, focus } = state;
     if (!graph) return;
     const refit = fit !== fitSeen.current;
     fitSeen.current = fit;
-    void canvasRef.current?.render(graph, refit, fitTo, focus?.highlight);
-  }, [state.graph, state.fit, state.fitTo, state.focus, canvasRef]);
+    void canvasRef.current?.render(graph, refit, fitTo, focus?.highlight, fitSmooth);
+  }, [state.graph, state.fit, state.fitTo, state.fitSmooth, state.focus, canvasRef]);
 
   const graph = state.graph;
   return (
@@ -179,8 +180,8 @@ export function DiagramView({ store, context }: { store: DiagramStore; context: 
           <span className="flex-1" />
           <label className="flex items-center gap-1.5 text-muted-foreground">
             Proposal
-            <Select value={state.proposalId ?? NO_PROPOSAL} onValueChange={(value) => store.chooseProposal(value === NO_PROPOSAL ? null : value)}>
-              <SelectTrigger className="max-w-[380px]" aria-label="Proposal to draw over the Model">
+            <Select value={state.proposalId ?? NO_PROPOSAL} disabled={state.focus !== null} onValueChange={(value) => store.chooseProposal(value === NO_PROPOSAL ? null : value)}>
+              <SelectTrigger className="max-w-[380px]" aria-label="Proposal to draw over the Model" aria-description={state.focus ? FOCUSED_REASON : undefined}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

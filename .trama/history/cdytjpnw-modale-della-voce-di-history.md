@@ -1,11 +1,12 @@
 ---
 created: 2026-10-18T07:32:06.736Z
-updated: 2026-10-18T08:11:10.948Z
+updated: 2026-10-24T20:56:01.773Z
 summary: "La finestra dei dettagli di una voce di History mostra titolo e data completa, resta modale anche quando la Board si aggiorna o la voce cambia posto, e non si ridisegna a ogni aggiornamento: scorrimento e fuoco restano dove sono finché il contenuto non cambia."
 tasks:
   - r174qdoy
   - u5n144hu
   - jdtjzcek
+  - 5xjjz3fm
 cleared:
   jdtjzcek:
     title: "Fix code to match the Model: Finestra della voce non più modale"

@@ -19,8 +19,9 @@ import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
 import { attachedDrift, blockedTasks, dismissDrift, getDrift, getTask, getTaskOrNull, listDrifts, listTasks, originDesign, requireNotAttached } from "../../../src/core/work";
 import type { AgentAction, NavigateOptions, RefinementView, RunEstimateView, SetupChoice, ToHost, ToWebview, ViewName, WorkspaceFolderView } from "../protocol";
 import type { MenuViewName } from "../menu-protocol";
+import { listAnnouncements } from "../../../src/core/announcements";
 import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
-import { configuredAsyncDriftResolver, configuredAutoUpdateStaleProposals, configuredMaxParallelAgents, configuredModels, configuredOmpPath, configuredParallelExecution, configuredSkillsDir, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, installOmp, launchAgent, launched, loginOmp, openAskMore, settings, startHeldJob } from "./agent";
+import { configuredAsyncDriftResolver, configuredAutoUpdateStaleProposals, configuredMaxParallelAgents, configuredModels, configuredOmpPath, configuredParallelExecution, configuredSkillsDir, configuredSystemCertificates, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, installOmp, launchAgent, type LogoutOutcome, launched, loginOmp, logoutOmp, openAskMore, settings, startHeldJob } from "./agent";
 import { bundledUnifyInstructions } from "./bundled";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
 import { driftWork, driftsFinishing, localProjectJobs, onAgentStopped, onDriftResolutionChange, onProposalDelivered, onStoppedFollowing, proposalsFinishing, receiveNotice, releaseFiledWork, type RunAll, tasksFinishing, unifyingDrifts } from "./drift-resolution";
@@ -54,6 +55,7 @@ import {
   refineAllClicked,
   refineAllPick,
   refinementEnd,
+  refinementNotes,
   refinementView,
   switchedOff,
   withdraw,
@@ -62,8 +64,10 @@ import { planRuns, runSequence, runSequenceTogether, startRuns, type AppliedMode
 import { runAllEstimate } from "./run-all-estimate";
 import { ompModels } from "./model-lists";
 import { ensureOmpUpdated, findOmp, forgetUpdateCheck } from "./omp-update";
+import { cursorKeySaved, onCursorApiKeyChanged, removeCursorApiKey, saveCursorApiKey } from "./cursor-api-key";
 import { ompLoginProvider } from "../omp-login";
 import { ompStatus } from "./omp-status";
+import { exportFailureMessage, onSystemCertificatesChanged, runExport, systemCertificatesState } from "./system-certificates";
 import { confirmScanSystem } from "./scan-confirm";
 import { planSettingChange, settingsSchema, settingTitle, type SettingPlan, type SettingSchema, type SettingsValues } from "./settings-schema";
 import { resolveMarkdownFile } from "./paths";
@@ -106,6 +110,19 @@ const ownWindowRuns = (root: string): boolean => localProjectJobs(root).some((jo
 
 const QUESTIONS_WAITING = "Trama has questions from the agent waiting.";
 const REOPEN = "Reopen";
+
+/** The masked input box of the Cursor API key: the text without spaces around it, or undefined for Esc. A blank text cannot be confirmed. */
+async function askCursorApiKey(): Promise<string | undefined> {
+  const typed = await vscode.window.showInputBox({
+    title: "Cursor API key",
+    prompt: "Paste a user API key from the Cursor dashboard. Trama keeps it in the editor's secret storage.",
+    password: true,
+    ignoreFocusOut: true,
+    validateInput: (text) => (text.trim() === "" ? "Enter a Cursor API key." : undefined),
+  });
+  const key = typed?.trim();
+  return key === undefined || key === "" ? undefined : key;
+}
 
 const notBlank = (message: string) => (value: string) => (value.trim() === "" ? message : undefined);
 
@@ -379,21 +396,21 @@ export class Controller implements vscode.Disposable {
 
   /**
    * The check of the omp step: the program found as the launches find it, the update check and, with a newer version, the update (announced
-   * with `updating`), then `omp models --json`.
+   * with `updating`), then `omp models --json`. `systemCertificates` is the wizard step's value of System Certificates for this check; without it the saved setting counts.
    */
-  private async checkAgent(ompPath: string): Promise<void> {
+  private async checkAgent(ompPath: string, systemCertificates?: boolean): Promise<readonly string[] | undefined> {
     const wanted = ompPath.trim();
     const program = await findOmp(wanted);
     if (program === undefined) {
       this.post({ type: "agentCheck", ompPath, state: "done", ok: false, missing: true, error: `omp not found at ${wanted === "" ? "the editor PATH" : wanted}` });
-      return;
+      return undefined;
     }
-    const outcome = await ensureOmpUpdated(program, (version) => this.post({ type: "agentCheck", ompPath, state: "updating", version }));
+    const outcome = await ensureOmpUpdated(program, (version) => this.post({ type: "agentCheck", ompPath, state: "updating", version }), undefined, undefined, systemCertificates);
     if (outcome.missing === true) {
       this.post({ type: "agentCheck", ompPath, state: "done", ok: false, missing: true, error: `omp not found at ${wanted === "" ? "the editor PATH" : wanted}` });
-      return;
+      return undefined;
     }
-    const list = await ompModels(wanted === "" ? program : wanted);
+    const list = await ompModels(wanted === "" ? program : wanted, undefined, undefined, systemCertificates);
     this.post({
       type: "agentCheck",
       ompPath,
@@ -406,15 +423,23 @@ export class Controller implements vscode.Disposable {
       ...(outcome.updateError === undefined ? {} : { updateError: outcome.updateError }),
       ...(outcome.tooOld === true ? { tooOld: true as const } : {}),
     });
+    return list.providers;
   }
 
-  /** Install omp: a visible terminal with the official installer; when it ends the wizard and the Settings tab get a new omp check, for the path set by then. */
-  installOmp(): void {
-    installOmp(() => {
-      forgetUpdateCheck();
-      void this.checkAgent(configuredOmpPath());
-      void this.refreshOmp(true);
-    });
+  /**
+   * Install omp: a visible terminal with the official installer; when it ends the wizard and the Settings tab get a new omp check, for the path set by then. `systemCertificates` is
+   * the wizard step's value of System Certificates, for that terminal and that check only; without it the saved setting counts.
+   */
+  installOmp(systemCertificates?: boolean): void {
+    installOmp(
+      () => {
+        forgetUpdateCheck();
+        void this.checkAgent(configuredOmpPath(), systemCertificates);
+        void this.refreshOmp(true);
+      },
+      undefined,
+      systemCertificates,
+    );
   }
 
   /**
@@ -422,7 +447,7 @@ export class Controller implements vscode.Disposable {
    * it, of the saved `trama.ompPath`. `provider` is an id of the fixed list (`parseToHost` checked it). When the command ends or the terminal closes, whatever
    * the outcome, the Settings tab's omp state and the wizard's omp check run again, silently: the outcome stays in the terminal.
    */
-  private async ompLogin(provider: string, ompPath: string | undefined): Promise<void> {
+  private async ompLogin(provider: string, ompPath: string | undefined, systemCertificates?: boolean): Promise<void> {
     const entry = ompLoginProvider(provider);
     if (entry === undefined) return;
     const wanted = ompPath ?? configuredOmpPath();
@@ -431,10 +456,144 @@ export class Controller implements vscode.Disposable {
       this.post({ type: "error", message: `omp not found at ${wanted.trim() === "" ? "the editor PATH" : wanted.trim()}` });
       return;
     }
-    loginOmp(program, entry, () => {
-      void this.checkAgent(wanted);
-      void this.refreshOmp(true);
-    });
+    loginOmp(
+      program,
+      entry,
+      () => {
+        void this.checkAgent(wanted, systemCertificates);
+        void this.refreshOmp(true);
+      },
+      undefined,
+      systemCertificates,
+    );
+  }
+
+  /** The providers whose logout is under way, so a second request for the same one does nothing until its checks have answered. */
+  private readonly loggingOut = new Set<string>();
+
+  /**
+   * Log out of a model provider: a modal confirmation first (closing it does nothing at all), then `omp auth-broker logout <id>` (`logoutOmp`) with the omp of `ompPath` (the wizard's
+   * omp step, saved or not) or of the saved `trama.ompPath`. `provider` is an id of the fixed list (`parseToHost` checked it). The row is told the logout runs until the checks that
+   * follow have answered. A failure is an editor error with omp's reason. Whatever the outcome, the Settings tab's omp state and the wizard's omp check run again; after a success,
+   * a provider the check of the same program still lists as Connected is told once to be reachable through another credential.
+   */
+  private async ompLogout(provider: string, ompPath: string | undefined): Promise<void> {
+    const entry = ompLoginProvider(provider);
+    if (entry === undefined || this.loggingOut.has(entry.id)) return;
+    const choice = await vscode.window.showWarningMessage(
+      `Log out of ${entry.name}?`,
+      { modal: true, detail: `omp forgets every account of ${entry.name} it stored. Credentials in environment variables, \`.env\` files or \`models.yml\` stay.` },
+      "Log out",
+    );
+    if (choice !== "Log out" || this.loggingOut.has(entry.id)) return;
+    this.loggingOut.add(entry.id);
+    this.post({ type: "ompLogoutState", provider: entry.id, running: true });
+    try {
+      const wanted = ompPath ?? configuredOmpPath();
+      const program = await findOmp(wanted.trim());
+      const outcome: LogoutOutcome = program === undefined ? { ok: false, reason: "could not start omp" } : await logoutOmp(program, entry);
+      if (!outcome.ok) void vscode.window.showErrorMessage(`Trama: could not log out of ${entry.name}: ${outcome.reason}.`);
+      const [providers] = await Promise.all([this.checkAgent(wanted), this.refreshOmp(true)]);
+      if (outcome.ok && providers?.includes(entry.id) === true) {
+        void vscode.window.showInformationMessage(
+          entry.apiKey === true && cursorKeySaved()
+            ? `Trama: ${entry.name} is still connected through the Cursor API key saved in Trama or another credential. Remove them to disconnect.`
+            : `Trama: ${entry.name} is still connected through another credential (environment variable, \`.env\` file or \`models.yml\`). Remove it there to disconnect.`,
+        );
+      }
+    } catch (err) {
+      this.post({ type: "error", message: describeError(err) });
+    } finally {
+      this.loggingOut.delete(entry.id);
+      this.post({ type: "ompLogoutState", provider: entry.id, running: false });
+    }
+  }
+
+  /** Sends the panel the state of the System Certificates bundle of this window. */
+  private postSystemCertificates(): void {
+    this.post({ type: "systemCertificates", ...systemCertificatesState() });
+  }
+
+  /**
+   * Exports the System Certificates bundle (`rules#developer.REFRESH_SYSTEM_CERTIFICATES`); a request while an export of this window runs does nothing. `origin` says who asked:
+   * `automatic` (the extension's start) shows the editor warning once if it fails, with `Open Settings`; `command` says the outcome in an editor message; `panel` is the Settings
+   * tab or the setting turned on; `wizard` is the omp step, whose own check follows the export, so only the Settings tab is checked here. Whatever the outcome, omp is checked again
+   * in silence, with the providers' state and the model suggestions, as after a change of the Cursor API key.
+   */
+  async exportSystemCertificates(origin: "automatic" | "command" | "panel" | "wizard"): Promise<void> {
+    const outcome = await runExport();
+    if (outcome === undefined) return;
+    // The outcome of the last update check no longer holds: the next check runs with the bundle as it is now.
+    forgetUpdateCheck();
+    const { exportedAt } = systemCertificatesState();
+    if (outcome.ok) {
+      if (origin === "command") void vscode.window.showInformationMessage(`Trama: exported ${outcome.count} system certificates.`);
+    } else if (origin === "command") {
+      void vscode.window.showErrorMessage(exportFailureMessage(outcome.reason, exportedAt));
+    } else if (origin === "automatic") {
+      void vscode.window.showWarningMessage(exportFailureMessage(outcome.reason, exportedAt), "Open Settings").then((choice) => (choice === "Open Settings" ? this.openSettings() : undefined));
+    }
+    await this.recheckOmp(origin !== "wizard");
+  }
+
+  /** The command `Trama: Refresh System Certificates`: exports again while the mode is on and says the outcome. */
+  async refreshSystemCertificatesCommand(): Promise<void> {
+    if (!configuredSystemCertificates()) {
+      void vscode.window.showInformationMessage("Trama: System Certificates is off.");
+      return;
+    }
+    await this.exportSystemCertificates("command");
+  }
+
+  /** The mode System Certificates changed in the user settings: turned on, the bundle is exported; turned off, nothing is exported. Either way omp is checked again in silence. */
+  async systemCertificatesChanged(): Promise<void> {
+    if (configuredSystemCertificates()) await this.exportSystemCertificates("panel");
+    else {
+      forgetUpdateCheck();
+      await this.recheckOmp(true);
+    }
+  }
+
+  /** The silent check of omp after an export or a change of the mode, panel open or not: the Settings tab's state and, when `wizard`, the check of the wizard's omp step for the saved path. */
+  private async recheckOmp(wizard: boolean): Promise<void> {
+    void this.refreshOmp(true);
+    if (wizard) await this.checkAgent(configuredOmpPath());
+  }
+
+  /** Sends the panel whether a Cursor API key is saved: only that, never the key. */
+  private postCursorApiKey(): void {
+    this.post({ type: "cursorApiKey", saved: cursorKeySaved() });
+  }
+
+  /**
+   * Set/Change API key: the masked input box of the editor, then, when the key is saved in the secret storage (a new key replaces the old one), the panel is told, and the omp
+   * state, the providers and the model suggestions are read again, and omp is checked at `ompPath` (or the saved `trama.ompPath`), as at the end of a login terminal. Esc, or a
+   * secret storage that fails (the editor tells the developer), changes nothing and checks nothing: the panel is only told the state as it is, so a wizard waiting for the
+   * answer to its own request stops waiting and a later change from another window is not taken for it.
+   */
+  private async saveTypedCursorKey(ompPath: string | undefined): Promise<void> {
+    const key = await askCursorApiKey();
+    if (key === undefined || !(await saveCursorApiKey(key))) {
+      this.postCursorApiKey();
+      return;
+    }
+    await this.cursorKeyChanged(ompPath);
+  }
+
+  /** Remove API key: no confirmation; same follow-up as `saveTypedCursorKey`, and the same state-only answer when the secret storage fails. The editor's own `CURSOR_ACCESS_TOKEN` stays as it is. */
+  private async removeSavedCursorKey(ompPath: string | undefined): Promise<void> {
+    if (!(await removeCursorApiKey())) {
+      this.postCursorApiKey();
+      return;
+    }
+    await this.cursorKeyChanged(ompPath);
+  }
+
+  /** The key of this window changed: the panel is told, and the checks that depend on it run once. */
+  private async cursorKeyChanged(ompPath: string | undefined): Promise<void> {
+    this.postCursorApiKey();
+    void this.refreshOmp(true);
+    await this.checkAgent(ompPath ?? configuredOmpPath());
   }
 
   /**
@@ -631,6 +790,12 @@ export class Controller implements vscode.Disposable {
       onQuestionRoundChange(() => this.refresh()),
       onDriftResolutionChange(() => this.refresh()),
       onProposalDelivered((root, id) => this.noteDelivered(root, id)),
+      onSystemCertificatesChanged(() => this.postSystemCertificates()),
+      // Another window changed the key: the panel is told, and omp is read again; the wizard's webview asks for its own check.
+      onCursorApiKeyChanged(() => {
+        this.postCursorApiKey();
+        void this.refreshOmp(true);
+      }),
       ...(this.questions ? [this.questions.onChange((round) => this.post({ type: "questions", round }))] : []),
     ];
 
@@ -825,19 +990,43 @@ export class Controller implements vscode.Disposable {
       return;
     }
     if (message.type === "ompStatusWanted") {
+      this.postCursorApiKey();
+      this.postSystemCertificates();
       await this.refreshOmp();
       return;
     }
+    // The Settings tab's Refresh counts only while the saved setting is on; the wizard's step has no saved value to ask, so its export is the webview's request.
+    if (message.type === "refreshSystemCertificates") {
+      if (configuredSystemCertificates()) await this.exportSystemCertificates("panel");
+      else this.postSystemCertificates();
+      return;
+    }
+    if (message.type === "systemCertificatesExport") {
+      await this.exportSystemCertificates("wizard");
+      return;
+    }
     if (message.type === "agentCheckWanted") {
-      await this.checkAgent(message.ompPath);
+      await this.checkAgent(message.ompPath, message.systemCertificates);
       return;
     }
     if (message.type === "installOmp") {
-      this.installOmp();
+      this.installOmp(message.systemCertificates);
       return;
     }
     if (message.type === "ompLogin") {
-      await this.ompLogin(message.provider, message.ompPath);
+      await this.ompLogin(message.provider, message.ompPath, message.systemCertificates);
+      return;
+    }
+    if (message.type === "ompLogout") {
+      await this.ompLogout(message.provider, message.ompPath);
+      return;
+    }
+    if (message.type === "setCursorApiKey") {
+      await this.saveTypedCursorKey(message.ompPath);
+      return;
+    }
+    if (message.type === "removeCursorApiKey") {
+      await this.removeSavedCursorKey(message.ompPath);
       return;
     }
     if (message.type === "instructionFilesWanted") {
@@ -863,6 +1052,8 @@ export class Controller implements vscode.Disposable {
     if (message.type === "ready") {
       this.refresh();
       this.postSettings();
+      this.postCursorApiKey();
+      this.postSystemCertificates();
       if (this.questions) this.post({ type: "questions", round: this.questions.current() });
       if (this.pendingView !== undefined) {
         this.post({ type: "navigate", view: this.pendingView.view, ...this.pendingView.options });
@@ -1253,7 +1444,8 @@ export class Controller implements vscode.Disposable {
   private refinementPicture(project: Project): RefinementView {
     const enabled = configuredAutoUpdateStaleProposals();
     const waits = this.refinement.queued.length === 0 ? new Map() : this.queuePlan(project, this.refinement.queued).waits;
-    return refinementView({ state: this.refinement, enabled, runInProgress: ownWindowRuns(project.root), waits, count: enabled ? this.refineAllTake(project).length : 0 });
+    const notes = refinementNotes(this.refinement.running.size === 0 ? [] : listAnnouncements(project), [...this.refinement.running.keys()]);
+    return refinementView({ state: this.refinement, enabled, runInProgress: ownWindowRuns(project.root), waits, count: enabled ? this.refineAllTake(project).length : 0, notes });
   }
 
   /** Whether the queued Proposal `id` may keep waiting: still refinable, and blocked by nothing but Proposals it requires. */
@@ -1499,9 +1691,10 @@ export class Controller implements vscode.Disposable {
       if (action.kind === "resolve-drifts") {
         const drift = getDrift(project, action.drift);
         if (drift.data.status !== "open") return `Resolve this Drift is unavailable: Drift ${cardName(project, "drift", drift.id)} is ${drift.data.status}`;
-        const holding = feedback !== undefined ? resolutionHolding(project, action.drift) : null;
+        const holding = resolutionHolding(project, action.drift);
         if (holding) return `Resolve this Drift is unavailable: Drift ${cardName(project, "drift", drift.id)} is part of resolution ${cardName(project, "proposal", holding.id)}.`;
-        const blocker = resolveDriftBlocker(project, driftWork(project.root), this.namedByResolution.has(action.drift), answered === undefined && feedback === undefined && this.preparedQuestionOf(project, action.drift) !== null);
+        // The answer to a prepared question is the prepared question's own work: no resolution awaiting a decision stops the agent it starts, as none stops the question.
+        const blocker = resolveDriftBlocker(project, driftWork(project.root), this.namedByResolution.has(action.drift), answered !== undefined || (feedback === undefined && this.preparedQuestionOf(project, action.drift) !== null));
         return blocker === null ? null : `Resolve this Drift is unavailable: ${blocker}.`;
       }
       if (action.kind === "unify-drifts") {
@@ -1562,7 +1755,7 @@ export class Controller implements vscode.Disposable {
         return;
       case "refine": {
         const { proposal, job, seats } = action;
-        const result = await send(action, getProposal(project, proposal).title, undefined, undefined, undefined, { role: "analysis", id: job, limit: seats, onEnd: () => this.endRefinement(project, proposal, job) });
+        const result = await send(action, { kind: "refine", proposal, title: getProposal(project, proposal).title }, undefined, undefined, undefined, { role: "analysis", id: job, limit: seats, onEnd: () => this.endRefinement(project, proposal, job) });
         if (!launched(result)) throw new TramaError("the agent did not start");
         return;
       }

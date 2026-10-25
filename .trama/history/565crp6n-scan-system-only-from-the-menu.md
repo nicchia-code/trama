@@ -1,11 +1,12 @@
 ---
 created: 2026-10-24T17:50:53.791Z
-updated: 2026-10-24T17:50:53.791Z
+updated: 2026-10-24T20:56:01.512Z
 summary: "Scan System in the side menu is always active, also with the Advisor Scanner on; the Diagram has no Scan button and the Trama: Scan System command and Feature scans launched by Trama are gone."
 tasks:
   - 4n7k1e9e
   - 0aac3gjx
   - lzkbhbcn
+  - xd39f33r
 ---
 # Scan System only from the menu
 

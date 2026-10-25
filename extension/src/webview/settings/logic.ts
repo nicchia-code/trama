@@ -112,3 +112,26 @@ export function ompStatusLine(status: OmpStatus | null): { tone: "checking" | "o
   if (status.error !== undefined || status.version === undefined) return { tone: "warning", text: ompFailureText(status.error), missing: status.missing === true };
   return { tone: "ok", text: ompAnsweredText(status.version, status.models ?? 0), missing: false };
 }
+
+/** The key of System Certificates: its box has the state line of the bundle, in the Settings tab and in the omp step of the wizard. */
+export const SYSTEM_CERTIFICATES_KEY = "trama.systemCertificates";
+
+/** The state of the System Certificates bundle, from the host's `systemCertificates` message without its type; null while nothing has arrived. */
+export type CertificatesState = Omit<Extract<ToWebview, { type: "systemCertificates" }>, "type">;
+
+/** `exportedAt` (ISO time) in the editor's locale, short form: the time the bundle in use was written. */
+export const exportedAtLabel = (exportedAt: string): string => new Date(exportedAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+
+/**
+ * The line under System Certificates, in words: being exported (the host says so, or has not said anything yet or no bundle has been reported), ready with the count and time of the bundle, failed with an
+ * earlier bundle in use, failed with none. `tone` picks the icon and its colour; the words carry the meaning on their own.
+ */
+export function systemCertificatesLine(state: CertificatesState | null): { tone: "exporting" | "ready" | "warning"; text: string } {
+  const when = state === null || state.exportedAt === undefined ? undefined : exportedAtLabel(state.exportedAt);
+  if (state === null || state.exporting) return { tone: "exporting", text: "Exporting system certificates…" };
+  if (state.error !== undefined) {
+    return { tone: "warning", text: `Could not export the system certificates (${state.error}). ${when === undefined ? "omp gets no certificates from Trama." : `Using the ones exported ${when}.`}` };
+  }
+  if (state.count === undefined || when === undefined) return { tone: "exporting", text: "Exporting system certificates…" };
+  return { tone: "ready", text: `${state.count} certificates, exported ${when}.` };
+}

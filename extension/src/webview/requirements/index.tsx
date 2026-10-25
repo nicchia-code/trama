@@ -187,7 +187,7 @@ export function RequirementsTab(props: RequirementsProps) {
       }}
     >
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
-        <ProposalSelect label="Proposal to draw over the Requirements" options={options} value={proposal ? proposal.id : null} onChange={props.onProposal} />
+        <ProposalSelect label="Proposal to draw over the Requirements" options={options} value={proposal ? proposal.id : null} focused={focus !== null} onChange={props.onProposal} />
       </div>
       {found && focus ? (
         <FocusBar
@@ -240,8 +240,9 @@ export const mountRequirements: MountView = (slot, context) => {
         proposalId={proposalId}
         focus={focus}
         onProposal={(id) => {
+          // With a focus on the Proposal drawn stays until Clear or Esc takes the focus off.
+          if (focus) return;
           proposalId = id;
-          focus = null;
           render();
         }}
         onFocus={(next) => {
