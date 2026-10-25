@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { execute } from "../src/cli/main";
 import {
   currentIteration,
@@ -133,12 +133,13 @@ describe("where gh is looked for", () => {
   });
 
   test("the first folder that holds a file named gh wins, and none is null", () => {
+    const gh = process.platform === "win32" ? "gh.exe" : "gh";
     mkdirSync(join(base, "one"));
     mkdirSync(join(base, "two"));
-    writeFileSync(join(base, "two", "gh"), "");
-    expect(findGh({ PATH: `${join(base, "one")}:${join(base, "two")}` }, "linux")).toBe(join(base, "two", "gh"));
+    writeFileSync(join(base, "two", gh), "");
+    expect(findGh({ PATH: `${join(base, "one")}${delimiter}${join(base, "two")}` })).toBe(join(base, "two", gh));
     // The fixed folders may hold a real gh on this machine: only the PATH part is asserted.
-    expect(findGh({ PATH: join(base, "one") }, "linux")).not.toBe(join(base, "one", "gh"));
+    expect(findGh({ PATH: join(base, "one") })).not.toBe(join(base, "one", gh));
   });
 });
 

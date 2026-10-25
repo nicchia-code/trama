@@ -27,7 +27,7 @@ import {
 } from "../src/core/issues";
 import { MANAGER_NEEDS_GITHUB, MANAGER_OFF, setManagerMode } from "../src/core/manager-mode";
 import { setSoloMode } from "../src/core/solo-mode";
-import { createdNow, type Project, projectAt, slugify, writeFileEnsuringDir } from "../src/core/store";
+import { createdNow, type Project, projectAt, readTextLf, slugify, writeFileEnsuringDir } from "../src/core/store";
 import { newProposal } from "../src/core/proposals";
 
 const GIT_TEST_MS = 60_000;
@@ -254,7 +254,8 @@ describe("what changed under a published issue", () => {
     git("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", message);
   };
   const orderFile = () => join(dir, ".trama", "model", "checkout", "order.md");
-  const edit = (change: (text: string) => string) => writeFileEnsuringDir(orderFile(), change(readFileSync(orderFile(), "utf8")));
+  // The example's files have CRLF in a Windows checkout: the edits are written against LF text.
+  const edit = (change: (text: string) => string) => writeFileEnsuringDir(orderFile(), change(readTextLf(orderFile())));
   const publish = (refs = ["order/Paid"]) => {
     const issue = card("aaaa1111", "Cancel order", { refs });
     moveIssue(p, issue.id, "published", { number: 5, url: "https://github.com/acme/web/issues/5" });

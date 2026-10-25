@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, rmSync, statSync } from "node:fs";
-import { delimiter, join, win32 } from "node:path";
+import { join, win32 } from "node:path";
 import { writeFileAtomic } from "./atomic-write";
 import { TramaError } from "./errors";
 import { type Project, readTextLf, writeFileEnsuringDir } from "./store";
@@ -76,7 +76,7 @@ const isFile = (path: string): boolean => {
 export function ghSearchFolders(env: Record<string, string | undefined>, platform: NodeJS.Platform = process.platform): string[] {
   const windows = platform === "win32";
   const path = env["PATH"] ?? env["Path"] ?? "";
-  const folders = path.split(windows ? ";" : delimiter).filter((folder) => folder !== "");
+  const folders = path.split(windows ? ";" : ":").filter((folder) => folder !== "");
   folders.push("/opt/homebrew/bin", "/usr/local/bin");
   const programFiles = env["ProgramFiles"];
   if (windows && programFiles !== undefined && programFiles !== "") folders.push(win32.join(programFiles, "GitHub CLI"));
