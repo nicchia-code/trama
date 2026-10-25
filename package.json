@@ -1,6 +1,6 @@
 {
   "name": "trama",
-  "version": "0.0.15",
+  "version": "0.1.0-rc.1",
   "license": "AGPL-3.0-only",
   "private": true,
   "type": "module",
