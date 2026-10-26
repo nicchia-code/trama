@@ -4,6 +4,7 @@ description: "Use for performance, security, privacy, accessibility, offline, lo
 # Quality
 
 ## General
+- Reliability: the test suite does not depend on the environment variables of the shell that runs it: it passes the same with or without Trama's variables (`TRAMA_*`, which every agent launched by Trama inherits) and `BUN_INSTALL` set. The suite's `bun test` preload (`bunfig.toml`) removes them at start; a test that needs one of them sets it itself and restores the previous value when it ends.
 
 ## task
 - Una corsa che realizza dei task legge Modello e Requisiti di ciascun task una volta, da `trama task show`, e esegue test, lint e build del progetto una volta, alla fine della corsa, dopo l'ultimo gruppo; mai un sotto-agente.
