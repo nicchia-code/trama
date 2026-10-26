@@ -104,6 +104,7 @@ const { MenuModel } = await import("../extension/src/host/menu/model");
 const { boardDecisionCount } = await import("../src/core/board-decisions");
 const { buildSnapshot } = await import("../src/core/snapshot");
 const { projectAt } = await import("../src/core/store");
+const { setOmpLauncher } = await import("../extension/src/host/omp-launch");
 
 let project: string;
 let plain: string;
@@ -572,17 +573,24 @@ test("Scan System from the menu asks the modal question first: Cancel launches n
   controller.dispose();
 });
 
+// The launch stops at the omp check, replaced here: the test runs no omp, the machine's omp (or its absence and its notice) changes nothing, and the check's call marks the launch.
 test("Scan System from the menu asks once; Scan launches the scan without opening the panel", async () => {
+  const launched = Promise.withResolvers<void>();
+  setOmpLauncher(async () => void launched.resolve());
   const { controller, menu } = windowWithMenu();
   const view = fakeView();
   providers["trama.home"]?.resolveWebviewView(view);
   modalAnswer = "Scan";
-  view.receive?.({ type: "scan" });
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  expect(modals).toHaveLength(1);
-  expect(panels).toHaveLength(0);
-  menu.dispose();
-  controller.dispose();
+  try {
+    view.receive?.({ type: "scan" });
+    await launched.promise;
+    expect(modals).toHaveLength(1);
+    expect(panels).toHaveLength(0);
+  } finally {
+    setOmpLauncher();
+    menu.dispose();
+    controller.dispose();
+  }
 });
 
 /** A throwaway copy of the example project, so a test can rewrite its Model. */
