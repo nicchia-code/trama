@@ -21,4 +21,4 @@ Usa quando lavori al codice di Unify Drifts: voce disabilitabile del pulsante di
 - I lettori di `origin` e `previous` (`src/core/work.ts`, i blocchi in `computeBlocks`, la correzione del codice che rimanda le origini in To do, `src/core/resolution.ts`, la Snapshot) accettano una stringa o una lista e lavorano su una lista; un Drift scritto prima non si riscrive.
 - `src/core/resolution.ts` e i controlli dei Drift già risolti trattano `resolution: unified` come un Drift chiuso ma non deciso: non frena la registrazione di una differenza e non può essere `previous`.
 - Le skill distribuite `trama-resolve-drifts`, `trama-scan`, `trama-implement`, `trama-import` e `trama-compare` sanno che un Drift può avere più origini e più precedenti, e che un Drift `unified` non conta fra i Drift già risolti.
-- `README.md`, `extension/README.md`, `docs/cli.md` e `CHANGELOG.md` descrivono Unify Drifts.
+- `docs/cli.md` and `CHANGELOG.md` describe Unify Drifts.

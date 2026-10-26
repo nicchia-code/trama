@@ -9,7 +9,7 @@ Use when building the ntfy notifications of omp Chat jobs: settings, signals fro
 - `SETTING_GROUPS` gets the sub-group `Notifications` of `Advanced`, after `omp Chat`, with `trama.ntfyServer` and then `trama.ntfyTopic`. The wizard leaves both keys out with `NOT_IN_WIZARD` of `extension/src/webview/wizard/logic.ts`, as it does for `trama.autoExit`, so the Advanced step and its summary skip the sub-group (`tech#setup-wizard`). The test that fixes groups and titles is updated.
 - `trama.ntfy` of older versions is neither declared nor read; a value left in the user settings is not rewritten.
 - No new runtime library; the command line takes no part.
-- `README.md`, `extension/README.md` and `CHANGELOG.md` describe the notifications: which events send them, that only the jobs of omp Chat do, the two settings, the access token, the test button and that on ntfy.sh the topic is readable by anyone who knows it. `docs/uat.md` has the steps of `quality#notice`.
+- `CHANGELOG.md` describes the notifications: which events send them, that only the jobs of omp Chat do, the two settings, the access token, the test button and that on ntfy.sh the topic is readable by anyone who knows it. `docs/uat.md` has the steps of `quality#notice`.
 
 ## notice
 
