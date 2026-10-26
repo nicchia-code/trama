@@ -6,7 +6,7 @@ In a Trama project the heading of the view carries the name of the project: the 
 
 In un progetto Trama l'icona porta il numero di ciò che aspetta una decisione del developer, lo stesso della voce Board del menu, anche quando la vista non è mostrata; con zero, e fuori da un progetto Trama, non porta nessun numero.
 
-Il menu segue i file come il pannello, anche a pannello chiuso: il numero di Scan System e il numero sulla voce Board si aggiornano da soli. Quando il pannello è aperto, il menu evidenzia la voce della vista che il pannello mostra, e l'evidenza la segue anche quando il developer cambia vista seguendo un collegamento o con un comando; a pannello chiuso nessuna voce è evidenziata.
+Il menu segue i file come il pannello, anche a pannello chiuso: il numero di Scan System e il numero sulla voce Board si aggiornano da soli. Quando il pannello è aperto, il menu evidenzia la voce della vista che il pannello mostra, e l'evidenza la segue anche quando il developer cambia vista seguendo un collegamento o con un comando; a pannello chiuso nessuna voce è evidenziata. Because the menu keeps following the files while hidden, when it is shown again it shows at once what it already knows, and when the panel changes view only the highlight moves, at once: neither waits for the project to be read again.
 
 Il menu non mostra suggerimenti passandoci sopra, in nessuna modalità: ogni voce e ogni pulsante si riconosce dal suo testo e dalla sua icona, e il suo nome resta per chi usa un lettore di schermo.
 

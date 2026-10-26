@@ -2,7 +2,7 @@ import { X } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { PersonErrors } from "../../../../src/core/people";
 import type { Snapshot } from "../../../../src/core/snapshot";
-import type { ToHost } from "../../protocol";
+import type { ReplanView, ToHost } from "../../protocol";
 import { ViewEnvContext } from "../board/parts";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -27,6 +27,8 @@ export interface TeamPageProps {
   github?: GitHubMessage | null;
   /** The last picture of the project: the open handoffs of Decisions and the issues of Issues; null until the host has sent one. */
   snapshot?: Snapshot | null;
+  /** What `Replan` needs (`ui#proposal/Open`); absent until the host has sent a picture, or while Team is not available: then the Decisions tab shows no `Replan`. */
+  replan?: ReplanView | null;
   /** The host's refusals of the changes of an issue's fields, by `rejectionKey`. */
   fieldRejections?: FieldRejections;
   /** A sentence of the host for the top of the view (a refused link, publish or split), closable. */
@@ -60,7 +62,7 @@ const noop = (): void => {};
  * stay while the view updates and while the developer visits other views; they are forgotten with the panel. The issue preview is a page of `Decisions`: it stays across tabs
  * and goes when its handoff is decided.
  */
-export function TeamPage({ team, rejection, post, github = null, snapshot = null, fieldRejections = {}, notice = null, navigate = noop, onFieldSent = noop, onDismissNotice = noop }: TeamPageProps) {
+export function TeamPage({ team, rejection, post, github = null, snapshot = null, replan = null, fieldRejections = {}, notice = null, navigate = noop, onFieldSent = noop, onDismissNotice = noop }: TeamPageProps) {
   const [tab, setTab] = useState("decisions");
   const [timelineMode, setTimelineMode] = useState<TimelineMode>("person");
   const [picking, setPicking] = useState(false);
@@ -107,7 +109,7 @@ export function TeamPage({ team, rejection, post, github = null, snapshot = null
     ) : (
       <>
         {page === null ? null : <div className="mb-4 border-b pb-4">{page}</div>}
-        <DecisionsTab snapshot={snapshot} post={post} onPreview={(handoff) => setAt({ handoff, issue: 0 })} onShowIssues={() => setTab("issues")} />
+        <DecisionsTab snapshot={snapshot} replan={replan} post={post} onPreview={(handoff) => setAt({ handoff, issue: 0 })} onShowIssues={() => setTab("issues")} />
       </>
     );
   const tabs: TabEntry[] = [
@@ -172,7 +174,7 @@ export interface TeamView extends Pick<View, "show" | "hide"> {
   /** What the host read of GitHub: the Project's button, the box of the state of `gh` and what stands in place of the tabs that need a Project. */
   receiveGitHub(message: GitHubMessage): void;
   /** The last picture of the project: the handoffs of Decisions and the issues of Issues. */
-  update(snapshot: Snapshot): void;
+  update(snapshot: Snapshot, replan?: ReplanView | null): void;
   /** A change of an issue's field the host refused, with its message. */
   receiveFieldRejected(handoff: string, issue: string, key: string, message: string): void;
   /** A sentence for the top of the view. */
@@ -185,6 +187,7 @@ export function mountTeam(slot: Slot, context: ViewContext): TeamView {
   let rejection: Rejection | null = null;
   let github: GitHubMessage | null = null;
   let snapshot: Snapshot | null = null;
+  let replan: ReplanView | null = null;
   let fieldRejections: FieldRejections = {};
   let notice: string | null = null;
   const render = () =>
@@ -194,6 +197,7 @@ export function mountTeam(slot: Slot, context: ViewContext): TeamView {
         rejection={rejection}
         github={github}
         snapshot={snapshot}
+        replan={replan}
         fieldRejections={fieldRejections}
         notice={notice}
         post={context.post}
@@ -223,8 +227,9 @@ export function mountTeam(slot: Slot, context: ViewContext): TeamView {
       github = message;
       render();
     },
-    update(next) {
+    update(next, nextReplan = null) {
       snapshot = next;
+      replan = nextReplan;
       render();
     },
     receiveFieldRejected(handoff, issue, key, message) {

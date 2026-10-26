@@ -15,6 +15,7 @@ test("accepts every well-formed message of the contract", () => {
   expect(ok({ type: "ready" })).toEqual({ type: "ready" });
   expect(ok({ type: "writeDesignRequest" })).toEqual({ type: "writeDesignRequest" });
   expect(ok({ type: "writeHandoffRequest" })).toEqual({ type: "writeHandoffRequest" });
+  expect(ok({ type: "replanHandoffs" })).toEqual({ type: "replanHandoffs" });
   expect(parseToHost({ type: "openQuickTask" })).toEqual({ ok: false, reason: 'unknown message type "openQuickTask"' });
   expect(parseToHost({ type: "launch", action: { kind: "scan" } })).toEqual({ ok: false, reason: 'unknown action "scan"' });
   expect(parseToHost({ type: "launch", action: { kind: "scan", feature: "checkout" } })).toEqual({ ok: false, reason: 'unknown action "scan"' });

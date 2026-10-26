@@ -646,27 +646,36 @@ export const loadSpoken = (load: Pick<CellLoad, "days" | "capacity" | "over">): 
 /** `2 items without estimate`: the note of a cell's tooltip, null when every item has one. */
 export const unestimatedText = (count: number): string | null => (count === 0 ? null : `${plural(count, "item", "items")} without estimate`);
 
-/** What the preview's `Sprint` field says under its value (`ui#issue/Published`): the assignee's load in that sprint counting this issue. */
+/** What the preview's `Sprint` field says under its value (`ui#issue/Published`): the assignee's load in that sprint, counting this issue and the open handoffs. */
 export interface SprintLoadNote {
   text: string;
   over: boolean;
 }
 
 /**
- * `<first name> has <load> / <capacity> d in this sprint` for the assignee of an issue of a handoff and the sprint it is proposed for, counting this issue; null without a
- * member of the team as assignee, without a sprint of the Project or before the Project was read. `estimate` is the one the issue has now.
+ * `<first name> has <load> / <capacity> d in this sprint` for the assignee of an issue of a handoff and the sprint it is proposed for; null without a member of the team as
+ * assignee, without a sprint of the Project or before the Project was read. The load adds up (`rules#issue/Published`): the open items of the Project assigned to the person in
+ * that sprint (`loads`), this issue with the values it has now (`issue`, `estimate` as typed) and the other issues of every open handoff in `handoffs` (this one and the stale
+ * ones included, never a Draft) assigned to the person in that sprint, each with the Manager's values applied (`values`) and an estimate that counts 0 when it has none. The
+ * issue `issue.id` is never counted twice: its entry in `handoffs` is skipped, whatever values it holds there.
  */
 export function sprintLoadNote(
-  issue: { assignee: string; sprint: string; estimate: string },
+  issue: { id: string; assignee: string; sprint: string; estimate: string },
   members: readonly PersonView[],
   iterations: readonly GitHubIteration[],
   loads: readonly OpenLoad[],
+  handoffs: readonly HandoffViewData[],
 ): SprintLoadNote | null {
   const member = members.find((person) => sameHandle(issue.assignee, person.handle));
   const iteration = iterations.find((candidate) => candidate.title === issue.sprint);
   if (member === undefined || iteration === undefined) return null;
   const estimate = Number(issue.estimate);
-  const days = loadIn(loads, member.handle, iteration.title).days + (issue.estimate.trim() !== "" && Number.isFinite(estimate) && estimate > 0 ? estimate : 0);
+  const own = issue.estimate.trim() !== "" && Number.isFinite(estimate) && estimate > 0 ? estimate : 0;
+  const proposed = handoffs
+    .flatMap((handoff) => handoff.issues)
+    .filter((other) => other.id !== issue.id && other.values.sprint === iteration.title && sameHandle(other.values.assignee, member.handle))
+    .reduce((sum, other) => sum + (other.values.estimate ?? 0), 0);
+  const days = loadIn(loads, member.handle, iteration.title).days + own + proposed;
   const capacity = capacityIn(member, iteration);
   return { text: `${firstName(member.name)} has ${numberText(days)} / ${numberText(capacity)} d in this sprint`, over: days > capacity };
 }

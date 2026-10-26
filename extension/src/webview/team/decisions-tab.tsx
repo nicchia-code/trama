@@ -2,7 +2,7 @@ import { Check, Inbox, MessageSquare, Plus, TriangleAlert, X } from "lucide-reac
 import type { MouseEvent } from "react";
 import { cardNameOf } from "../../../../src/core/card-names";
 import type { Snapshot } from "../../../../src/core/snapshot";
-import type { ToHost } from "../../protocol";
+import type { ReplanView, ToHost } from "../../protocol";
 import { TAG, BoardButton } from "../board/parts";
 import { tagColour, type TagColour } from "../board/logic";
 import { IdTag } from "../diagram/panel";
@@ -10,6 +10,7 @@ import { cn } from "../lib/utils";
 import { SplitButton } from "../split-button";
 import { Button } from "../ui/button";
 import { useNow } from "./github";
+import { ReplanControl } from "./replan";
 import {
   createsLine,
   DECISIONS_EMPTY_TEXT,
@@ -100,7 +101,7 @@ function HandoffCard({ handoff, snapshot, now, post, onPreview }: { handoff: Han
 }
 
 /** The Decisions tab (`ui#proposal/Open`): the open handoffs, one card each, and the empty state. */
-export function DecisionsTab({ snapshot, post, onPreview, onShowIssues }: { snapshot: Snapshot | null; post: (message: ToHost) => void; onPreview: (handoff: string) => void; onShowIssues: () => void }) {
+export function DecisionsTab({ snapshot, replan = null, post, onPreview, onShowIssues }: { snapshot: Snapshot | null; replan?: ReplanView | null; post: (message: ToHost) => void; onPreview: (handoff: string) => void; onShowIssues: () => void }) {
   const now = useNow();
   const handoffs = snapshot?.handoffs ?? [];
   const newHandoff = (
@@ -134,6 +135,7 @@ export function DecisionsTab({ snapshot, post, onPreview, onShowIssues }: { snap
         </h3>
         <div className="flex items-center gap-3">
           <span className="text-xs text-muted-foreground">{DECISIONS_HINT}</span>
+          {replan === null ? null : <ReplanControl replan={replan} post={post} />}
           {newHandoff}
         </div>
       </div>

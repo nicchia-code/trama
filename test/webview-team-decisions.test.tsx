@@ -336,6 +336,14 @@ test("the Sprint field says what the assignee has in that sprint counting this i
   expect(over.className).not.toContain("text-muted-foreground");
 });
 
+test("the Sprint field counts the other issues of every open handoff, the issue shown once", () => {
+  const other = handoff({ id: "hhhhhhh2", title: "Saved carts", issues: [issue({ id: "jjjjjjj1", values: { ...emptyValues, estimate: 2, assignee: "giulia", sprint: "Sprint 14" } })] });
+  page(snapshotWith({ handoffs: [handoff(), other] }), {});
+  fireEvent.click(screen.getByRole("button", { name: "Guest checkout" }));
+  // The issue (4 d) and the one of the other handoff (2 d); the issue is also listed in its handoff and counts once.
+  expect(screen.getByText("Giulia has 6 / 5 d in this sprint").className).toContain("text-destructive");
+});
+
 test("without a read Project the Sprint field says nothing of the load", () => {
   open({ github: github({ project: null, loads: [] }) });
   expect(screen.queryByText(/in this sprint/)).toBeNull();

@@ -8,6 +8,7 @@ import type { ToHost } from "../extension/src/protocol";
 import { TeamPage } from "../extension/src/webview/team";
 import {
   type GitHubMessage,
+  type HandoffViewData,
   type IssueRow,
   type IssueRowData,
   loadSpoken,
@@ -255,21 +256,59 @@ test("the settings of the Project are its address plus /settings; a read that pr
 
 // ---- The preview's Sprint field ----
 
+const handoffIssue = (id: string, over: Partial<HandoffViewData["issues"][number]["values"]> = {}): HandoffViewData["issues"][number] => {
+  const values = { estimate: 2, assignee: "giulia", reviewer: null, sprint: "Sprint 13", fields: {}, ...over };
+  return { id, title: id, body: "", refs: [], dependsOn: [], values, agent: values, changed: [], warnings: [] };
+};
+const handoffOf = (id: string, issues: HandoffViewData["issues"], over: Partial<HandoffViewData> = {}): HandoffViewData => ({ id, created: null, title: id, label: null, issues, files: 0, machines: 0, warnings: 0, block: null, ...over });
+const here = (over: Partial<{ id: string; assignee: string; sprint: string; estimate: string }> = {}) => ({ id: "this0001", assignee: "giulia", sprint: "Sprint 13", estimate: "1.5", ...over });
+
 test("the preview says the load of the assignee in the sprint counting the issue, over their capacity in the sprint", () => {
   const loads: OpenLoad[] = [{ assignee: "giulia", sprint: "Sprint 13", estimate: 3 }, { assignee: "giulia", sprint: "Sprint 15", estimate: 1 }];
-  expect(sprintLoadNote({ assignee: "giulia", sprint: "Sprint 13", estimate: "1.5" }, MEMBERS, SPRINTS, loads)).toEqual({ text: "Giulia has 4.5 / 5 d in this sprint", over: false });
-  expect(sprintLoadNote({ assignee: "giulia", sprint: "Sprint 13", estimate: "3" }, MEMBERS, SPRINTS, loads)).toEqual({ text: "Giulia has 6 / 5 d in this sprint", over: true });
+  expect(sprintLoadNote(here(), MEMBERS, SPRINTS, loads, [])).toEqual({ text: "Giulia has 4.5 / 5 d in this sprint", over: false });
+  expect(sprintLoadNote(here({ estimate: "3" }), MEMBERS, SPRINTS, loads, [])).toEqual({ text: "Giulia has 6 / 5 d in this sprint", over: true });
   // Her absence of three days in Sprint 15 leaves two days of capacity.
-  expect(sprintLoadNote({ assignee: "giulia", sprint: "Sprint 15", estimate: "2" }, MEMBERS, SPRINTS, loads)).toEqual({ text: "Giulia has 3 / 2 d in this sprint", over: true });
-  expect(sprintLoadNote({ assignee: "GIULIA", sprint: "Sprint 14", estimate: "" }, MEMBERS, SPRINTS, loads)).toEqual({ text: "Giulia has 0 / 5 d in this sprint", over: false });
+  expect(sprintLoadNote(here({ sprint: "Sprint 15", estimate: "2" }), MEMBERS, SPRINTS, loads, [])).toEqual({ text: "Giulia has 3 / 2 d in this sprint", over: true });
+  expect(sprintLoadNote(here({ assignee: "GIULIA", sprint: "Sprint 14", estimate: "" }), MEMBERS, SPRINTS, loads, [])).toEqual({ text: "Giulia has 0 / 5 d in this sprint", over: false });
 });
 
 test("the preview says nothing without a member as assignee, without a sprint of the Project or without a read Project", () => {
-  expect(sprintLoadNote({ assignee: "zoe", sprint: "Sprint 13", estimate: "2" }, MEMBERS, SPRINTS, [])).toBeNull();
-  expect(sprintLoadNote({ assignee: "", sprint: "Sprint 13", estimate: "2" }, MEMBERS, SPRINTS, [])).toBeNull();
-  expect(sprintLoadNote({ assignee: "giulia", sprint: "", estimate: "2" }, MEMBERS, SPRINTS, [])).toBeNull();
-  expect(sprintLoadNote({ assignee: "giulia", sprint: "Sprint 99", estimate: "2" }, MEMBERS, SPRINTS, [])).toBeNull();
-  expect(sprintLoadNote({ assignee: "giulia", sprint: "Sprint 13", estimate: "2" }, MEMBERS, [], [])).toBeNull();
+  expect(sprintLoadNote(here({ assignee: "zoe", estimate: "2" }), MEMBERS, SPRINTS, [], [])).toBeNull();
+  expect(sprintLoadNote(here({ assignee: "", estimate: "2" }), MEMBERS, SPRINTS, [], [])).toBeNull();
+  expect(sprintLoadNote(here({ sprint: "", estimate: "2" }), MEMBERS, SPRINTS, [], [])).toBeNull();
+  expect(sprintLoadNote(here({ sprint: "Sprint 99", estimate: "2" }), MEMBERS, SPRINTS, [], [])).toBeNull();
+  expect(sprintLoadNote(here({ estimate: "2" }), MEMBERS, [], [], [])).toBeNull();
+});
+
+test("the load adds the other issues of every open handoff assigned to the person in that sprint, this issue once", () => {
+  const loads: OpenLoad[] = [{ assignee: "giulia", sprint: "Sprint 13", estimate: 1 }];
+  const handoffs = [
+    // This handoff: the issue shown is skipped whatever it holds here; its sibling counts.
+    handoffOf("hhhhhhh1", [handoffIssue("this0001", { estimate: 9 }), handoffIssue("sibling1", { estimate: 0.5 })]),
+    // Another open handoff, with the person written in another case.
+    handoffOf("hhhhhhh2", [handoffIssue("other001", { estimate: 1, assignee: "GIULIA" }), handoffIssue("other002", { estimate: null })]),
+  ];
+  expect(sprintLoadNote(here(), MEMBERS, SPRINTS, loads, handoffs)).toEqual({ text: "Giulia has 4 / 5 d in this sprint", over: false });
+  expect(sprintLoadNote(here({ estimate: "2.5" }), MEMBERS, SPRINTS, loads, handoffs)).toEqual({ text: "Giulia has 5 / 5 d in this sprint", over: false });
+  expect(sprintLoadNote(here({ estimate: "3" }), MEMBERS, SPRINTS, loads, handoffs)).toEqual({ text: "Giulia has 5.5 / 5 d in this sprint", over: true });
+});
+
+test("the issues of the handoffs of other people, other sprints or without assignee or sprint add nothing", () => {
+  const handoffs = [
+    handoffOf("hhhhhhh1", [
+      handoffIssue("a0000001", { assignee: "marco" }),
+      handoffIssue("a0000002", { sprint: "Sprint 14" }),
+      handoffIssue("a0000003", { assignee: null }),
+      handoffIssue("a0000004", { sprint: null }),
+    ]),
+  ];
+  expect(sprintLoadNote(here(), MEMBERS, SPRINTS, [], handoffs)).toEqual({ text: "Giulia has 1.5 / 5 d in this sprint", over: false });
+});
+
+test("the issue shown counts with the values it has now, not the ones its handoff holds", () => {
+  // The Manager just moved it to Marco: Giulia keeps only her sibling; the handoff still lists it for her.
+  const handoffs = [handoffOf("hhhhhhh1", [handoffIssue("this0001", { estimate: 4 }), handoffIssue("sibling1", { estimate: 1 })])];
+  expect(sprintLoadNote(here({ assignee: "marco", estimate: "2" }), MEMBERS, SPRINTS, [], handoffs)).toEqual({ text: "Marco has 2 / 5 d in this sprint", over: false });
 });
 
 // ---- The tab ----

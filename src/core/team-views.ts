@@ -91,9 +91,9 @@ function issueView(p: Project, handoff: Proposal, issue: ProposalIssue, handoffW
   };
 }
 
-/** The open handoffs, in creation order, as the Decisions tab shows them. Never a Draft: an agent is still writing it. */
-export function handoffViews(p: Project): HandoffView[] {
-  return listProposals(p)
+/** The open handoffs, in creation order, as the Decisions tab shows them. Never a Draft: an agent is still writing it. `proposals` are the Proposals already read: without them they are listed. */
+export function handoffViews(p: Project, proposals: readonly Proposal[] = listProposals(p)): HandoffView[] {
+  return proposals
     .filter((proposal) => proposal.data.kind === "handoff" && proposal.data.status === "open")
     .map((proposal) => {
       const notCovered = handoffCoverage(p, proposal)
@@ -145,8 +145,8 @@ export function issueRows(p: Project): IssueRowView[] {
   );
 }
 
-/** What the Team view's tabs read of the project; a file that cannot be read leaves its list empty and is reported in `faults`, so the rest of the Snapshot still shows. */
-export function teamViews(p: Project): { handoffs: HandoffView[]; issues: IssueRowView[]; faults: Diagnostic[] } {
+/** What the Team view's tabs read of the project; a file that cannot be read leaves its list empty and is reported in `faults`, so the rest of the Snapshot still shows. `proposals` are the Proposals already read, when the caller has read them. */
+export function teamViews(p: Project, proposals?: readonly Proposal[]): { handoffs: HandoffView[]; issues: IssueRowView[]; faults: Diagnostic[] } {
   const faults: Diagnostic[] = [];
   const read = <T>(file: string, fn: () => T[]): T[] => {
     try {
@@ -156,7 +156,7 @@ export function teamViews(p: Project): { handoffs: HandoffView[]; issues: IssueR
       return [];
     }
   };
-  return { handoffs: read("proposals/", () => handoffViews(p)), issues: read("issues/", () => issueRows(p)), faults };
+  return { handoffs: read("proposals/", () => handoffViews(p, proposals)), issues: read("issues/", () => issueRows(p)), faults };
 }
 
 /** The data types of the Project's fields Trama can set to a value the Manager chose, and the kind each is checked as. */

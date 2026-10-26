@@ -19,6 +19,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Quality** (`main.md`): Use for performance, security, privacy, accessibility, offline, localisation or reliability. Sections: `task`, `drift-resolution`, `panel/Settings`, `developer.CLEAR_DONE`.
 - **omp Chat** (`omp-chat.md`): Usa quando lavori alla sicurezza, all'affidabilità, alla compatibilità o all'accettazione di omp Chat. Sections: `omp-chat-conversation`, `omp-chat`.
 - **Login dei fornitori di omp** (`omp-login.md`): Usa quando il lavoro sul login ai fornitori di omp o sulla chiave API di Cursor tocca credenziali, sicurezza del terminale o accessibilità. Sections: `developer.LOG_IN_PROVIDER`, `developer.SET_CURSOR_API_KEY`.
+- **Panel performance** (`panel.md`): Use for the performance and reliability of the panel's views, of the picture of the project and of the side menu. Sections: `panel`, `menu-laterale`.
 - **Raffinamento delle Proposal obsolete** (`raffinamento.md`): Usa per sicurezza, affidabilità e collaudo di Auto-update Stale Proposals. Sections: `raffinamento`.
 - **System certificates** (`system-certificates.md`): Use when work on System Certificates or on certificate error messages touches security, privacy, reliability or accessibility. Sections: `developer.REFRESH_SYSTEM_CERTIFICATES`.
 - **Team** (`team.md`): Use when the work touches the privacy of the people of the Manager's team or the accessibility of the Team view. Sections: `person`.

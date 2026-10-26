@@ -3,12 +3,12 @@ import { basename } from "node:path";
 import * as vscode from "vscode";
 import { boardDecisionCount } from "../../../../src/core/board-decisions";
 import { managerStatus } from "../../../../src/core/manager-mode";
-import { buildSnapshot } from "../../../../src/core/snapshot";
+import type { WindowPicture } from "../picture";
 import type { Project } from "../../../../src/core/store";
 import type { MenuSituation, MenuViewName, MergeMenuState, ToMenuWebview } from "../../menu-protocol";
 import type { AgentAction, ViewName } from "../../protocol";
 import { describeError } from "../controller";
-import { driftsFinishing, onDriftResolutionChange, proposalsFinishing, tasksFinishing } from "../drift-resolution";
+import { onDriftResolutionChange } from "../drift-resolution";
 import { configuredAutoUpdateStaleProposals } from "../agent";
 import { webviewHtml } from "../html";
 import { configuredTheme } from "../omp-chat/view";
@@ -55,9 +55,10 @@ export function menuSituation(): MenuSituation {
 }
 
 /**
- * The side menu (`menu-laterale`): a `WebviewViewProvider` kept alive while hidden (`retainContextWhenHidden`) in the view `trama.home`. It follows the files of
- * `.trama/` through the extension's global watcher, the folders of the window, the settings and the panel's view, also with the panel closed, and keeps the
- * badge of the icon. The extension never opens, closes or moves the sidebar or its views: the editor does that.
+ * The side menu (`menu-laterale`): a `WebviewViewProvider` kept alive while hidden (`retainContextWhenHidden`) in the view `trama.home`. It follows the picture of the
+ * project the window builds (`WindowPicture`: the files of `.trama/` and the folders of the window), the settings, Merge of Solo mode and the panel's view, also with the
+ * panel closed, and keeps the badge of the icon. It builds no picture and reads no file of the project itself. The extension never opens, closes or moves the sidebar or
+ * its views: the editor does that.
  */
 export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
   readonly model: MenuModel;
@@ -70,7 +71,7 @@ export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly panel: MenuPanel,
-    private readonly tramaFiles: vscode.FileSystemWatcher,
+    private readonly picture: WindowPicture,
     private readonly soloMerge: MenuMerge,
   ) {
     this.model = new MenuModel(this.surface());
@@ -81,15 +82,14 @@ export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
     const onChange = () => this.schedule();
     return vscode.Disposable.from(
       vscode.window.registerWebviewViewProvider(MENU_VIEW, this, { webviewOptions: { retainContextWhenHidden: true } }),
-      this.tramaFiles.onDidCreate(onChange),
-      this.tramaFiles.onDidChange(onChange),
-      this.tramaFiles.onDidDelete(onChange),
-      vscode.workspace.onDidChangeWorkspaceFolders(onChange),
+      // The window builds one picture per change of the files or of the folders, shared with the panel; the menu takes its numbers and the name of the project from it.
+      this.picture.onDidBuild(() => this.refresh()),
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (event.affectsConfiguration("trama.theme")) this.model.themeChanged();
         if (event.affectsConfiguration("trama")) this.refresh();
       }),
-      this.panel.onDidChangeShownView(() => this.refresh()),
+      // Only the highlight moves when the panel changes view: the last state is sent again, with nothing read.
+      this.panel.onDidChangeShownView(() => this.highlight()),
       // Merge of Solo mode: git, the files of the working copy and the jobs of the agent decide whether it is available.
       this.soloMerge.onDidChange(onChange),
       onDriftResolutionChange(onChange),
@@ -110,9 +110,9 @@ export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
     this.model.state();
     this.showTitle(view, menuSituation());
     const received = view.webview.onDidReceiveMessage((raw: unknown) => this.model.receive(raw));
-    // The menu shows what is true now each time it becomes visible.
+    // The menu shows at once what it already knows each time it becomes visible: it follows the files while hidden.
     const visibility = view.onDidChangeVisibility(() => {
-      if (view.visible) this.refresh();
+      if (view.visible) this.highlight();
     });
     view.onDidDispose(() => {
       received.dispose();
@@ -136,9 +136,14 @@ export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
     view.title = situation === "project" ? this.name : PRODUCT_NAME;
   }
 
-  /** Sends the state again; with no view there is nothing to show and no badge to set, and the webview asks for it when it is made. */
+  /** Sends the state again, computed from the files; with no view there is nothing to show and no badge to set, and the webview asks for it when it is made. */
   private refresh(): void {
     if (this.view) this.model.refresh();
+  }
+
+  /** Sends the last state again with the panel's view of now, reading nothing; with no view there is nothing to show. */
+  private highlight(): void {
+    if (this.view) this.model.highlight();
   }
 
   /** Shows what failed to the developer: the menu has no place of its own for an error. */
@@ -159,16 +164,16 @@ export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
       theme: configuredTheme,
       situation: menuSituation,
       facts: () => {
-        const project = findProject();
-        if (project === undefined) return undefined;
-        try {
-          const snapshot = buildSnapshot(project, driftsFinishing(project.root), proposalsFinishing(project.root), tasksFinishing(project.root));
-          this.name = projectName(project, snapshot.system.name);
-          return { decisions: boardDecisionCount(snapshot, configuredAutoUpdateStaleProposals()), tasksSinceScan: snapshot.tasksSinceScan, handoffs: snapshot.handoffs.length };
-        } catch {
-          this.name = projectName(project, undefined);
+        // The last picture of the window: the menu builds nothing and reads no file of the project itself.
+        const outcome = this.picture.latest();
+        if (outcome.kind === "none") return undefined;
+        if (outcome.kind === "failed") {
+          this.name = projectName(outcome.project, undefined);
           return undefined;
         }
+        const { snapshot } = outcome;
+        this.name = projectName(outcome.project, snapshot.system.name);
+        return { decisions: boardDecisionCount(snapshot, configuredAutoUpdateStaleProposals()), tasksSinceScan: snapshot.tasksSinceScan, handoffs: snapshot.handoffs.length };
       },
       panelView: () => this.panel.shownView,
       show: (view) => this.guarded(() => this.panel.show(view)),

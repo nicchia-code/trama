@@ -4,7 +4,7 @@ import { stringify } from "yaml";
 import { writeFileAtomic } from "./atomic-write";
 import { TramaError } from "./errors";
 import { canonicalCardId, instantField, type Raw, stringList } from "./schema";
-import { createdNow, newCardId, type Project, readDocument, slugify } from "./store";
+import { createdNow, listNames, newCardId, type Project, readDocument, slugify } from "./store";
 import { getTask, type Task } from "./work";
 
 /** The copy of a Task that Clear deleted, kept by each History entry that cites it: what the entry shows once the Task is gone. */
@@ -137,7 +137,7 @@ export function readHistory(p: Project): HistoryRead {
   if (!existsSync(dir)) return { entries: [], faults: [] };
   const entries: HistoryEntry[] = [];
   const faults: HistoryFault[] = [];
-  for (const name of readdirSync(dir).filter((n) => !n.startsWith(".")).sort()) {
+  for (const name of listNames(dir).filter((n) => !n.startsWith(".")).sort()) {
     try {
       entries.push(readEntry(join(dir, name), name));
     } catch (err) {

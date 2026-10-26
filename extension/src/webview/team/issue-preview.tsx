@@ -177,7 +177,13 @@ export function IssuePreview({
   const count = handoff.issues.length;
   const editors = fieldEditors(issue, team?.members ?? [], github?.project ?? null, now);
   const editorValue = (key: string): string => editors.find((editor) => editor.key === key)?.value ?? "";
-  const sprintNote = sprintLoadNote({ assignee: editorValue("assignee"), sprint: editorValue("sprint"), estimate: editorValue("estimate") }, team?.members ?? [], github?.project?.iterations ?? [], github?.loads ?? []);
+  const sprintNote = sprintLoadNote(
+    { id: issue.id, assignee: editorValue("assignee"), sprint: editorValue("sprint"), estimate: editorValue("estimate") },
+    team?.members ?? [],
+    github?.project?.iterations ?? [],
+    github?.loads ?? [],
+    snapshot.handoffs,
+  );
   const repository = github?.repository ?? null;
   const splitReason = decision.reject;
   const step = (delta: 1 | -1) => onStep(stepIssue(index, count, delta));

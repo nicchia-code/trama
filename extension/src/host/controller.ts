@@ -9,19 +9,20 @@ import { deleteTask } from "../../../src/core/delete-task";
 import { findInstructionFiles } from "../../../src/core/instruction-files";
 import { type ApprovalBlock, approvalBlock, approveProposal, getProposal, health, listProposals, type Proposal, rejectProposal, requiredProposals, resolutionHolding, setIssueField, stillBeingWritten, touchedFiles } from "../../../src/core/proposals";
 import { type PreparedQuestion, preparedOutcome, preparedStatus } from "../../../src/core/prepared";
-import { reworkProposalBlocker, reworkProposalDrifts, resolveDriftBlocker, resolveDriftsBlocker, runWindowBlocker, unifiableDrifts, unifyDriftsBlockers, writePreparedResolution } from "../../../src/core/resolution";
+import { reworkProposalBlocker, reworkProposalDrifts, resolveDriftBlocker, resolveDriftsBlocker, resolutionFacts, runWindowBlocker, unifiableDrifts, unifyDriftsBlockers, type WindowWork, writePreparedResolution } from "../../../src/core/resolution";
 import type { QuestionAnswer } from "../../../src/core/questions";
-import { buildSnapshot } from "../../../src/core/snapshot";
+import type { Picture, Snapshot } from "../../../src/core/snapshot";
 import { loadModel, modelDir, type Project, REQUIREMENTS_PREFIX, requirementsDir } from "../../../src/core/store";
 import { namerOf } from "../../../src/core/card-names";
 import { RUN_IN_PROGRESS, runBlocker } from "../../../src/core/design";
 import { cardName, syncShortNumbers } from "../../../src/core/short-numbers";
-import { attachedDrift, blockedTasks, dismissDrift, getDrift, getTask, getTaskOrNull, listDrifts, listTasks, originDesign, requireNotAttached } from "../../../src/core/work";
-import type { AgentAction, NavigateOptions, RefinementView, RunEstimateView, SetupChoice, ToHost, ToWebview, ViewName, WorkspaceFolderView } from "../protocol";
+import { attachedDrift, blockedTasks, dismissDrift, type Drift, getDrift, getTask, getTaskOrNull, listTasks, originDesign, requireNotAttached } from "../../../src/core/work";
+import type { AgentAction, NavigateOptions, RefinementView, ReplanView, RunEstimateView, SetupChoice, ToHost, ToWebview, ViewName, WorkspaceFolderView } from "../protocol";
 import type { MenuViewName } from "../menu-protocol";
 import { VIEW_LABELS } from "../view-labels";
 import { type Announcement, listAnnouncements } from "../../../src/core/announcements";
-import { onAnnouncementsWithdrawn, synchronizeAnnouncementTitles } from "./announcements";
+import { onAnnouncementsWithdrawn } from "./announcements";
+import { type PictureOutcome, WindowPicture } from "./picture";
 import { configuredAsyncDriftResolver, configuredAutoUpdateStaleProposals, configuredMaxParallelAgents, configuredModels, configuredNtfyTarget, configuredOmpPath, configuredParallelExecution, configuredSkillsDir, configuredSystemCertificates, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, installOmp, launchAgent, type LogoutOutcome, launched, loginGitHub, loginOmp, logoutOmp, openAskMore, settings, startHeldJob } from "./agent";
 import { bundledUnifyInstructions } from "./bundled";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
@@ -82,9 +83,9 @@ import { inGitRepository, soloModeMessage, writeSoloMode } from "./solo-mode";
 import { managerModeMessage, writeManagerMode } from "./manager-mode";
 import { managerStatus, readOrigin, teamUnavailableReason } from "../../../src/core/manager-mode";
 import { type GitHubTarget, githubTarget, linkChosenProject, TeamGitHub } from "./team/github";
-import { findGh, localToday, unlinkGithubProject } from "../../../src/core/github";
+import { findGh, linkedGithubProject, localToday, unlinkGithubProject } from "../../../src/core/github";
 import { People, type SaveOutcome, type WriteOutcome } from "./team/people";
-import { appliedFields, beginPublishing, findIssue, issuesOfHandoff, listIssues, publishAgainBlock, referenceTexts, splitIssueBlock, stopPublishing } from "../../../src/core/issues";
+import { appliedFields, beginPublishing, findIssue, handoffBeingWritten, issuesOfHandoff, listIssues, publishAgainBlock, referenceTexts, REPLANNING_TITLE, replanHandoffsBlock, replanRunning, splitIssueBlock, stopPublishing } from "../../../src/core/issues";
 import { fieldRulesOf, publishedIssues } from "../../../src/core/team-views";
 import { type IssueActions, type IssueOnGitHub, issueActions, issueJobs, issueSignals, type IssueSignals, scanBlock, SCANNING_REASON, scanningTitle, UPDATING_REASON, updateBlock, updatingTitle } from "../../../src/core/timeline";
 import { folderChildren, folderInside, gitIgnored, type RawEntry } from "./folder-tree";
@@ -95,7 +96,6 @@ import type { DesignRequests } from "./design-requests";
 import { writeLastScan } from "../../../src/core/last-scan";
 import { askMorePart, buildPrompt, mayFileDrifts, PREPARED_ANSWER_SENTENCE, reworkPrompt, terminalName, type ResolvedAction } from "./prompts";
 
-const DEBOUNCE_MS = 150;
 /** How often the time left of a Run all is worked out again while it goes on. */
 const RUN_ESTIMATE_INTERVAL_MS = 60_000;
 
@@ -177,7 +177,8 @@ export class Controller implements vscode.Disposable {
   /** The Proposal refinement of this window: the queue, the refinements at work and the Proposals waiting for a Run, in memory. */
   private refinement: RefinementState = NO_REFINEMENT;
   private panel: vscode.WebviewPanel | undefined;
-  private timer: NodeJS.Timeout | undefined;
+  /** The picture of the project, one per window: the panel and the side menu show the same one (`tech#picture`). */
+  private readonly picture: WindowPicture;
   /** Worked out again every `RUN_ESTIMATE_INTERVAL_MS`, only while a Run all of this window goes on. */
   private estimateTimer: NodeJS.Timeout | undefined;
   /** The estimate the Board was last sent, as text, so the timer sends only a change. */
@@ -211,13 +212,15 @@ export class Controller implements vscode.Disposable {
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly questions?: QuestionSession,
-    private readonly tramaFiles?: vscode.FileSystemWatcher,
+    /** The picture of the window; without one the controller makes its own, which builds only when asked. */
+    picture?: WindowPicture,
     private readonly designRequests?: DesignRequests,
     /** The workspace state, where the models chosen for Proposals are kept. */
     private readonly modelMemory?: ModelMemory,
     /** The Manager's people, kept in the editor's global state; without it the Team view has nothing to read or write. */
     private readonly people?: People,
   ) {
+    this.picture = picture ?? new WindowPicture();
     this.github = modelMemory === undefined ? undefined : new TeamGitHub(modelMemory);
   }
 
@@ -285,10 +288,6 @@ export class Controller implements vscode.Disposable {
     });
   }
 
-  /** The workspace folders changed: the first setup lists them again, and the panel follows a folder that is now (or no longer) a project. */
-  workspaceFoldersChanged(): void {
-    this.refresh();
-  }
 
   /**
    * A question round entered Asking: the panel opens in front, on the Diagram, or comes to the front keeping its tab.
@@ -317,8 +316,9 @@ export class Controller implements vscode.Disposable {
   }
 
   /**
-   * An entry of the side menu or a command `Trama: Show <view>`: opens the panel on `view`, or brings it forward and moves it there, and checks the installed
-   * skills as an ordinary opening does (only a project has any). Settings opens without a folder and in a folder that is no project too; Get Started opens
+   * An entry of the side menu or a command `Trama: Show <view>`: opens the panel on `view`, or brings it forward and moves it there. Only when it opens the panel that
+   * was closed it checks the installed skills as an ordinary opening does (only a project has any): with the panel open it only moves the view and starts no check.
+   * Settings opens without a folder and in a folder that is no project too; Get Started opens
    * the panel on Get Started; every other view does the ordinary opening when the folder is no Trama project.
    */
   async show(view: MenuViewName): Promise<void> {
@@ -338,8 +338,8 @@ export class Controller implements vscode.Disposable {
     } else {
       this.pendingView = { view, options: {} };
       this.create();
+      this.checkSkillsInBackground();
     }
-    this.checkSkillsInBackground();
   }
 
   /** The view the open panel shows, or undefined with the panel closed. */
@@ -1112,7 +1112,6 @@ export class Controller implements vscode.Disposable {
     this.panel?.dispose();
     this.shownViewListeners.clear();
     this.githubOutput?.dispose();
-    clearTimeout(this.timer);
     this.stopEstimateTimer();
   }
 
@@ -1143,7 +1142,10 @@ export class Controller implements vscode.Disposable {
     panel.webview.onDidReceiveMessage((raw: unknown) => void this.handle(raw));
 
     const subscriptions = [
-      ...(this.tramaFiles ? this.watchChanges(this.tramaFiles) : []),
+      // The panel follows the picture the window builds when the files of `.trama/` or the folders change (`WindowPicture`); a refresh asked for here builds its own and renders it itself.
+      this.picture.onDidBuild((outcome, cause) => {
+        if (cause !== "requested") this.render(outcome);
+      }),
       onAnnouncementsWithdrawn((announcements) => this.post({ type: "withdrawn", announcements })),
       onStoppedFollowing((subject, reason, details) => this.post({ type: "stoppedFollowing", subject, reason, ...(details === undefined ? {} : { details }) })),
       onAgentStopped((job, reason) => this.post({ type: "notice", text: agentStoppedNotice(job, reason) })),
@@ -1163,7 +1165,6 @@ export class Controller implements vscode.Disposable {
 
     panel.onDidDispose(() => {
       for (const subscription of subscriptions) subscription.dispose();
-      clearTimeout(this.timer);
       this.stopEstimateTimer();
       this.panel = undefined;
       this.setPanelView(undefined);
@@ -1206,26 +1207,27 @@ export class Controller implements vscode.Disposable {
     if (missing.length > 0) this.panel.webview.options = { ...options, localResourceRoots: [...roots, ...missing] };
   }
 
-  private scheduleRefresh(): void {
-    clearTimeout(this.timer);
-    this.timer = setTimeout(() => this.refresh(), DEBOUNCE_MS);
-  }
-
-  private watchChanges(watcher: vscode.FileSystemWatcher): vscode.Disposable[] {
-    const onChange = () => this.scheduleRefresh();
-    return [watcher.onDidCreate(onChange), watcher.onDidChange(onChange), watcher.onDidDelete(onChange)];
-  }
-
-  /** Posts a fresh snapshot; if the files cannot be read, posts the error and the view keeps its last snapshot. */
+  /**
+   * Builds a picture now, so the panel always sees the files as an action or an event of the host left them, and shows it; the side menu gets the same picture. If the files
+   * cannot be read the panel gets the error and keeps its last snapshot.
+   */
   private refresh(): void {
+    this.picture.build("requested", (outcome) => this.render(outcome));
+  }
+
+  /**
+   * Shows a picture in the panel. What the panel needs of the cards (the open Drifts, the Proposals, the Tasks) comes from the picture and from its parsed files, so
+   * nothing of `.trama/` is read again.
+   */
+  private render(outcome: PictureOutcome): void {
     // Turning the setting off empties the refinement queue: a Proposal already being refined goes on.
     if (!configuredAutoUpdateStaleProposals()) this.refinement = emptyQueue(this.refinement);
-    const project = findProject();
-    this.post({ type: "project", present: project !== undefined });
-    if (!project) {
+    this.post({ type: "project", present: outcome.kind !== "none" });
+    if (outcome.kind === "none") {
       this.post({ type: "workspaceFolders", folders: this.workspaceFolderViews() });
       return;
     }
+    const { project } = outcome;
     // Team's availability depends on origin, which can change under an open panel: it is read again with every picture, and told even when the files of the picture cannot be read.
     this.postManager();
     // The Proposals that waited for a Run of this window are settled once that Run has ended.
@@ -1233,29 +1235,56 @@ export class Controller implements vscode.Disposable {
     try {
       if (this.modelMemory) forgetProposalModels(this.modelMemory, project).catch((err: unknown) => this.post({ type: "error", message: describeError(err) }));
       const work = driftWork(project.root);
-      synchronizeAnnouncementTitles(project);
       this.allowTaskImages(project);
-      const built = buildSnapshot(project, driftsFinishing(project.root), proposalsFinishing(project.root), tasksFinishing(project.root));
-      const webview = this.panel?.webview;
-      const snapshot = webview ? withImageUris(built, (path) => webview.asWebviewUri(vscode.Uri.file(path)).toString()) : built;
-      const models: BoardModels = this.modelMemory ? boardModels(this.modelMemory, snapshot.proposals) : { proposals: {} };
-      // The Drifts an agent was asked to resolve are forgotten once no resolution runs, so a later Resolve is not held by them.
-      if (!work.resolving) this.namedByResolution.clear();
-      const asyncResolver = configuredAsyncDriftResolver();
-      const drifts = Object.fromEntries(listDrifts(project).filter((d) => d.data.status === "open").map((d) => [d.id, resolveDriftBlocker(project, work, this.namedByResolution.has(d.id), asyncResolver && snapshot.drifts.find((x) => x.id === d.id)?.prepared?.valid === true)]));
-      // The open Drifts the running resolution is working on: those this window asked an agent to resolve.
-      const resolving = work.resolving ? Object.keys(drifts).filter((id) => this.namedByResolution.has(id)) : [];
-      const runEstimate = runAllEstimate(project);
-      this.lastRunEstimate = JSON.stringify(runEstimate);
-      if (runEstimate === null) this.stopEstimateTimer();
-      else this.startEstimateTimer(project);
-      const repo = readOrigin(project.root).repository;
-      this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work), runReason: runWindowBlocker({ resolving: work.resolving, running: ownWindowRuns(project.root) }), running: ownWindowRuns(project.root), drifts, resolving }, unify: { blockers: unifyDriftsBlockers(project, work, driftsFinishing(project.root)), unifying: unifyingDrifts(project.root) }, models, refinement: this.refinementPicture(project), runEstimate, ...(repo === null ? {} : { githubRepo: repo }) });
-      // The states of the published issues come from the last read of GitHub and from the cards: a new picture of the cards moves them without a new read.
-      if (this.panelView === "team") this.postGitHub();
+      if (outcome.kind === "failed") throw outcome.error;
+      const { picture } = outcome;
+      picture.reads.run(() => this.postPicture(project, work, outcome.snapshot, picture));
     } catch (err) {
       this.post({ type: "error", message: describeError(err) });
     }
+  }
+
+  private postPicture(project: Project, work: WindowWork, built: Snapshot, picture: Picture): void {
+    const webview = this.panel?.webview;
+    const snapshot = webview ? withImageUris(built, (path) => webview.asWebviewUri(vscode.Uri.file(path)).toString()) : built;
+    const models: BoardModels = this.modelMemory ? boardModels(this.modelMemory, snapshot.proposals) : { proposals: {} };
+    // The Drifts an agent was asked to resolve are forgotten once no resolution runs, so a later Resolve is not held by them.
+    if (!work.resolving) this.namedByResolution.clear();
+    const asyncResolver = configuredAsyncDriftResolver();
+    const facts = resolutionFacts(picture.proposals, picture.drifts);
+    const preparedValid = new Set(snapshot.drifts.filter((x) => x.prepared?.valid === true).map((x) => x.id));
+    const drifts = Object.fromEntries(picture.drifts.filter((d) => d.data.status === "open").map((d) => [d.id, resolveDriftBlocker(project, work, this.namedByResolution.has(d.id), asyncResolver && preparedValid.has(d.id), facts)]));
+    // The open Drifts the running resolution is working on: those this window asked an agent to resolve.
+    const resolving = work.resolving ? Object.keys(drifts).filter((id) => this.namedByResolution.has(id)) : [];
+    const runEstimate = runAllEstimate(project, new Date(), { tasks: picture.tasks, blocked: new Map(built.tasks.map((task) => [task.id, task.blockedBy])) });
+    this.lastRunEstimate = JSON.stringify(runEstimate);
+    if (runEstimate === null) this.stopEstimateTimer();
+    else this.startEstimateTimer(project);
+    const repo = readOrigin(project.root).repository;
+    this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work, facts), runReason: runWindowBlocker({ resolving: work.resolving, running: ownWindowRuns(project.root) }), running: ownWindowRuns(project.root), drifts, resolving }, unify: { blockers: unifyDriftsBlockers(project, work, driftsFinishing(project.root), facts), unifying: unifyingDrifts(project.root) }, models, refinement: this.refinementPicture(project, picture), runEstimate, ...(repo === null ? {} : { githubRepo: repo }), ...(teamRepository(project) === null ? {} : { replan: this.replanView(project, picture.proposals) }) });
+    // The states of the published issues come from the last read of GitHub and from the cards: a new picture of the cards moves them without a new read.
+    if (this.panelView === "team") this.postGitHub();
+  }
+
+  /**
+   * `developer.REPLAN_HANDOFFS`: the state of Replan for the Decisions tab, from the cards and the jobs of this window: the first reason it is unavailable (`replanHandoffsBlock`),
+   * whether a Replan runs (its announcement is live), the open handoffs and the stale ones among them. Every other thing is read from the proposals already read.
+   */
+  private replanView(project: Project, proposals: readonly Proposal[]): ReplanView {
+    const handoffs = proposals.filter((proposal) => proposal.data.kind === "handoff");
+    const open = handoffs.filter((proposal) => proposal.data.status === "open");
+    const announced = listAnnouncements(project);
+    const finishing = proposalsFinishing(project.root);
+    const running = replanRunning(announced);
+    const block = replanHandoffsBlock({
+      linked: linkedGithubProject(project) !== null,
+      open: open.length,
+      finishing: open.some((proposal) => finishing.includes(proposal.id)),
+      writing: handoffBeingWritten(announced) || handoffs.some((proposal) => proposal.data.status === "draft" && writtenNow(proposal.id, this.refinement.running, announced)),
+      running: ownWindowRuns(project.root),
+      replanning: running,
+    });
+    return { block, running, open: open.length, stale: open.filter((proposal) => health(project, proposal).stale.length > 0).length };
   }
 
   /** The Runs the Tasks cut into by their effective model, among `only` when given: the runnable ones, in creation order. */
@@ -1585,6 +1614,9 @@ export class Controller implements vscode.Disposable {
       case "setIssueField":
         this.changeIssueField(project, message);
         return;
+      case "replanHandoffs":
+        await this.replanHandoffs(project);
+        return;
       case "splitIssue":
         await this.splitIssue(project, message.handoff, message.issue);
         return;
@@ -1765,9 +1797,9 @@ export class Controller implements vscode.Disposable {
     this.refresh();
   }
 
-  /** Whether `proposal` is refinable now; `writing` says an agent writes the Draft (`writtenNow`), which is never refined. */
-  private refinableProposal(project: Project, proposal: Proposal, writing: boolean): boolean {
-    return refinable({ kind: proposal.data.kind, attached: attachedDrift(project, proposal.id) !== null, open: proposal.data.status === "open", stale: health(project, proposal).stale.length > 0, draftRefining: proposal.data.refining === true, writing });
+  /** Whether `proposal` is refinable now; `writing` says an agent writes the Draft (`writtenNow`), which is never refined. `drifts` are the Drifts already read, when the caller has them. */
+  private refinableProposal(project: Project, proposal: Proposal, writing: boolean, drifts?: readonly Drift[]): boolean {
+    return refinable({ kind: proposal.data.kind, attached: attachedDrift(project, proposal.id, drifts) !== null, open: proposal.data.status === "open", stale: health(project, proposal).stale.length > 0, draftRefining: proposal.data.refining === true, writing });
   }
 
   /** Whether the Proposal `id` is refinable now, a Draft that an agent writes not included (a refinement of this window at work on it, or any live announcement bound to it). Unknown Proposals are not. */
@@ -1840,19 +1872,19 @@ export class Controller implements vscode.Disposable {
     this.refresh();
   }
 
-  /** The Proposals a click on Refine All takes now, in Backlog order. */
-  private refineAllTake(project: Project): string[] {
+  /** The Proposals a click on Refine All takes now, in Backlog order. `picture` holds the cards already read, when the caller has them. */
+  private refineAllTake(project: Project, picture?: Picture): string[] {
     const held = new Set([...this.refinement.queued, ...this.refinement.running.keys(), ...this.refinement.waiting]);
     const finishing = proposalsFinishing(project.root);
     const announced = listAnnouncements(project);
-    const order = new Map(listProposals(project).map((proposal) => [proposal.id, proposal]));
+    const order = new Map((picture?.proposals ?? listProposals(project)).map((proposal) => [proposal.id, proposal]));
     const candidates: PickFact[] = [];
     for (const id of backlogOrder([...order.values()].map((proposal) => ({ id: proposal.id, created: proposal.data.created })))) {
       const proposal = order.get(id);
       // Only an Open change, or a Draft left refining, can be refined: the others are skipped before anything costly is read.
       if (proposal === undefined || held.has(id) || proposal.data.kind !== "change" || (proposal.data.status !== "open" && proposal.data.refining !== true)) continue;
       try {
-        if (!this.refinableProposal(project, proposal, proposal.data.status === "draft" && writtenNow(id, this.refinement.running, announced))) continue;
+        if (!this.refinableProposal(project, proposal, proposal.data.status === "draft" && writtenNow(id, this.refinement.running, announced), picture?.drifts)) continue;
         const block = refinementBlock(project, id);
         if (finishing.includes(id) || (block !== null && block.kind !== "waiting")) candidates.push({ id, block: "other", requires: [] });
         else candidates.push({ id, block: block === null ? "none" : "requires", requires: requiredProposals(project, proposal).map((required) => required.id) });
@@ -1890,12 +1922,12 @@ export class Controller implements vscode.Disposable {
     return planQueue({ queued, running: this.refinement.running, waiting: this.refinement.waiting, facts, limit: configuredMaxParallelAgents() });
   }
 
-  /** The refinement as the Board shows it: the state of the window, why each queued Proposal waits, and what a click on Refine All takes. */
-  private refinementPicture(project: Project): RefinementView {
+  /** The refinement as the Board shows it: the state of the window, why each queued Proposal waits, and what a click on Refine All takes. `picture` holds the cards already read. */
+  private refinementPicture(project: Project, picture: Picture): RefinementView {
     const enabled = configuredAutoUpdateStaleProposals();
     const waits = this.refinement.queued.length === 0 ? new Map() : this.queuePlan(project, this.refinement.queued).waits;
     const notes = refinementNotes(this.refinement.running.size === 0 ? [] : listAnnouncements(project), [...this.refinement.running.keys()]);
-    return refinementView({ state: this.refinement, enabled, runInProgress: ownWindowRuns(project.root), waits, count: enabled ? this.refineAllTake(project).length : 0, notes });
+    return refinementView({ state: this.refinement, enabled, runInProgress: ownWindowRuns(project.root), waits, count: enabled ? this.refineAllTake(project, picture).length : 0, notes });
   }
 
   /** Whether the queued Proposal `id` may keep waiting: still refinable, and blocked by nothing but Proposals it requires. */
@@ -2165,6 +2197,26 @@ export class Controller implements vscode.Disposable {
   }
 
   /**
+   * `developer.REPLAN_HANDOFFS`, after the Manager confirmed: checks again the reasons Replan is unavailable, gathers the handoffs open now, stale ones included, and asks the agent
+   * to plan together the issues of those that are not stale. When the instruction does not leave nothing changes and the Team view hears why, as a notice.
+   */
+  private async replanHandoffs(project: Project): Promise<void> {
+    const team = teamUnavailableReason(project);
+    const proposals = listProposals(project);
+    const blocked = team ?? this.replanView(project, proposals).block;
+    if (blocked !== null) {
+      this.post({ type: "notice", text: `Trama could not replan the handoffs: ${blocked}.` });
+      return;
+    }
+    const handoffs = proposals.filter((proposal) => proposal.data.kind === "handoff" && proposal.data.status === "open").map((proposal) => proposal.id);
+    try {
+      await this.launchAction(project, { kind: "replan-handoffs", handoffs });
+    } catch (err) {
+      this.post({ type: "notice", text: `Trama could not replan the handoffs: ${describeError(err).replace(/\.$/, "")}.` });
+    }
+  }
+
+  /**
    * Approving, rejecting and reworking a handoff are the Team view's: from any other view the host refuses with a notice (`ui#proposal/Open`). The decision itself is the
    * one of every Proposal.
    */
@@ -2225,7 +2277,7 @@ export class Controller implements vscode.Disposable {
   }
 
   /** `feedback` is set only by Rework: the Drift's prepared question is never used and the instruction carries the feedback. */
-  private async launchAction(project: Project, action: AgentAction | Extract<ResolvedAction, { kind: "rework" | "rework-resolution" | "refine" | "publish-issues" | "split-issue" | "update-issue" | "scan-issue" }>, answered?: { selected: string[]; text?: string }, feedback?: string): Promise<void> {
+  private async launchAction(project: Project, action: AgentAction | Extract<ResolvedAction, { kind: "rework" | "rework-resolution" | "refine" | "publish-issues" | "split-issue" | "replan-handoffs" | "update-issue" | "scan-issue" }>, answered?: { selected: string[]; text?: string }, feedback?: string): Promise<void> {
     // Resolve Drifts and Runs are checked from current state at the request and at each delivery checkpoint.
     const refusal = (): string | null => {
       if (action.kind === "resolve-drifts" && driftsFinishing(project.root).includes(action.drift)) return "Resolve this Drift is unavailable: the agent is still finishing.";
@@ -2248,6 +2300,7 @@ export class Controller implements vscode.Disposable {
         return reasons.length === 0 ? null : `Unify Drifts is unavailable: ${reasons.join(". ")}.`;
       }
       if (action.kind === "refine") return this.refinementRefusal(project, action.proposal);
+      if (action.kind === "replan-handoffs") return this.replanView(project, listProposals(project)).block;
       if (action.kind === "update-issue" || action.kind === "scan-issue") {
         const jobs = issueJobs(listAnnouncements(project));
         if ((action.kind === "update-issue" ? jobs.updating : jobs.scanning).includes(action.number)) return action.kind === "update-issue" ? UPDATING_REASON : SCANNING_REASON;
@@ -2386,6 +2439,12 @@ export class Controller implements vscode.Disposable {
       case "split-issue": {
         // The handoff stays Open until the agent changes its first file; the instruction runs on the analysis role and files no Drift.
         const result = await send(action, { kind: "work", title: "Splitting an issue" });
+        if (!launched(result)) throw new TramaError("the agent did not start");
+        return;
+      }
+      case "replan-handoffs": {
+        // Every handoff open at the confirmation is named; the instruction runs on the analysis role and files no Drift. Its ghost is how the running Replan is known.
+        const result = await send(action, { kind: "work", title: REPLANNING_TITLE });
         if (!launched(result)) throw new TramaError("the agent did not start");
         return;
       }

@@ -15,11 +15,12 @@ import { tasksHeldByDrifts } from "./delete-task";
 import { syncShortNumbers } from "./short-numbers";
 import { readTaskImages, type TaskImage } from "./task-images";
 import { clearedSince, readLastScan } from "./last-scan";
-import { attachedDrift, closedUnchanged, type Column, type Drift, type DriftOption, type DriftSides, driftBody, driftOptions, driftSides, type FollowedDrift, followedDrifts, listDrifts, listTasks, taskProgress, unifiedDrifts, unifiedInto } from "./work";
+import { attachedDrift, closedUnchanged, type Column, type Drift, type DriftOption, type DriftSides, driftBody, driftOptions, driftSides, type FollowedDrift, followedDrifts, indexDrifts, listDrifts, listTasks, type Task, taskProgress, unifiedDrifts, unifiedInto } from "./work";
 import { preparedFlag, preparedStatus } from "./prepared";
 import { type Specs, type SpecsChange, specsChange } from "./specs";
 import { type HistoryFault, readHistory } from "./history";
 import { type HandoffView, type IssueRowView, teamViews } from "./team-views";
+import { type DocumentCache, PictureReader } from "./document-cache";
 
 export interface ActorChange {
   id: string;
@@ -366,8 +367,8 @@ const modelView = (project: ProjectModel): ModelView => ({
   areas: project.areas.map((a) => areaView(a, a, a)),
 });
 
-/** A Proposal as the Diagram and the Requirements tab draw it, read in `p` whose Model is `project`. */
-function proposalView(p: Project, project: ProjectModel, proposal: Proposal, writer: ProposalWriter | null): ProposalView {
+/** A Proposal as the Diagram and the Requirements tab draw it, read in `p` whose Model is `project`; `drifts` are the Drifts already read. */
+function proposalView(p: Project, project: ProjectModel, proposal: Proposal, writer: ProposalWriter | null, drifts: readonly Drift[]): ProposalView {
   const afterProject = buildProject(applied(p, proposal));
   const after = afterProject.model;
   const h = health(p, proposal);
@@ -403,13 +404,13 @@ function proposalView(p: Project, project: ProjectModel, proposal: Proposal, wri
     tasks: coverage === null ? [] : proposal.tasks.map((t) => ({ id: t.id, title: t.title, body: stripTitle(t.body), technical: t.technical, refs: t.refs, images: readTaskImages(p, t.id) })),
     removals: coverage?.removals ?? [],
     creates: coverage === null ? 0 : proposal.tasks.length + coverage.removals.length,
-    resolves: proposal.data.kind === "resolution" ? resolvedDrifts(p, proposal) : [],
+    resolves: proposal.data.kind === "resolution" ? resolvedDrifts(p, proposal, drifts) : [],
     requires: h.requires,
     base: pending ? modelView(baseProject) : null,
     stale: h.stale,
     unbased: h.unbased,
     errors: afterProject.diagnostics,
-    unfixable: unfixableDrifts(p, proposal),
+    unfixable: unfixableDrifts(p, proposal, drifts),
     changes: touched,
     // A file the Model rejects (bad name, ID taken by a Feature or Actor) is a Machine on neither side; its errors are listed instead.
     machines: [...machineIds].sort().flatMap((id) => {
@@ -430,22 +431,57 @@ function proposalView(p: Project, project: ProjectModel, proposal: Proposal, wri
   };
 }
 
-/** Everything the extension shows, as plain JSON. Malformed Task or Drift files throw, naming the file. */
-export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [], finishingProposals: readonly string[] = [], finishingTasks: readonly string[] = []): Snapshot {
-  const numbers = syncShortNumbers(p).all();
+/** What a picture of the project is made of: the Snapshot, the cards it was built from, and the reads it went through. */
+export interface Picture {
+  snapshot: Snapshot;
+  /** The cards as the picture read them, in creation order: a reader that needs them (the host's refresh) takes them from here instead of reading the files again. */
+  tasks: readonly Task[];
+  drifts: readonly Drift[];
+  proposals: readonly Proposal[];
+  /** The picture's reads: `reads.run` works from the same parsed files while the picture is fresh. */
+  reads: PictureReader;
+}
+
+/**
+ * Everything the extension shows, as plain JSON. Malformed Task or Drift files throw, naming the file. `cache` is the window's cache of parsed documents; the
+ * command line builds without one. Each folder of `.trama/` is listed once and each file is read and parsed at most once per picture.
+ */
+export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [], finishingProposals: readonly string[] = [], finishingTasks: readonly string[] = [], cache?: DocumentCache): Snapshot {
+  const picture = buildPicture(p, finishingDrifts, finishingProposals, finishingTasks, cache);
+  picture.reads.close();
+  return picture.snapshot;
+}
+
+/** The Snapshot with the cards it was built from. The reads stay open for the caller to work from the same files; it closes them when done (`reads.close`). */
+export function buildPicture(p: Project, finishingDrifts: readonly string[] = [], finishingProposals: readonly string[] = [], finishingTasks: readonly string[] = [], cache?: DocumentCache): Picture {
+  const reads = new PictureReader(cache);
+  try {
+    const picture = reads.run(() => pictureOf(p, finishingDrifts, finishingProposals, finishingTasks, reads));
+    reads.finish();
+    return picture;
+  } catch (error) {
+    reads.close();
+    throw error;
+  }
+}
+
+function pictureOf(p: Project, finishingDrifts: readonly string[], finishingProposals: readonly string[], finishingTasks: readonly string[], reads: PictureReader): Picture {
+  // Each folder is listed and each card read once, here; everything below works from these cards.
+  const tasks = listTasks(p);
+  const drifts = listDrifts(p);
+  const allProposals = listProposals(p);
+  const numbers = syncShortNumbers(p, { tasks, drifts, proposals: allProposals }).all();
   const project = buildProject(readTrackedFiles(p));
 
-  const tasks = listTasks(p);
   const taskById = new Map(tasks.map((t) => [t.id, t]));
+  const driftById = indexDrifts(drifts);
   const history = readHistory(p);
-  const team = teamViews(p);
+  const team = teamViews(p, allProposals);
   const scanInstant = Date.parse(readLastScan(p));
   const tasksSinceScan = tasks.filter((t) => t.data.column === "done" && t.data.finished !== null && t.data.unchanged === null && Date.parse(t.data.finished) > scanInstant).length + clearedSince(p, scanInstant);
-  const drifts = listDrifts(p);
   const blocked = computeBlocked(project, tasks, drifts);
   const held = tasksHeldByDrifts(drifts);
 
-  const allProposals = listProposals(p);
   const live = listAnnouncements(p);
   // Any live announcement bound to a Draft means an agent is writing it, whoever launched that agent.
   const writerOf = (proposal: Proposal): ProposalWriter | null => {
@@ -454,24 +490,24 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
     return bound === undefined ? null : { phase: announcementView(p, bound, undefined).phase, note: bound.notes.at(-1)?.text ?? null };
   };
   // A handoff never shows on the Board, in the Diagram's or the Requirements' Proposal selectors, or in any count of them (`rules#proposal/Draft`): the Team view has its own list.
-  const shownProposals = allProposals.filter((x) => x.data.kind !== "handoff" && (x.data.status === "open" || (x.data.status === "draft" && x.data.refining))).map((proposal) => proposalView(p, project, proposal, writerOf(proposal)));
+  const shownProposals = allProposals.filter((x) => x.data.kind !== "handoff" && (x.data.status === "open" || (x.data.status === "draft" && x.data.refining))).map((proposal) => proposalView(p, project, proposal, writerOf(proposal), drifts));
   const proposalById = new Map(allProposals.map((x) => [x.id, x]));
   // The developer does not see attached Proposals, so the ghost of a Proposal whose Draft is attached to an open Drift is drawn nowhere.
   // The announcement of a refinement is bound to a Proposal that already has its card (Open, or a Draft left refining): its phase and notes show on that card, never as a ghost of its own.
   // The ghost of a handoff has no column on the Board (it shows in the status bar), so an announcement bound to a handoff is no ghost of the Board.
   const carded = new Set(shownProposals.map((x) => x.id));
-  const announcements = live.filter((a) => !(a.kind === "proposal" && a.proposal !== null && (attachedDrift(p, a.proposal) || carded.has(a.proposal) || proposalById.get(a.proposal)?.data.kind === "handoff")));
+  const announcements = live.filter((a) => !(a.kind === "proposal" && a.proposal !== null && (attachedDrift(p, a.proposal, drifts) || carded.has(a.proposal) || proposalById.get(a.proposal)?.data.kind === "handoff")));
   const driftView = (d: Drift): DriftView => ({
     id: d.id,
     created: d.data.created,
     title: d.title,
-    previous: followedDrifts(p, d),
+    previous: followedDrifts(p, d, driftById),
     origin: d.data.origin,
     task: d.data.task,
-    unifies: unifiedDrifts(p, d),
-    unifiedInto: unifiedInto(p, d),
+    unifies: unifiedDrifts(p, d, driftById),
+    unifiedInto: unifiedInto(p, d, driftById),
     merge: d.data.merge,
-    closedUnchanged: closedUnchanged(p, d),
+    closedUnchanged: closedUnchanged(p, d, tasks),
     body: driftBody(d),
     job: d.data.job,
     prepared: preparedFlag(preparedStatus(p, d, project)),
@@ -486,13 +522,13 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
     proposalTitle: (d.data.proposal !== null && proposalById.get(d.data.proposal)?.title) || null,
     proposalChanges: shownProposals.find((x) => x.id === d.data.proposal)?.changes ?? null,
   });
-  return {
+  const snapshot: Snapshot = {
     ...modelView(project),
     specs: project.specs,
     specsPresent: project.specsPresent,
     // A History file that does not read is an error of the Snapshot, shown with the Model's errors; it is not a Model error, so approval does not see it.
     diagnostics: [...project.diagnostics, ...history.faults.map((fault) => ({ file: fault.file, line: 0, message: fault.message })), ...team.faults],
-    proposals: shownProposals.filter((v) => !attachedDrift(p, v.id)),
+    proposals: shownProposals.filter((v) => !attachedDrift(p, v.id, drifts)),
     resolutionDrifts: allProposals.filter((x) => x.data.kind === "resolution" && (x.data.status === "draft" || x.data.status === "open")).flatMap((x) => x.data.drifts.map((d) => d.drift)),
     finishingDrifts: [...finishingDrifts],
     finishingProposals: [...finishingProposals],
@@ -556,6 +592,7 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
     })),
     historyFaults: history.faults,
   };
+  return { snapshot, tasks, drifts, proposals: allProposals, reads };
 }
 
 /** The tag of a Task's Proposal: its label in full, or else its title shortened past 30 characters; null when the Task has no Proposal or the Proposal is gone. */

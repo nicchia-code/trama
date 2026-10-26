@@ -12,6 +12,7 @@ import {
   findIssue,
   githubBody,
   goneIssues,
+  handoffBeingWritten,
   type Issue,
   type IssueData,
   issuesDir,
@@ -21,6 +22,10 @@ import {
   publicationOrder,
   publishAgainBlock,
   publishingIssues,
+  REPLANNING_TITLE,
+  replanHandoffsBlock,
+  replanRunning,
+  type ReplanFacts,
   saveIssue,
   STOPPED_REASON,
   stopPublishing,
@@ -336,5 +341,48 @@ describe("what changed under a published issue", () => {
     const old = card("cccc3333", "Ship order", { state: "published", number: 9, url: "https://github.com/acme/web/issues/9", texts: {} });
     edit((text) => text.replace("### Paid\n", "### Paid\nChanged.\n"));
     expect(json<{ changed: Changed }>("issue", "show", old.id).changed).toEqual([]);
+  });
+});
+
+describe("when Replan is available (rules#developer.REPLAN_HANDOFFS)", () => {
+  const ready: ReplanFacts = { linked: true, open: 2, finishing: false, writing: false, running: false, replanning: false };
+
+  test("it is available when a Project is linked, a handoff is open and nothing else runs", () => {
+    expect(replanHandoffsBlock(ready)).toBeNull();
+    expect(replanHandoffsBlock({ ...ready, open: 1 })).toBeNull();
+  });
+
+  test("each reason alone is the reason", () => {
+    expect(replanHandoffsBlock({ ...ready, linked: false })).toBe("Link a GitHub Project first");
+    expect(replanHandoffsBlock({ ...ready, open: 0 })).toBe("No handoff waits for a decision");
+    expect(replanHandoffsBlock({ ...ready, finishing: true })).toBe("The agent is still finishing");
+    expect(replanHandoffsBlock({ ...ready, writing: true })).toBe("An agent is writing a handoff");
+    expect(replanHandoffsBlock({ ...ready, running: true })).toBe("A run is in progress");
+    expect(replanHandoffsBlock({ ...ready, replanning: true })).toBe("Replan is already running");
+  });
+
+  test("with several reasons the first in this order wins", () => {
+    const all: ReplanFacts = { linked: false, open: 0, finishing: true, writing: true, running: true, replanning: true };
+    expect(replanHandoffsBlock(all)).toBe("Link a GitHub Project first");
+    expect(replanHandoffsBlock({ ...all, linked: true })).toBe("No handoff waits for a decision");
+    expect(replanHandoffsBlock({ ...all, linked: true, open: 1 })).toBe("The agent is still finishing");
+    expect(replanHandoffsBlock({ ...all, linked: true, open: 1, finishing: false })).toBe("An agent is writing a handoff");
+    expect(replanHandoffsBlock({ ...all, linked: true, open: 1, finishing: false, writing: false })).toBe("A run is in progress");
+    expect(replanHandoffsBlock({ ...all, linked: true, open: 1, finishing: false, writing: false, running: false })).toBe("Replan is already running");
+  });
+
+  test("a Replan runs while its announcement is live", () => {
+    expect(REPLANNING_TITLE).toBe("Replanning handoffs");
+    expect(replanRunning([])).toBe(false);
+    expect(replanRunning([{ kind: "work", title: "Replanning handoffs" }])).toBe(true);
+    expect(replanRunning([{ kind: "check", title: "Replanning handoffs" }, { kind: "work", title: "Splitting an issue" }])).toBe(false);
+  });
+
+  test("a handoff is written by a live work that is a request, a Rework with feedback or a Split, never by the other jobs", () => {
+    expect(handoffBeingWritten([])).toBe(false);
+    expect(handoffBeingWritten([{ kind: "work", title: "Splitting an issue" }])).toBe(true);
+    expect(handoffBeingWritten([{ kind: "work", title: "Ship the refund policy" }])).toBe(true);
+    expect(handoffBeingWritten([{ kind: "work", title: "Publishing issues" }, { kind: "work", title: "Updating #7" }, { kind: "work", title: "Importing from code" }, { kind: "work", title: "Replanning handoffs" }])).toBe(false);
+    expect(handoffBeingWritten([{ kind: "check", title: "Scanning System" }, { kind: "proposal", title: "Resolve Drifts" }])).toBe(false);
   });
 });

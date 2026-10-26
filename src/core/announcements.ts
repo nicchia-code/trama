@@ -1,12 +1,12 @@
 import { randomInt } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomic } from "./atomic-write";
 import { TramaError, UsageError } from "./errors";
 import { withFileLock } from "./file-lock";
 import { enumField, idField, type Raw } from "./schema";
 import { cardName } from "./short-numbers";
-import { documentText, type Project, readDocument, writeFileEnsuringDir } from "./store";
+import { documentText, listNames, type Project, readDocument, writeFileEnsuringDir } from "./store";
 
 /**
  * An announcement is a card the agent is about to create, kept in a temporary file so the Board can show a ghost of
@@ -255,7 +255,7 @@ export function listAnnouncements(p: Project): Announcement[] {
   const dir = announcementsDir(p);
   if (!existsSync(dir)) return [];
   const out: Announcement[] = [];
-  for (const name of readdirSync(dir)) {
+  for (const name of listNames(dir)) {
     if (!FILE_PATTERN.test(name)) continue;
     const id = name.slice(0, -3);
     try {

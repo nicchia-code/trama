@@ -13,7 +13,7 @@ export interface MenuSurface {
   theme(): ThemeSetting;
   /** No folder open, a folder that is no project (the one that counts for the panel), or a project. */
   situation(): MenuSituation;
-  /** The numbers of the project's Snapshot, read now with `src/core`; undefined when the files cannot be read. */
+  /** The numbers of the last picture of the project the window built; undefined when there is none or its files could not be read. */
   facts(): { decisions: number; tasksSinceScan: number; handoffs: number } | undefined;
   /** The view the panel shows, or undefined with the panel closed. */
   panelView(): ViewName | undefined;
@@ -69,10 +69,12 @@ export function menuBadge(state: Pick<MenuState, "situation" | "decisions">): { 
 export class MenuModel {
   /** The numbers of the last Snapshot that could be read: they stay when the files cannot be read for a moment. */
   private last = { decisions: 0, tasksSinceScan: 0, handoffs: 0 };
+  /** The last full state computed (`state`): what a change of the panel's view or a new visibility sends again, with only `panelView` read again. */
+  private current: MenuState | undefined;
 
   constructor(private readonly surface: MenuSurface) {}
 
-  /** The state now: the Snapshot is read only inside a project. */
+  /** The state now, computed from the files: the Snapshot is read only inside a project. It becomes the last state. */
   state(): MenuState {
     const situation = this.surface.situation();
     if (situation === "project") this.last = this.surface.facts() ?? this.last;
@@ -80,10 +82,21 @@ export class MenuModel {
     const merge = situation === "project" ? this.surface.mergeState() : undefined;
     const manager = situation === "project" && this.surface.manager();
     const { handoffs, ...numbers } = facts;
-    return { situation, ...numbers, panelView: this.surface.panelView() ?? null, ...(merge === undefined ? {} : { merge }), ...(manager ? { manager: true as const } : {}), ...(manager && handoffs > 0 ? { handoffs } : {}) };
+    this.current = { situation, ...numbers, panelView: this.surface.panelView() ?? null, ...(merge === undefined ? {} : { merge }), ...(manager ? { manager: true as const } : {}), ...(manager && handoffs > 0 ? { handoffs } : {}) };
+    return this.current;
   }
 
-  /** Computes the state and sends it to the menu and the badge to the icon: after a change of the files, the panel, the folders or the settings, and when the menu is shown. */
+  /** Sends the last state again with the view the panel shows now, when it changed view or the menu became visible: it builds no Snapshot, reads no file and starts no process. The badge and the title stay those of the last state. */
+  highlight(): void {
+    if (this.current === undefined) {
+      this.refresh();
+      return;
+    }
+    this.current = { ...this.current, panelView: this.surface.panelView() ?? null };
+    this.surface.post({ type: "menuState", ...this.current });
+  }
+
+  /** Computes the state from the files and sends it to the menu and the badge to the icon: after a change of the files, the folders, the settings or the Merge, and when the menu asks for it. */
   refresh(): void {
     const state = this.state();
     this.surface.setBadge(menuBadge(state));

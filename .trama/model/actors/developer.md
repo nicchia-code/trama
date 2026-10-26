@@ -215,6 +215,9 @@ The Manager changes, in the issue preview of the Team view, a field the agent pr
 ### SPLIT_ISSUE
 The Manager asks, from the issue preview, that the agent split an issue estimated more than three days.
 
+### REPLAN_HANDOFFS
+The Manager asks, from the Decisions tab of the Team view and after confirming, that the agent plan again together, in time and among the people of the team, the issues of all the open handoffs.
+
 ### PUBLISH_AGAIN
 The Manager asks, from the Issues tab, that the agent publish again an issue that is not published.
 

@@ -36,7 +36,7 @@ export function stringList(raw: Raw, key: string, where: string): string[] {
   if (v === undefined || v === null) return [];
   if (!Array.isArray(v) || v.some((x) => typeof x !== "string"))
     throw new TramaError(`${where}: "${key}" must be a list of strings, found ${Array.isArray(v) ? "a list with non-string items" : describe(v)}`);
-  return v as string[];
+  return [...(v as string[])];
 }
 
 /** Eight lowercase letters and digits: the identity of a Proposal, Task or Drift that is not numbered. */
@@ -80,7 +80,7 @@ export function stringMap(raw: Raw, key: string, where: string): Record<string, 
   if (v === undefined || v === null) return {};
   if (typeof v !== "object" || Array.isArray(v) || Object.values(v).some((x) => typeof x !== "string"))
     throw new TramaError(`${where}: "${key}" must map file paths to hashes (or "new"), found ${describe(v)}`);
-  return v as Record<string, string>;
+  return { ...(v as Record<string, string>) };
 }
 
 /** A whole number from 1 up (an option's number); absent or null is none. */

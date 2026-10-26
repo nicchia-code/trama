@@ -102,7 +102,7 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
     requirements.update(snapshot);
     specs.update(snapshot);
     history.update(snapshot);
-    team.update(snapshot);
+    team.update(snapshot, message.replan ?? null);
     store.set({ error: null, diagnostics: snapshot.diagnostics, githubRepo: message.githubRepo ?? null });
   } else if (message.type === "withdrawn") {
     board.withdrawn?.(message.announcements);

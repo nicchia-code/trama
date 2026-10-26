@@ -156,6 +156,7 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
     case "ready":
     case "writeDesignRequest":
     case "writeHandoffRequest":
+    case "replanHandoffs":
     case "refineAll":
     case "cancelRefineAll":
       return { ok: true, message: { type } };

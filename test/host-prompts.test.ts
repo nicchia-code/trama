@@ -74,6 +74,15 @@ test("Comment update and the Scan of a closed issue are one-line instructions wi
   expect(mayFileDrifts(scan)).toBe(true);
 });
 
+test("Replan is a one-line instruction that names every open handoff, in the terminal Replan, and files no Drift", () => {
+  const short = (kind: "task" | "proposal", id: string) => (kind === "task" ? `T${id.length}` : `P${id.length}`);
+  const replan: ResolvedAction = { kind: "replan-handoffs", handoffs: ["ab12cd34", "ef56gh78"] };
+  expect(buildPrompt(replan)).toBe("Use the trama-handoff skill to replan together the issues of the open handoffs ab12cd34, ef56gh78.");
+  expect(buildPrompt({ kind: "replan-handoffs", handoffs: ["ab12cd34"] })).toBe("Use the trama-handoff skill to replan together the issues of the open handoffs ab12cd34.");
+  expect(terminalName(replan, short)).toBe("Replan");
+  expect(mayFileDrifts(replan)).toBe(false);
+});
+
 test("a chosen language ends every job's instruction on the same line, trimmed and as typed; blank asks nothing", () => {
   const sentence = (language: string) => `Write the texts for the developer in ${language}, as the Language section of your instructions says.`;
   const jobs = [

@@ -42,6 +42,18 @@ export interface RefinementView {
 /** The time left of a Run all launched from this window, as the host carries it with each picture: `null` without a Run all, `{ estimating: true }` while Trama works it out, otherwise the range in minutes (not rounded), whether the Run all lasts longer than its reference (the time since the launch passes it), and `done`, its progress between 0 and 0.95 (the highest reached outside `over`; 0.95 when `over`). */
 export type RunEstimateView = null | { estimating: true } | { low: number; high: number; over: boolean; done: number };
 
+/**
+ * What `Replan` of the Decisions tab needs (`rules#developer.REPLAN_HANDOFFS`), as the host carries it with each picture while Team is available: `block` is the first reason
+ * Replan is unavailable, null when it is available; `running` says a Replan launched from this window runs (its button shows the loader); `open` and `stale` are the numbers of open
+ * handoffs and of stale ones among them, which the confirmation names.
+ */
+export interface ReplanView {
+  block: string | null;
+  running: boolean;
+  open: number;
+  stale: number;
+}
+
 /** One group of a Run all that a sequence cuts by model: the Tasks of the Proposals in `include`, or every Task but those of the Proposals in `exclude`. `model` is the group's model; absent for the Settings group. */
 export interface RunGroup {
   include?: string[];
@@ -127,6 +139,8 @@ export type ToHost =
   | { type: "publishAgain"; handoff: string }
   /** «Split» on an issue estimated more than three days of an open handoff: the host rechecks the reasons Split is unavailable, in order, and asks the agent to split the issue into issues that each fit a sprint, on the same handoff; when the instruction does not leave, nothing changes and a `notice` says why. */
   | { type: "splitIssue"; handoff: string; issue: string }
+  /** «Replan» of the Decisions tab, sent only by the confirmation of its dialog (`developer.REPLAN_HANDOFFS`): the host rechecks the reasons Replan is unavailable, in order, gathers the open handoffs at that moment, stale ones included, and asks the agent to plan again together the issues of those that are not stale; when the instruction does not leave, nothing changes and a `notice` says why. */
+  | { type: "replanHandoffs" }
   /** «Comment update» of the Issues tab, on a published open issue the Model changed under (`developer.ASK_ISSUE_UPDATE`): `issue` is the issue's identity. The host rechecks that the issue is published, open and stale and that Team is available and no job of its own or Run of this window is in progress, and asks the agent to comment on it what changed; when the instruction does not leave, nothing changes and a `notice` says why. */
   | { type: "askIssueUpdate"; issue: string }
   /** «Scan» of the Issues tab, on a published issue that is `Closed` (`developer.SCAN_ISSUE`): `issue` is the issue's identity. The host rechecks Team and the Run and asks the agent to compare only the references of the issue with the code; when the instruction does not leave, nothing changes and a `notice` says why. */
@@ -243,7 +257,7 @@ export interface NavigateOptions {
 /** Host -> webview. */
 export type ToWebview =
   /** `asking`: a question round is open; `resolve` reports the blocker, why every Run is disabled, per open Drift the reason its Resolve is disabled (null when it works), and the open Drifts the running resolution is working on (`resolving`). `unify.blockers` are all the reasons Unify Drifts is unavailable, in order (empty when it works), and `unify.unifying` the open Drifts the running Unify Drifts agent works on. `models` carries the models chosen for the Proposals that carry Tasks. `refinement` is the state of the Proposal refinement (absent: off); see `RefinementView`. `runEstimate` is the time left of the Run all of this window; see `RunEstimateView`. */
-  | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; running?: boolean; drifts: Record<string, string | null>; resolving: string[] }; unify: { blockers: string[]; unifying: string[] }; models: BoardModels; refinement?: RefinementView; runEstimate: RunEstimateView; githubRepo?: string }
+  | { type: "snapshot"; snapshot: Snapshot; asking: boolean; resolve: { blocker: string | null; runReason: string | null; running?: boolean; drifts: Record<string, string | null>; resolving: string[] }; unify: { blockers: string[]; unifying: string[] }; models: BoardModels; refinement?: RefinementView; runEstimate: RunEstimateView; githubRepo?: string; replan?: ReplanView }
   /** Announcements withdrawn because the agent finished without delivering their cards: the Board tells the developer. */
   | { type: "withdrawn"; announcements: AnnouncementView[] }
   /** The run control stopped following a job or released a Task: the Board shows `Trama stopped following <subject>: <reason>.` (`ui#agents`). `details` are the last lines of omp's error output, shown behind `Show details`. */

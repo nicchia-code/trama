@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { writeFileAtomic } from "./atomic-write";
 import { TramaError } from "./errors";
 import { compareByCreation, createdField, idField } from "./schema";
-import { listCards, type CardLayout, type Project, readDocument, readTextLf } from "./store";
+import { currentPictureReads, listCards, type CardLayout, type Project, readDocument, readTextLf } from "./store";
 
 export type { CardKind };
 
@@ -60,14 +60,20 @@ function taskRowsIn(dir: string): TaskRow[] {
  * design it comes from has a Task in To do or In progress. A Done Task without a number never takes one, so `previous`
  * (the numbers already written) decides which Done Tasks stay.
  */
-function numberedTasks(dir: string, previous: Map<string, number> | undefined): LiveCard[] {
-  const rows = taskRowsIn(dir);
+function numberedTasks(rows: readonly TaskRow[], previous: Map<string, number> | undefined): LiveCard[] {
   const openDesigns = new Set(rows.filter((r) => KIND_SPEC.task.live.includes(r.column) && r.design !== null).map((r) => r.design));
   return rows.filter(
     (r) =>
       KIND_SPEC.task.live.includes(r.column) ||
       (r.column === "done" && r.design !== null && openDesigns.has(r.design) && previous?.has(r.id) === true),
   );
+}
+
+/** The cards a reader has already read: `syncShortNumbers` takes the numbers of these instead of listing and reading the folders again. */
+export interface NumberedCards {
+  tasks: readonly { id: string; data: { column: string; proposal: string | null; created: string | null } }[];
+  drifts: readonly { id: string; data: { status: string; created: string | null } }[];
+  proposals: readonly { id: string; data: { status: string; created: string | null } }[];
 }
 
 /**
@@ -191,7 +197,17 @@ export class ShortNumbers {
  * file is rebuilt from zero in creation order. Never fails because of the file: when it cannot be saved either, the
  * command warns once and goes on with the numbers it rebuilt.
  */
-export function syncShortNumbers(p: Project): ShortNumbers {
+export function syncShortNumbers(p: Project, cards?: NumberedCards): ShortNumbers {
+  const reads = currentPictureReads();
+  const key = `numbers:${p.dir}`;
+  // Within one picture the numbers are worked out once: nothing the picture reads changes between its calls.
+  if (cards === undefined && reads !== undefined) return reads.once(key, () => syncNumbers(p));
+  const numbers = syncNumbers(p, cards);
+  reads?.remember(key, numbers);
+  return numbers;
+}
+
+function syncNumbers(p: Project, cards?: NumberedCards): ShortNumbers {
   let current: string | null;
   try {
     current = readTextLf(assignedFile(p));
@@ -199,8 +215,11 @@ export function syncShortNumbers(p: Project): ShortNumbers {
     current = null; // missing, or unreadable: a folder in its place, no permission
   }
   const previous = current === null ? null : parseAssigned(current);
-  const liveOf = (kind: CardKind): LiveCard[] =>
-    (kind === "task" ? numberedTasks(p.dir, previous?.task) : cardsIn(p.dir, kind)).sort(compareByCreation);
+  const liveOf = (kind: CardKind): LiveCard[] => {
+    if (cards === undefined) return (kind === "task" ? numberedTasks(taskRowsIn(p.dir), previous?.task) : cardsIn(p.dir, kind)).sort(compareByCreation);
+    if (kind === "task") return numberedTasks(cards.tasks.map((t) => ({ id: t.id, created: t.data.created, column: t.data.column, design: t.data.proposal })), previous?.task).sort(compareByCreation);
+    return cards[kind === "proposal" ? "proposals" : "drifts"].filter((card) => KIND_SPEC[kind].live.includes(card.data.status)).map((card) => ({ id: card.id, created: card.data.created })).sort(compareByCreation);
+  };
   const live = Object.fromEntries(CARD_KINDS.map((kind) => [kind, liveOf(kind)])) as Record<CardKind, LiveCard[]>;
   const numbers = emptyNumbers();
   for (const kind of CARD_KINDS) numbers[kind] = assign(live[kind], previous?.[kind]);

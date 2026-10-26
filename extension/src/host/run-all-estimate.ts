@@ -1,7 +1,7 @@
 import { estimateRunAll, runAllPlan, runAllProgress, type RunEstimateInput } from "../../../src/core/run-estimate";
 import type { Project } from "../../../src/core/store";
 import { readTimingRecords } from "../../../src/core/timings";
-import { blockedTasks, listTasks } from "../../../src/core/work";
+import { blockedTasks, listTasks, type Task } from "../../../src/core/work";
 import type { RunEstimateView } from "../protocol";
 import { runAllJob } from "./drift-resolution";
 
@@ -13,16 +13,16 @@ const MS_PER_MINUTE = 60_000;
  * reference until a Run has taken its first Task, and it is made again as `elapsed + high` when the plan has a choice or a Task the
  * kept plan lacks. The Run all is `over` (longer than expected) while the time since the launch exceeds the reference, worked out
  * at every call. The progress is made again with the estimate; the highest one reached outside `over` is kept in the job. Reads the
- * timing records and the Tasks; writes nothing under `.trama/`.
+ * timing records and the Tasks; writes nothing under `.trama/`. `cards` are the Tasks and what blocks them as a picture of the project already read them: without them they are read.
  */
-export function runAllEstimate(project: Project, now: Date = new Date()): RunEstimateView {
+export function runAllEstimate(project: Project, now: Date = new Date(), cards?: { tasks: readonly Task[]; blocked: ReadonlyMap<string, readonly unknown[]> }): RunEstimateView {
   const job = runAllJob(project.root);
   if (job === undefined) return null;
   const runAll = job.runAll;
-  const blocked = blockedTasks(project);
+  const blocked = cards?.blocked ?? blockedTasks(project);
   const input: RunEstimateInput = {
     records: readTimingRecords(project),
-    tasks: listTasks(project).map((task) => ({
+    tasks: (cards?.tasks ?? listTasks(project)).map((task) => ({
       id: task.id,
       column: task.data.column,
       blocked: (blocked.get(task.id) ?? []).length > 0,

@@ -21,6 +21,41 @@ export function projectAt(root: string): Project {
   return { root, dir: join(root, TRAMA_DIR) };
 }
 
+/**
+ * What one picture of the project reads through (`src/core/document-cache.ts`): each parsed document, each folder listing and each tracked tree is read once, and the
+ * values a picture works out once (the short numbers) are kept for its whole build. Active only while `withPictureReads` runs; every other read goes to the disk.
+ */
+export interface PictureReads {
+  /** The document at `path`, read and parsed at most once per picture; what it returns is never changed by its callers. */
+  document(path: string): Document;
+  /** What `compute` returns for `key`, computed at most once per picture. Callers must not change it. */
+  once<T>(key: string, compute: () => T): T;
+  /** Keeps `value` as what `once(key, …)` returns from now on. */
+  remember(key: string, value: unknown): void;
+}
+
+let activeReads: PictureReads | undefined;
+
+/** Runs `fn` with every document, folder listing and tracked tree read through `reads`. Synchronous: nothing else reads while it runs. */
+export function withPictureReads<T>(reads: PictureReads, fn: () => T): T {
+  const outer = activeReads;
+  activeReads = reads;
+  try {
+    return fn();
+  } finally {
+    activeReads = outer;
+  }
+}
+
+/** The picture being built, if any. */
+export const currentPictureReads = (): PictureReads | undefined => activeReads;
+
+/** The names in `dir` (empty when it is not there), as `readdirSync` lists them; listed once per picture. */
+export function listNames(dir: string): string[] {
+  const list = () => (existsSync(dir) ? readdirSync(dir) : []);
+  return activeReads === undefined ? list() : [...activeReads.once(`names:${dir}`, list)];
+}
+
 /** Walks up from `start` to the first folder that contains `.trama/`. */
 export function findProject(start: string): Project {
   for (let dir = resolve(start); ; dir = dirname(dir)) {
@@ -66,13 +101,16 @@ export const requirementsDir = (p: Project) => join(p.dir, "requirements");
 export const trackedLocation = (root: string, path: string): string =>
   safeJoin(root, path === SPECS_FILE || path.startsWith(REQUIREMENTS_PREFIX) ? path : `model/${path}`);
 
-/** Model, Requirement and Specs files under `root` (a `.trama/` or a Proposal folder), keyed as tracked paths. */
+/** Model, Requirement and Specs files under `root` (a `.trama/` or a Proposal folder), keyed as tracked paths. Read once per picture; the map is the caller's to change. */
 export function readTracked(root: string): FileMap {
-  const files = readTree(join(root, "model"));
-  for (const [path, content] of readTree(join(root, "requirements"))) files.set(`${REQUIREMENTS_PREFIX}${path}`, content);
-  const specs = join(root, SPECS_FILE);
-  if (existsSync(specs)) files.set(SPECS_FILE, readTextLf(specs));
-  return files;
+  const read = (): FileMap => {
+    const files = readTree(join(root, "model"));
+    for (const [path, content] of readTree(join(root, "requirements"))) files.set(`${REQUIREMENTS_PREFIX}${path}`, content);
+    const specs = join(root, SPECS_FILE);
+    if (existsSync(specs)) files.set(SPECS_FILE, readTextLf(specs));
+    return files;
+  };
+  return activeReads === undefined ? read() : new Map(activeReads.once(`tracked:${root}`, read));
 }
 
 export const readTrackedFiles = (p: Project): FileMap => readTracked(p.dir);
@@ -97,7 +135,8 @@ export interface Document {
   body: string;
 }
 
-export function readDocument(path: string): Document {
+/** Reads and parses the document at `path` from the disk, whatever picture is being built. */
+export function readDocumentFile(path: string): Document {
   if (!existsSync(path)) throw new TramaError(`${path}: file not found`);
   const text = readTextLf(path);
   const m = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(text);
@@ -109,6 +148,11 @@ export function readDocument(path: string): Document {
     throw new TramaError(`${path}: invalid YAML front matter: ${(err as Error).message.split("\n")[0]}`);
   }
   return { data: asObject(data, path), body: m[2] as string };
+}
+
+/** The document at `path`: through the picture being built when there is one (read once, and from the cache of the window when it has one), else from the disk. */
+export function readDocument(path: string): Document {
+  return activeReads === undefined ? readDocumentFile(path) : activeReads.document(path);
 }
 
 /** The text of a Markdown document: YAML front matter of `data`, then `body`. */
@@ -170,9 +214,8 @@ function remembersCreated(path: string): boolean {
  * when it has no `created`, and a random identity (kept as those eight characters) when it does.
  */
 export function listCards(dir: string, layout: CardLayout): CardEntry[] {
-  if (!existsSync(dir)) return [];
   const out: CardEntry[] = [];
-  for (const name of readdirSync(dir)) {
+  for (const name of listNames(dir)) {
     if (name.startsWith(".")) continue;
     const stem = stemOf(name);
     const randomId = RANDOM_PREFIX.exec(stem)?.[1];

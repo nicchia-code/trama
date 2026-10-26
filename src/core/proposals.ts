@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, rmSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { withFileLock } from "./file-lock";
 import { type AgentOrigin, type Announcement, bindDraft, removeBoundTo } from "./announcements";
@@ -14,6 +14,7 @@ import {
   createdNow,
   findCard,
   listCards,
+  listNames,
   lockNameOf,
   newCardId,
   type Project,
@@ -32,7 +33,7 @@ import type { Diagnostic, FileMap } from "./types";
 import { appliesUnder, type RequiredProposal, requiredReasons } from "./required";
 import { cardName, identityOfShortNumber, savedIdentityOfShortNumber, syncShortNumbers } from "./short-numbers";
 import { isSpecsRef, SPECS_FILE } from "./specs";
-import { attachedDrift, type DriftOutcome, fixCodeRefusal, listDrifts, listTasks, planApprovalTasks, requireNotAttached, resolveListedDrifts, writeApprovalTasks } from "./work";
+import { attachedDrift, type Drift, type DriftOutcome, fixCodeRefusal, listDrifts, listTasks, planApprovalTasks, requireNotAttached, resolveListedDrifts, writeApprovalTasks } from "./work";
 import { IMAGE_EXTENSIONS, isImagePath, pruneTaskImages, removeTaskImage } from "./task-image-cleanup";
 import { copyTaskImages, readTaskImages } from "./task-images";
 import { removedElements, type RemovedKind, SCAN_REASONS, scanScope, type ScanScopeEntry } from "./scan-scope";
@@ -204,8 +205,7 @@ function scanScopeField(raw: Raw, where: string): ScanScopeEntry[] | null {
 /** The Task files under a Proposal folder's `tasks/`, by name. A file that cannot be read is kept with its problem, so the Proposal still loads. */
 function loadTasks(dir: string): ProposalTask[] {
   const folder = join(dir, "tasks");
-  if (!existsSync(folder)) return [];
-  return readdirSync(folder)
+  return listNames(folder)
     .filter((name) => name.endsWith(".md"))
     .sort()
     .map((name) => parseProposalTask(join(folder, name), name));
@@ -1259,10 +1259,10 @@ export function driftListProblems(p: Project, proposal: Proposal): string[] {
   return problems;
 }
 
-/** Why a resolution cannot be approved: a listed, still-open Drift is to be fixed in code but none of its Model elements is left once the resolution's files are applied. Empty for any other Proposal. */
-export function unfixableDrifts(p: Project, proposal: Proposal): string[] {
+/** Why a resolution cannot be approved: a listed, still-open Drift is to be fixed in code but none of its Model elements is left once the resolution's files are applied. Empty for any other Proposal. `drifts` are the Drifts already read: without them they are listed. */
+export function unfixableDrifts(p: Project, proposal: Proposal, drifts?: readonly Drift[]): string[] {
   if (proposal.data.kind !== "resolution") return [];
-  const open = new Map(listDrifts(p).filter((d) => d.data.status === "open").map((d) => [d.id, d]));
+  const open = new Map((drifts ?? listDrifts(p)).filter((d) => d.data.status === "open").map((d) => [d.id, d]));
   const after = buildProject(applied(p, proposal));
   return proposal.data.drifts.flatMap(({ drift, decision }) => {
     const d = open.get(drift);

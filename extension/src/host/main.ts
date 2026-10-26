@@ -15,6 +15,7 @@ import { findProject } from "./project";
 import { QuestionSession } from "./question-session";
 import { EditorQuestions } from "./questions";
 import { People } from "./team/people";
+import { WindowPicture } from "./picture";
 import { CONVERSATIONS_KEY, readSavedConversations } from "../../../src/core/omp-chat-conversation";
 import { OmpClient } from "./omp-chat/client";
 import { OmpChatView } from "./omp-chat/view";
@@ -52,16 +53,20 @@ export function activate(context: vscode.ExtensionContext): void {
   setYoloNoticeStore(context.globalState);
   const tramaFiles = vscode.workspace.createFileSystemWatcher("**/.trama/**");
   const requests = new DesignRequests(context.workspaceState, tramaFiles, undefined, undefined, () => trama.launch({ kind: "implement-all" }));
-  const trama = new Controller(context.extensionUri, session, tramaFiles, requests, context.workspaceState, people);
+  // One picture of the project per window, built after the pause of the watcher and at a change of the folders, and shared by the panel and the side menu.
+  const picture = new WindowPicture(tramaFiles);
+  const trama = new Controller(context.extensionUri, session, picture, requests, context.workspaceState, people);
   controller = trama;
   // The item of the ghosts with no Board column lives with the extension, so it shows with the panel closed too.
   const activities = new ActivitiesItem(() => findProject()?.root, tramaFiles, (announcement) => trama.openGhostDetails(announcement));
   // Merge of Solo mode: its flow and the follow-up of the merge Trama started, for the whole life of the window.
   const soloMerge = new SoloMerge((action) => trama.launch(action));
-  // The side menu of the Activity Bar icon: it follows the same watcher, so it stays up to date with the panel closed.
-  const menu = new MenuView(context.extensionUri, trama, tramaFiles, soloMerge);
+  // The side menu of the Activity Bar icon: it takes the same picture, so it stays up to date with the panel closed.
+  const menu = new MenuView(context.extensionUri, trama, picture, soloMerge);
   context.subscriptions.push(
     tramaFiles,
+    picture,
+    picture.register(),
     soloMerge,
     soloMerge.start(),
     menu,
@@ -82,7 +87,6 @@ export function activate(context: vscode.ExtensionContext): void {
     questions,
     requests,
     watchRequirements(),
-    vscode.workspace.onDidChangeWorkspaceFolders(() => trama.workspaceFoldersChanged()),
     vscode.workspace.onDidChangeConfiguration((event) => {
       // A changed `trama.ompPath` means another omp: the outcome of the last update check no longer holds.
       if (event.affectsConfiguration("trama.ompPath")) forgetUpdateCheck();

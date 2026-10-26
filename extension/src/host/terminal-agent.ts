@@ -26,7 +26,7 @@ export interface RunModel {
  */
 // ponytail: the role follows the terminal name, which the Requirements tie one-to-one to the kind of instruction; pass the role explicitly if a name ever serves two roles.
 export const roleOf = (name: string): Role =>
-  name === "Design" || name === "Setup" || name === "Import" || name === "Drifts" || name === "Handoff" || name.startsWith("Split ") ? "analysis" : name === "Scan" || name.startsWith("Scan #") ? "scan" : "execution";
+  name === "Design" || name === "Setup" || name === "Import" || name === "Drifts" || name === "Handoff" || name === "Replan" || name.startsWith("Split ") ? "analysis" : name === "Scan" || name.startsWith("Scan #") ? "scan" : "execution";
 
 /** Whether instructions of `role` can scan (every scan and every implement run) and use the analysis sub-agent. */
 export const canScan = (role: Role): boolean => role !== "analysis";

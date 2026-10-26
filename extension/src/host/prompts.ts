@@ -20,6 +20,8 @@ export type ResolvedAction =
   | { kind: "rework"; proposal: string; skill: "design" | "setup" | "import" | "handoff" }
   /** Split the issue `issue` of the open handoff `handoff` into issues that each fit a sprint, on the same handoff: the `trama-handoff` skill, named `Split <short number>`. */
   | { kind: "split-issue"; handoff: string; issue: string }
+  /** Replan, together, the issues of the open handoffs `handoffs` (every one open at the confirmation, stale ones included): the `trama-handoff` skill, named `Replan`. */
+  | { kind: "replan-handoffs"; handoffs: string[] }
   /** Comment update on the published, open, stale issue `issue` (its GitHub number is `number`): the `trama-handoff` skill, named `Update #<number>`. */
   | { kind: "update-issue"; issue: string; number: number }
   /** Scan of the closed issue `issue` (its GitHub number is `number`): the `trama-scan` skill on its `refs` alone, named `Scan #<number>`. */
@@ -50,6 +52,8 @@ export function buildPrompt(action: ResolvedAction): string {
       return `Use the trama-${action.skill} skill to rework the rejected Proposal ${action.proposal} with the developer's feedback. Bind the first Proposal you open to it with the \`reworks\` field.`;
     case "split-issue":
       return `Use the trama-handoff skill to split issue ${action.issue} of handoff ${action.handoff} into issues that each fit a sprint, on the same handoff.`;
+    case "replan-handoffs":
+      return `Use the trama-handoff skill to replan together the issues of the open handoffs ${action.handoffs.join(", ")}.`;
     case "update-issue":
       return `Use the trama-handoff skill to comment on issue ${action.issue} what changed in the Model since it was published.`;
     case "scan-issue":
@@ -140,6 +144,8 @@ export function terminalName(action: ResolvedAction, short: (kind: "task" | "pro
       return action.skill === "design" ? "Design" : action.skill === "setup" ? "Setup" : action.skill === "handoff" ? "Handoff" : "Import";
     case "split-issue":
       return `Split ${short("proposal", action.handoff)}`;
+    case "replan-handoffs":
+      return "Replan";
     case "update-issue":
       return `Update #${action.number}`;
     case "scan-issue":
@@ -209,6 +215,7 @@ export function mayFileDrifts(action: ResolvedAction): boolean {
     case "resolve-drifts":
     case "refine":
     case "split-issue":
+    case "replan-handoffs":
     case "reconcileMerge":
     case "rework-resolution":
       return false;

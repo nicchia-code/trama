@@ -578,9 +578,18 @@ export function listDrifts(p: Project): Drift[] {
     .sort((a, b) => compareByCreation({ id: a.id, created: a.data.created }, { id: b.id, created: b.data.created }));
 }
 
-/** The open Drift that holds Proposal `proposalId`, or null: a resolved Drift no longer holds it. The one decision of "attached to an open Drift". */
-export function attachedDrift(p: Project, proposalId: string): Drift | null {
-  return listDrifts(p).find((d) => d.data.status === "open" && d.data.proposal === proposalId) ?? null;
+/** The Drifts by identity; of two that share one, the first, as `find` over the list gives. A reader that has already read the Drifts builds it once and hands it to the lookups below. */
+export type DriftIndex = ReadonlyMap<string, Drift>;
+
+export function indexDrifts(drifts: readonly Drift[]): DriftIndex {
+  const index = new Map<string, Drift>();
+  for (const drift of drifts) if (!index.has(drift.id)) index.set(drift.id, drift);
+  return index;
+}
+
+/** The open Drift that holds Proposal `proposalId`, or null: a resolved Drift no longer holds it. The one decision of "attached to an open Drift". `drifts` are the Drifts already read. */
+export function attachedDrift(p: Project, proposalId: string, drifts: readonly Drift[] = listDrifts(p)): Drift | null {
+  return drifts.find((d) => d.data.status === "open" && d.data.proposal === proposalId) ?? null;
 }
 
 /** Refuses a direct approval or rejection of a Proposal attached to an open Drift; the developer decides it through the Drift. */
@@ -615,37 +624,38 @@ export interface FollowedDrift {
   decision: DriftResolution | null;
 }
 
-/** The identity, title and decision of each Drift `drift` follows, when it is recurring; empty otherwise. A Drift whose file is gone keeps its identity as title. */
-export function followedDrifts(p: Project, drift: Drift): FollowedDrift[] {
+/** The identity, title and decision of each Drift `drift` follows, when it is recurring; empty otherwise. A Drift whose file is gone keeps its identity as title. `all` are the Drifts already read; without them they are listed, only when there is something to look up. */
+export function followedDrifts(p: Project, drift: Drift, all?: DriftIndex): FollowedDrift[] {
   if (drift.data.previous.length === 0) return [];
-  const all = listDrifts(p);
+  const index = all ?? indexDrifts(listDrifts(p));
   return drift.data.previous.map((id) => {
-    const found = all.find((d) => d.id === id);
+    const found = index.get(id);
     return { id, title: found?.title ?? id, decision: found?.data.resolution ?? null };
   });
 }
 
-/** The identity and title of each Drift a unified Drift merged, in order; empty for any other Drift. */
-export function unifiedDrifts(p: Project, drift: Drift): { id: string; title: string }[] {
+/** The identity and title of each Drift a unified Drift merged, in order; empty for any other Drift. `all` are the Drifts already read, as for `followedDrifts`. */
+export function unifiedDrifts(p: Project, drift: Drift, all?: DriftIndex): { id: string; title: string }[] {
   if (drift.data.unifies.length === 0) return [];
-  const all = listDrifts(p);
-  return drift.data.unifies.map((id) => ({ id, title: all.find((d) => d.id === id)?.title ?? id }));
+  const index = all ?? indexDrifts(listDrifts(p));
+  return drift.data.unifies.map((id) => ({ id, title: index.get(id)?.title ?? id }));
 }
 
-/** The identity and title of the unified Drift `drift` was merged into; null for a Drift that was not. */
-export function unifiedInto(p: Project, drift: Drift): { id: string; title: string } | null {
+/** The identity and title of the unified Drift `drift` was merged into; null for a Drift that was not. `all` are the Drifts already read, as for `followedDrifts`. */
+export function unifiedInto(p: Project, drift: Drift, all?: DriftIndex): { id: string; title: string } | null {
   const id = drift.data.unifiedInto;
   if (id === null) return null;
-  return { id, title: listDrifts(p).find((d) => d.id === id)?.title ?? id };
+  return { id, title: (all ?? indexDrifts(listDrifts(p))).get(id)?.title ?? id };
 }
 
 /**
  * The fix Task that dismissed a Drift by being closed without changes, with its note while that Task is in Done; the
  * note is null once the Task has left Done. Null for any other Drift. Read from the files; the Drift itself stores nothing new.
+ * `tasks` are the Tasks already read; without them they are listed, only for a Drift that has something to look up.
  */
-export function closedUnchanged(p: Project, drift: Drift, tasks: Task[] = listTasks(p)): { task: string; note: string | null } | null {
+export function closedUnchanged(p: Project, drift: Drift, tasks?: readonly Task[]): { task: string; note: string | null } | null {
   if (drift.data.resolution !== "dismissed" || drift.data.task === null) return null;
-  const task = tasks.find((t) => t.id === drift.data.task);
+  const task = (tasks ?? listTasks(p)).find((t) => t.id === drift.data.task);
   return { task: drift.data.task, note: task?.data.column === "done" ? task.data.unchanged : null };
 }
 

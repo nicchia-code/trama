@@ -3,8 +3,9 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { githubProjectFile, linkGithubProject } from "../src/core/github";
-import { moveIssue, rosterOf } from "../src/core/issues";
+import { announce, listAnnouncements, withdrawAll } from "../src/core/announcements";
+import { githubProjectFile, linkGithubProject, unlinkGithubProject } from "../src/core/github";
+import { moveIssue, REPLANNING_TITLE, rosterOf } from "../src/core/issues";
 import { approveProposal, editInProposal, getProposal, newProposal, submitProposal } from "../src/core/proposals";
 import { setManagerMode } from "../src/core/manager-mode";
 import { projectAt } from "../src/core/store";
@@ -659,6 +660,92 @@ test("the same Reject, made from the Team view, rejects the handoff", async () =
     expect(getProposal(projectAt(dir), handoff.id).data.status).toBe("rejected");
   } finally {
     controller.dispose();
+    handoff.forget();
+  }
+});
+
+// ---- Replan ----
+
+interface SentReplan {
+  block: string | null;
+  running: boolean;
+  open: number;
+  stale: number;
+}
+/** The `replan` of the last snapshot the panel got; undefined when the snapshot carried none. */
+const replanSent = (): SentReplan | undefined => (posted.filter((message) => message.type === "snapshot").at(-1) as unknown as { replan?: SentReplan } | undefined)?.replan;
+const snapshotsSent = (): number => posted.filter((message) => message.type === "snapshot").length;
+
+test("every snapshot carries the state of Replan while Team is available: the first reason, no Replan running, the open handoffs and none stale", async () => {
+  const { people: team } = people();
+  const handoff = openHandoff();
+  const controller = await open(team);
+  try {
+    await settled(() => snapshotsSent() > 0);
+    // No GitHub Project is linked in the shared project.
+    expect(replanSent()).toEqual({ block: "Link a GitHub Project first", running: false, open: 1, stale: 0 });
+    linkGithubProject(projectAt(dir), { owner: "Acme", number: 1, title: "Roadmap", iteration: true });
+    posted.length = 0;
+    await send({ type: "ready" });
+    await settled(() => snapshotsSent() > 0);
+    expect(replanSent()).toEqual({ block: null, running: false, open: 1, stale: 0 });
+  } finally {
+    controller.dispose();
+    unlinkGithubProject(projectAt(dir));
+    handoff.forget();
+  }
+});
+
+test("Replan is unavailable with the reason of the first fact that holds: a handoff being written, then its own running ghost", async () => {
+  const { people: team } = people();
+  const handoff = openHandoff();
+  const project = projectAt(dir);
+  linkGithubProject(project, { owner: "Acme", number: 1, title: "Roadmap", iteration: true });
+  const controller = await open(team);
+  try {
+    posted.length = 0;
+    announce(project, { kind: "work", title: "Splitting an issue", source: "request" });
+    await send({ type: "ready" });
+    await settled(() => snapshotsSent() > 0);
+    expect(replanSent()).toEqual({ block: "An agent is writing a handoff", running: false, open: 1, stale: 0 });
+    withdrawAll(project);
+    announce(project, { kind: "work", title: "Publishing issues", source: "request" });
+    announce(project, { kind: "work", title: REPLANNING_TITLE, source: "request" });
+    posted.length = 0;
+    await send({ type: "ready" });
+    await settled(() => snapshotsSent() > 0);
+    // A publication does not write a handoff; the ghost of the Replan says it runs.
+    expect(replanSent()).toEqual({ block: "Replan is already running", running: true, open: 1, stale: 0 });
+  } finally {
+    controller.dispose();
+    withdrawAll(project);
+    unlinkGithubProject(project);
+    handoff.forget();
+  }
+});
+
+test("replanHandoffs is refused with a notice while a reason holds, and changes nothing", async () => {
+  const { people: team } = people();
+  const handoff = openHandoff();
+  const project = projectAt(dir);
+  const controller = await open(team);
+  try {
+    posted.length = 0;
+    await send({ type: "replanHandoffs" });
+    expect(notices()).toEqual(["Trama could not replan the handoffs: Link a GitHub Project first."]);
+    expect(getProposal(project, handoff.id).data.status).toBe("open");
+    expect(listAnnouncements(project)).toEqual([]);
+    setManagerMode(project, false);
+    posted.length = 0;
+    await send({ type: "replanHandoffs" });
+    expect(notices().at(-1)).toContain("Manager Mode is off in this working copy");
+    posted.length = 0;
+    await send({ type: "ready" });
+    await settled(() => snapshotsSent() > 0);
+    expect(replanSent()).toBeUndefined();
+  } finally {
+    controller.dispose();
+    setManagerMode(project, true);
     handoff.forget();
   }
 });

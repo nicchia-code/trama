@@ -3,7 +3,7 @@ import { joinReasons, RUN_IN_PROGRESS } from "./design";
 import { copyProposalFiles, type DriftDecision, type DriftDecisionKind, discardProposal, getProposal, listProposals, newProposal, type Proposal, requireEditable, resolutionHolding, save, submitProposal, touch, withProposalLock } from "./proposals";
 import { cardName } from "./short-numbers";
 import type { Project } from "./store";
-import { chosenOption, driftOptions, fixCodeRefusal, followedDrifts, getDrift, listDrifts, unifiedDrifts } from "./work";
+import { chosenOption, driftOptions, fixCodeRefusal, followedDrifts, getDrift, indexDrifts, listDrifts, unifiedDrifts, type Drift } from "./work";
 
 /**
  * Records, replaces or (`remove`) removes the decision on `driftId` in a resolution Proposal, a Draft or an open one;
@@ -66,19 +66,40 @@ function commit(p: Project, proposal: Proposal, drifts: DriftDecision[]) {
 /**
  * The resolution Proposal still being written or open, the oldest, or null. Always computed from the files, never remembered.
  * A resolution born from a prepared question (`prepared: true`) never stops Resolve, so it is not counted here.
+ * `proposals` are the Proposals already read: without them they are listed.
  */
-export function awaitingResolution(p: Project, exceptId?: string): Proposal | null {
-  return listProposals(p).find((r) => r.id !== exceptId && r.data.kind === "resolution" && !r.data.prepared && (r.data.status === "draft" || r.data.status === "open")) ?? null;
+export function awaitingResolution(p: Project, exceptId?: string, proposals: readonly Proposal[] = listProposals(p)): Proposal | null {
+  return awaitingIn(proposals, exceptId);
 }
 
-/** Why Resolve Drifts cannot be launched now: every reason that holds, in order (Drifts are being resolved, a run in progress, the resolution Proposal awaiting a decision, no open Drifts), or null. `work` is what holds in this window. */
-export function resolveDriftsBlocker(p: Project, work: WindowWork): string | null {
-  const awaiting = awaitingResolution(p);
+const awaitingIn = (proposals: readonly Proposal[], exceptId?: string): Proposal | null =>
+  proposals.find((r) => r.id !== exceptId && r.data.kind === "resolution" && !r.data.prepared && (r.data.status === "draft" || r.data.status === "open")) ?? null;
+
+/** What the blockers below ask of the cards, worked out once from the Proposals and Drifts a reader has already read. */
+export interface ResolutionFacts {
+  drifts: readonly Drift[];
+  /** The resolution awaiting a decision (`awaitingResolution`). */
+  awaiting: Proposal | null;
+  /** The Drifts listed by a resolution being written or open, a prepared one included. */
+  held: ReadonlySet<string>;
+}
+
+export function resolutionFacts(proposals: readonly Proposal[], drifts: readonly Drift[]): ResolutionFacts {
+  const held = new Set(proposals.filter((r) => r.data.kind === "resolution" && (r.data.status === "draft" || r.data.status === "open")).flatMap((r) => r.data.drifts.map((d) => d.drift)));
+  return { drifts, awaiting: awaitingIn(proposals), held };
+}
+
+/** The facts of the files now: used when the caller has no cards already read. */
+const factsOf = (p: Project, facts: ResolutionFacts | undefined): ResolutionFacts => facts ?? resolutionFacts(listProposals(p), listDrifts(p));
+
+/** Why Resolve Drifts cannot be launched now: every reason that holds, in order (Drifts are being resolved, a run in progress, the resolution Proposal awaiting a decision, no open Drifts), or null. `work` is what holds in this window; `facts` are the cards a reader has already read. */
+export function resolveDriftsBlocker(p: Project, work: WindowWork, facts?: ResolutionFacts): string | null {
+  const { awaiting, drifts } = factsOf(p, facts);
   return joinReasons([
     work.resolving ? "Drifts are being resolved" : null,
     work.running ? "A run is in progress" : null,
     awaiting ? `Proposal ${cardName(p, "proposal", awaiting.id)} resolving Drifts awaits a decision` : null,
-    listDrifts(p).some((d) => d.data.status === "open") ? null : "No open Drifts",
+    drifts.some((d) => d.data.status === "open") ? null : "No open Drifts",
   ]);
 }
 
@@ -86,9 +107,10 @@ export function resolveDriftsBlocker(p: Project, work: WindowWork): string | nul
  * Why Resolve on one open Drift cannot be launched now, or null: the reasons of `resolveDriftsBlocker` that hold for it,
  * in the same order, without «No open Drifts». `agentOnIt` tells whether the agent resolving Drifts works on this one.
  * `preparedQuestion` is true when Resolve opens the Drift's valid prepared question: no resolution awaiting a decision stops it.
+ * `facts` are the cards a reader has already read.
  */
-export function resolveDriftBlocker(p: Project, work: WindowWork, agentOnIt: boolean, preparedQuestion = false): string | null {
-  const awaiting = preparedQuestion ? null : awaitingResolution(p);
+export function resolveDriftBlocker(p: Project, work: WindowWork, agentOnIt: boolean, preparedQuestion = false, facts?: ResolutionFacts): string | null {
+  const awaiting = preparedQuestion ? null : factsOf(p, facts).awaiting;
   return joinReasons([
     work.resolving ? (agentOnIt ? "An agent is resolving this Drift" : "Drifts are being resolved") : null,
     work.running ? "A run is in progress" : null,
@@ -98,23 +120,24 @@ export function resolveDriftBlocker(p: Project, work: WindowWork, agentOnIt: boo
 
 /**
  * The Drifts Unify Drifts would unite now, in creation order: open, in no resolution being written or open (a prepared one
- * included), and not held by the turn of the agent that filed them (`finishing`).
+ * included), and not held by the turn of the agent that filed them (`finishing`). `facts` are the cards a reader has already read.
  */
-export function unifiableDrifts(p: Project, finishing: readonly string[] = []): string[] {
-  return listDrifts(p).filter((d) => d.data.status === "open" && !finishing.includes(d.id) && resolutionHolding(p, d.id) === null).map((d) => d.id);
+export function unifiableDrifts(p: Project, finishing: readonly string[] = [], facts?: ResolutionFacts): string[] {
+  const { drifts, held } = factsOf(p, facts);
+  return drifts.filter((d) => d.data.status === "open" && !finishing.includes(d.id) && !held.has(d.id)).map((d) => d.id);
 }
 
 /**
  * Why Unify Drifts cannot be launched now: every reason that holds, in order (Drifts are being resolved, a run in progress,
- * the resolution Proposal awaiting a decision, fewer than two Drifts to unify). Empty when it works. `work` is what holds in this window.
+ * the resolution Proposal awaiting a decision, fewer than two Drifts to unify). Empty when it works. `work` is what holds in this window; `facts` are the cards a reader has already read.
  */
-export function unifyDriftsBlockers(p: Project, work: WindowWork, finishing: readonly string[] = []): string[] {
-  const awaiting = awaitingResolution(p);
+export function unifyDriftsBlockers(p: Project, work: WindowWork, finishing: readonly string[] = [], facts?: ResolutionFacts): string[] {
+  const all = factsOf(p, facts);
   return [
     work.resolving ? "Drifts are being resolved" : null,
     work.running ? "A run is in progress" : null,
-    awaiting ? `Proposal ${cardName(p, "proposal", awaiting.id)} resolving Drifts awaits a decision` : null,
-    unifiableDrifts(p, finishing).length < 2 ? "Unify needs at least two open Drifts" : null,
+    all.awaiting ? `Proposal ${cardName(p, "proposal", all.awaiting.id)} resolving Drifts awaits a decision` : null,
+    unifiableDrifts(p, finishing, all).length < 2 ? "Unify needs at least two open Drifts" : null,
   ].filter((reason): reason is string => reason !== null);
 }
 
@@ -210,13 +233,14 @@ export interface ResolvedDrift {
   note: string | null;
 }
 
-/** The Drifts a resolution lists, in creation order, read from the files at each call. Empty for any other Proposal. */
-export function resolvedDrifts(p: Project, proposal: Proposal): ResolvedDrift[] {
-  return listDrifts(p).flatMap((drift) => {
+/** The Drifts a resolution lists, in creation order, read from the files at each call. Empty for any other Proposal. `drifts` are the Drifts already read: without them they are listed. */
+export function resolvedDrifts(p: Project, proposal: Proposal, drifts: readonly Drift[] = listDrifts(p)): ResolvedDrift[] {
+  const index = indexDrifts(drifts);
+  return drifts.flatMap((drift) => {
     const d = proposal.data.drifts.find((x) => x.drift === drift.id);
     if (!d) return [];
     const already = drift.data.status === "resolved" && drift.data.resolvedBy !== proposal.id;
     const option = d.option === undefined ? undefined : driftOptions(drift)[d.option - 1]?.title;
-    return [{ drift: drift.id, title: drift.title, previous: followedDrifts(p, drift), unifies: unifiedDrifts(p, drift), merge: drift.data.merge, decision: already ? "(already resolved)" : decisionText(d.decision, option), note: already ? null : (d.note ?? null) }];
+    return [{ drift: drift.id, title: drift.title, previous: followedDrifts(p, drift, index), unifies: unifiedDrifts(p, drift, index), merge: drift.data.merge, decision: already ? "(already resolved)" : decisionText(d.decision, option), note: already ? null : (d.note ?? null) }];
   });
 }

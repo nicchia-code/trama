@@ -1,6 +1,7 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { referenceFingerprint } from "./describe";
+import { RUN_IN_PROGRESS } from "./design";
 import { TramaError } from "./errors";
 import { withFileLock } from "./file-lock";
 import { linkedGithubProject } from "./github";
@@ -9,7 +10,7 @@ import { loadProject, resolves } from "./requirements";
 import { compareByCreation, createdField, enumField, instantField, type Raw, stringList, textOrNull } from "./schema";
 import { readSoloMode } from "./solo-mode";
 import { type FollowFacts, unfollowedTasks } from "./task-holders";
-import { createdNow, type Document, listCards, type Project, readDocument, slugify, writeDocument } from "./store";
+import { createdNow, type Document, listCards, listNames, type Project, readDocument, slugify, writeDocument } from "./store";
 import type { Diagnostic } from "./types";
 
 /*
@@ -294,8 +295,7 @@ function parseProposalIssue(path: string, name: string): ProposalIssue {
 /** The issue files under a handoff folder's `issues/`, by name. A file that cannot be read is kept with its problem, so the handoff still loads. */
 export function loadProposalIssues(dir: string): ProposalIssue[] {
   const folder = join(dir, "issues");
-  if (!existsSync(folder)) return [];
-  return readdirSync(folder)
+  return listNames(folder)
     .filter((name) => name.endsWith(".md") && !name.startsWith("."))
     .sort()
     .map((name) => parseProposalIssue(join(folder, name), name));
@@ -802,5 +802,54 @@ export function splitIssueBlock(facts: SplitFacts): string | null {
   if (facts.finishing) return "The agent is still finishing";
   if (facts.writing || facts.status === "draft") return "The agent is writing this handoff";
   if (facts.running) return "A run is in progress";
+  return null;
+}
+
+/** The title of the announcement of a Replan, whose ghost is how Trama knows it runs (`rules#developer.REPLAN_HANDOFFS`). */
+export const REPLANNING_TITLE = "Replanning handoffs";
+
+/** The titles of the announcements of work with handoffs that do not write one: the publication of issues, their Comment update, an import and a Replan. */
+const OTHER_WORK_TITLES = ["Publishing issues", "Importing from code", REPLANNING_TITLE];
+
+/** Whether a Replan launched from this window runs: its announcement is live, from the launch until its agent ends its turn or its terminal or conversation closes. */
+export function replanRunning(announcements: readonly { kind: string; title: string }[]): boolean {
+  return announcements.some((announcement) => announcement.kind === "work" && announcement.title === REPLANNING_TITLE);
+}
+
+/**
+ * Whether an agent writes a handoff: a live announcement of work that is none of the other jobs of the handoff skill (a handoff request, Rework with feedback or Split; the other
+ * jobs are the publication, the Comment update `Updating #<n>`, an import and a Replan), which is live until its agent ends its turn.
+ */
+export function handoffBeingWritten(announcements: readonly { kind: string; title: string }[]): boolean {
+  return announcements.some((announcement) => announcement.kind === "work" && !OTHER_WORK_TITLES.includes(announcement.title) && !/^Updating #\d+$/.test(announcement.title));
+}
+
+/** What decides whether Replan is available (`rules#developer.REPLAN_HANDOFFS`). */
+export interface ReplanFacts {
+  /** A GitHub Project is linked. */
+  linked: boolean;
+  /** The number of open handoffs, stale ones included, never a Draft. */
+  open: number;
+  /** The agent that handed an open handoff over has not finished its turn. */
+  finishing: boolean;
+  /** An agent is writing a handoff: a Draft one, or a handoff request, Split or Rework with feedback whose agent has not finished its turn. */
+  writing: boolean;
+  /** A Run launched from this window is in progress. */
+  running: boolean;
+  /** A Replan launched from this window is running. */
+  replanning: boolean;
+}
+
+/**
+ * Why Replan is not available, or null when it is: the first of, in this order, `Link a GitHub Project first`, `No handoff waits for a decision`, `The agent is still finishing`,
+ * `An agent is writing a handoff`, `A run is in progress`, `Replan is already running`.
+ */
+export function replanHandoffsBlock(facts: ReplanFacts): string | null {
+  if (!facts.linked) return LINK_PROJECT_FIRST;
+  if (facts.open === 0) return "No handoff waits for a decision";
+  if (facts.finishing) return "The agent is still finishing";
+  if (facts.writing) return "An agent is writing a handoff";
+  if (facts.running) return RUN_IN_PROGRESS;
+  if (facts.replanning) return "Replan is already running";
   return null;
 }
