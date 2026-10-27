@@ -24,7 +24,7 @@ import { type Announcement, listAnnouncements } from "../../../src/core/announce
 import { onAnnouncementsWithdrawn } from "./announcements";
 import { type PictureOutcome, WindowPicture } from "./picture";
 import { configuredAsyncDriftResolver, configuredAutoUpdateStaleProposals, configuredMaxParallelAgents, configuredModels, configuredNtfyTarget, configuredOmpPath, configuredParallelExecution, configuredSkillsDir, configuredSystemCertificates, type DesignAnnouncement, type Instruction, type LaunchAnnouncement, type LaunchJobOptions, endHeldJob, installOmp, launchAgent, type LogoutOutcome, launched, loginGitHub, loginOmp, logoutOmp, openAskMore, settings, startHeldJob } from "./agent";
-import { bundledUnifyInstructions } from "./bundled";
+import { bundledUnifyInstructions, ownExtension } from "./bundled";
 import { onQuestionRoundChange, questionRoundOpen } from "./question-activity";
 import { driftWork, driftsFinishing, localProjectJobs, onAgentStopped, onDriftResolutionChange, onProposalDelivered, onStoppedFollowing, proposalsFinishing, receiveNotice, releaseFiledWork, type RunAll, tasksFinishing, unifyingDrifts } from "./drift-resolution";
 import { agentStoppedNotice } from "../../../src/core/omp-chat-conversation";
@@ -837,7 +837,7 @@ export class Controller implements vscode.Disposable {
 
   /** The Trama settings as the manifest declares them, read at run time: the Settings tab and the check of its messages both use them. */
   private manifestSettings(): SettingSchema[] {
-    return settingsSchema(vscode.extensions.getExtension("trama-dev.trama")?.packageJSON);
+    return settingsSchema(ownExtension()?.packageJSON);
   }
 
   /** Sends the Settings tab the schema, each key's user value, and the workspace value of the keys that are not application-scoped. */

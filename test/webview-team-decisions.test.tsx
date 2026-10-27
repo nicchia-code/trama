@@ -186,6 +186,16 @@ test("the fields of the preview: people, estimate, sprint, then the Project's ow
   expect(fieldEditors(issue(), MEMBERS, null, NOW).map((e) => e.key)).toEqual(["assignee", "reviewer", "estimate", "sprint"]);
 });
 
+test("the Project's estimate field has no editor of its own: Estimate (days) fills it; other number fields stay", () => {
+  const base = github().project;
+  if (base === null) throw new Error("no project");
+  const withEstimate = { ...base, fields: [...base.fields, { id: "F7", name: "Estimate (days)", type: "NUMBER" }, { id: "F8", name: "Days left", type: "NUMBER" }] };
+  expect(fieldEditors(issue(), MEMBERS, withEstimate, NOW).map((e) => e.key)).toEqual(["assignee", "reviewer", "estimate", "sprint", "fields.Status", "fields.Priority", "fields.Points", "fields.Days left"]);
+  // The first number field that names the estimate is the estimate field: it comes before another one that also does.
+  const estimateFirst = { ...base, fields: [{ id: "F7", name: "Estimate", type: "NUMBER" }, ...base.fields] };
+  expect(fieldEditors(issue(), MEMBERS, estimateFirst, NOW).map((e) => e.key)).toEqual(["assignee", "reviewer", "estimate", "sprint", "fields.Status", "fields.Priority", "fields.Points"]);
+});
+
 test("a handle that is not in the team is still shown as the value; an ended sprint already chosen stays in the choices", () => {
   const editors = fieldEditors(issue({ values: { ...issue().values, assignee: "visitor", sprint: "Sprint 12" } }), MEMBERS, github().project, NOW);
   expect(editors[0]?.options.map((o) => o.value)).toEqual(["giulia", "sara", "visitor"]);

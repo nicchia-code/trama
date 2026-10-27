@@ -438,6 +438,7 @@ test("trama-handoff turns a request into a handoff of issues, publishes them wit
   expect(skill).toContain("\"kind\":\"handoff\"");
   expect(skill).toContain("`trama team show --json`");
   expect(skill).toContain("`trama issue fields --json`");
+  expect(skill).toContain("none for the field `trama issue fields` marks as the estimate field: publication fills it with the estimate of the issue");
   expect(skill).toContain("`trama question new --root <project> --input -`");
   expect(skill).toContain("in two parts");
   expect(skill).toContain("**Part for the person**, first, headed with `##`");

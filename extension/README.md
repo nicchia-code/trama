@@ -2,6 +2,8 @@
 
 **Your AI agent writes code fast. Trama makes sure it's the code you meant.**
 
+> **Windows (x64) is experimental.** It is tested less than Linux and macOS, some parts may not work as described, and `trama.exe` is not signed, so SmartScreen or an antivirus may warn the first time it runs.
+
 ![Trama in VS Code: the Board with a Proposal to approve, the Diagram of the app's states and a Drift to resolve](https://raw.githubusercontent.com/nicchia-code/trama/main/docs/images/demo.gif)
 
 **[Read the guide](https://nicchia-code.github.io/trama/)**
@@ -43,7 +45,7 @@ When the code and the map stop telling the same story, Trama raises a Drift. Fix
 ## Requirements
 
 - VS Code 1.106 or later, the only editor Trama supports.
-- Linux (x64), macOS (Apple silicon) or Windows (x64, in preview).
+- Linux (x64), macOS (Apple silicon) or Windows (x64, experimental).
 - omp, the only agent Trama supports.
 - The GitHub CLI (`gh`), only for Team.
 
@@ -54,8 +56,6 @@ Download the `.vsix` for your platform from [Releases](https://github.com/nicchi
 ```sh
 code --install-extension trama-<platform>-<version>.vsix
 ```
-
-> **Windows is in preview.** `trama.exe` is not signed, so SmartScreen or an antivirus may warn the first time it runs.
 
 > **omp Chat runs every command without asking by default** (approval `yolo`). To have it ask first, set `trama.ompChatApproval` to `ask` in your user settings.
 

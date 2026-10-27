@@ -60,9 +60,9 @@ function IssueBlockView({ block, post }: { block: IssueBlock; post: Post }) {
       aria-label={block.name}
       data-signal={block.signal ?? undefined}
       disabled={block.url === null}
-      style={{ width: `${block.fraction * 100}%`, minWidth: `calc(${number.length + 1}ch + 1.75rem)` }}
+      style={{ width: `${block.fraction * 100}%` }}
       className={cn(
-        "flex h-7 max-w-full shrink-0 items-center gap-1.5 overflow-hidden rounded-md border bg-card px-2 text-xs shadow-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none",
+        "flex h-7 max-w-full min-w-max shrink-0 items-center gap-1.5 overflow-hidden rounded-md border bg-card px-2 text-xs shadow-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none",
         block.signal !== null && cn("border-l-[3px]", SIGNAL_BORDER[block.signal]),
         block.closed && "opacity-60",
       )}
@@ -72,8 +72,8 @@ function IssueBlockView({ block, post }: { block: IssueBlock; post: Post }) {
       <span aria-hidden="true" className={cn("shrink-0 font-mono", block.closed && "line-through")}>
         {number}
       </span>
-      <span aria-hidden="true" className="min-w-0 flex-1 truncate">
-        {block.title}
+      <span aria-hidden="true" className="@container w-0 min-w-0 grow">
+        <span className="hidden truncate text-left @min-[2.5rem]:block">{block.title}</span>
       </span>
       {block.days === null ? null : (
         <span aria-hidden="true" className="shrink-0 text-muted-foreground">

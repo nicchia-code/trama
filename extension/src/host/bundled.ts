@@ -2,8 +2,19 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
 
-/** Where the extension's package lives, when it is installed under its own identifier. */
-const packagePath = (): string | undefined => vscode.extensions.getExtension("trama-dev.trama")?.extensionPath;
+/** The identifier of this extension (`<publisher>.<name>` of its manifest), recorded at activation so that nothing writes the publisher by hand. */
+let extensionId = "";
+
+/** Records this extension's identifier; `activate` calls it first, with `context.extension.id`. */
+export const setExtensionId = (id: string): void => {
+  extensionId = id;
+};
+
+/** This extension as the editor knows it: its package folder and manifest. */
+export const ownExtension = (): vscode.Extension<unknown> | undefined => vscode.extensions.getExtension(extensionId);
+
+/** Where the extension's package lives. */
+const packagePath = (): string | undefined => ownExtension()?.extensionPath;
 
 /** A file the extension ships under `extensionPath`, or undefined when the package has none. */
 function shipped(extensionPath: string | undefined, ...parts: string[]): string | undefined {

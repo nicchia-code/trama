@@ -1,0 +1,14 @@
+---
+description: "Use when adding, changing or using the `trama issue` commands or the handoff fields of `trama proposal`."
+---
+# Issue commands
+
+## issue
+- `trama proposal new` accepts `kind: handoff` (`rules#proposal/Draft`). `trama proposal edit <id>` with `issues/<slug>.md` in `edit` creates in exclusive mode `issues/<identity>-<slug>.md` with a new identity and prints the path, like `tasks/`; the full name rewrites it and `delete` removes it. Writing an issue of an open handoff sends it back to Draft like any file of a Proposal; the Manager's changes (`manager`) are never written by this command.
+- `trama proposal show <id>` of a handoff prints `## Issues` (for each issue identity, title, estimate, assignee, reviewer, sprint, dependencies, references, and `(changed by the Manager)` on the fields with a value in `manager`) and `## Warnings`, and no `## Tasks`; `## Scope` shows each entry with the issues that cover it or `not covered (warning)`. With `--json`: `issues` and `warnings`.
+- `trama issue list` prints the issues of `.trama/issues/`, grouped by handoff, with identity, title, state and number; with `{ handoff?, state? }` it keeps those of a handoff or in a state (`publishing`, `not-published`, `published`); the order is the order of publication (dependencies first). With `--json` a list of `{ id, title, handoff, state, number, url, dependsOn }`.
+- `trama issue show <id>` prints one issue with every field and, under `## GitHub body`, the body composed for GitHub (`rules#issue`); `--json` has the same fields and `githubBody`. It accepts an issue of a handoff not approved yet, by its identity.
+- `trama issue move <id> published` with `{ number, url }` records the publication (`rules#issue`); `trama issue move <id> not-published` with `{ reason }` records a refusal; `trama issue move <id> publishing` is refused (only Trama moves an issue there). Moving an issue that is already `published` is refused.
+- `trama issue edit <id>` with `{ unset }` records the fields GitHub did not take on a published issue, and with `{ updated: true }` records a Comment update (`rules#developer.ASK_ISSUE_UPDATE`). Nothing else of an issue changes from the command line.
+- `trama issue fields` reads, through `gh` (`rules#github-project`), the linked Project and prints its fields with their options and its iterations with dates, marking the sprint field, the estimate field (`rules#issue/Published`) and the current sprint; `--json` gives `{ project, fields, iterations }`, each field with the booleans `sprint` and `estimate`. Without a linked Project it fails with `No GitHub Project is linked: link one in the Team view.`; with `gh` missing, not logged in or without access to Projects, with the reason of `ui#github-project` and exit code 1.
+- All `trama issue` commands fail with the reason of `rules#manager-mode` when Team is not available. None of them is developer-only.

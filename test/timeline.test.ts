@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 import type { GitHubItem, GitHubProject } from "../src/core/github";
 import { RUN_IN_PROGRESS } from "../src/core/design";
 import type { GitHubIteration } from "../src/core/github";
+import { estimateField } from "../src/core/sprints";
 import {
   assigneeOf,
   changedReferences,
-  estimateField,
   estimateOf,
   eventsBetween,
   githubEvents,

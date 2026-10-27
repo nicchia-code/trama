@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TramaError, UsageError } from "../../core/errors";
 import { currentIteration, findGh, type GitHubIteration, ghProblemMessage, iterationEnd, linkedGithubProject, localToday, NO_PROJECT_LINKED, readLinkedProject, sprintField } from "../../core/github";
+import { estimateField } from "../../core/sprints";
 import { changedSincePublishing } from "../../core/issue-changes";
 import { editIssue, findIssue, type FoundIssue, githubBodyOf, effective, type Issue, ISSUE_STATES, type IssueState, listIssues, moveIssue, publicationOrder } from "../../core/issues";
 import { requireTeam } from "../../core/manager-mode";
@@ -231,7 +232,7 @@ const edit = defineCommand({
 
 const fieldsJson = z.object({
   project: z.object({ owner: z.string(), number: z.number(), title: z.string() }).describe("The linked GitHub Project."),
-  fields: z.array(z.object({ id: z.string(), name: z.string(), type: z.string().describe("GitHub's data type: `ITERATION`, `SINGLE_SELECT`, `NUMBER`, `TEXT`, `DATE`, …"), options: z.array(z.object({ id: z.string(), name: z.string() })).optional(), sprint: z.boolean().describe("Whether this is the sprint field: the first iteration field.") })),
+  fields: z.array(z.object({ id: z.string(), name: z.string(), type: z.string().describe("GitHub's data type: `ITERATION`, `SINGLE_SELECT`, `NUMBER`, `TEXT`, `DATE`, …"), options: z.array(z.object({ id: z.string(), name: z.string() })).optional(), sprint: z.boolean().describe("Whether this is the sprint field: the first iteration field."), estimate: z.boolean().describe("Whether this is the estimate field: the first number field whose name contains `estimate` or `days`, without case. Publication fills it with the issue's estimate.") })),
   iterations: z.array(z.object({ id: z.string(), title: z.string(), startDate: z.string().describe("`YYYY-MM-DD`."), duration: z.number().describe("Days."), current: z.boolean().describe("Whether the iteration contains today.") })).describe("The iterations of the sprint field, oldest first."),
 });
 
@@ -243,7 +244,7 @@ const fields = defineCommand({
   mode: "blocking",
   summary: "The fields and iterations of the linked GitHub Project.",
   description:
-    "Reads, with the GitHub command line (`gh`), the fields of the GitHub Project linked in the Team view, each with its options, and the iterations of its sprint field with their dates, marking the sprint field (the first iteration field) and the current sprint (the one that contains today). Read-only, on GitHub and in the project. Fails, with exit code 1, when no Project is linked (`No GitHub Project is linked: link one in the Team view.`), when `gh` is not installed, is not logged in or cannot read Projects, with the reason the Team view shows, and with the reason of Manager mode when Team is not available.",
+    "Reads, with the GitHub command line (`gh`), the fields of the GitHub Project linked in the Team view, each with its options, and the iterations of its sprint field with their dates, marking the sprint field (the first iteration field), the estimate field (the first number field whose name contains `estimate` or `days`, without case, which publication fills with the issue's estimate) and the current sprint (the one that contains today). Read-only, on GitHub and in the project. Fails, with exit code 1, when no Project is linked (`No GitHub Project is linked: link one in the Team view.`), when `gh` is not installed, is not logged in or cannot read Projects, with the reason the Team view shows, and with the reason of Manager mode when Team is not available.",
   input: z.strictObject({}),
   output: fieldsJson,
   async run(ctx, _input, _args, runtime) {
@@ -254,10 +255,11 @@ const fields = defineCommand({
     const read = await readLinkedProject(linked, { find: () => findGh(runtime.env) });
     if (!read.ok) throw new TramaError(ghProblemMessage(read.reason));
     const sprint = sprintField(read.project.fields);
+    const estimate = estimateField(read.project.fields);
     const current = currentIteration(read.project.iterations, localToday());
     const json = {
       project: linked,
-      fields: read.project.fields.map((field) => ({ ...field, sprint: field === sprint })),
+      fields: read.project.fields.map((field) => ({ ...field, sprint: field === sprint, estimate: field === estimate })),
       iterations: read.project.iterations.map((iteration) => ({ ...iteration, current: iteration === current })),
     };
     const md = [
@@ -265,7 +267,7 @@ const fields = defineCommand({
       "",
       "## Fields",
       "",
-      ...json.fields.map((field) => `- ${field.name} (${field.type})${field.sprint ? " — sprint field" : ""}${field.options === undefined ? "" : `: ${field.options.length === 0 ? "no options" : field.options.map((option) => option.name).join(", ")}`}`),
+      ...json.fields.map((field) => `- ${field.name} (${field.type})${field.sprint ? " — sprint field" : ""}${field.estimate ? " — estimate field" : ""}${field.options === undefined ? "" : `: ${field.options.length === 0 ? "no options" : field.options.map((option) => option.name).join(", ")}`}`),
       "",
       "## Iterations",
       "",

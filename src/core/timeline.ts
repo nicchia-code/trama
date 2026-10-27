@@ -2,7 +2,7 @@ import type { Announcement } from "./announcements";
 import { RUN_IN_PROGRESS } from "./design";
 import { type GitHubField, type GitHubItem, type GitHubIteration, type GitHubProject, sprintField } from "./github";
 import { type Absence, firstName } from "./people";
-import { capacityIn, lastDayOf, loadIn, numberText, type OpenLoad } from "./sprints";
+import { capacityIn, estimateField, lastDayOf, loadIn, numberText, type OpenLoad } from "./sprints";
 
 /*
  * The pure logic of the Team view that follows the issues Trama published (`rules#issue/Published`, `tech#issue/Published`): where an issue is, from what the last read of
@@ -80,9 +80,6 @@ export function githubEvents(before: readonly GitHubItem[] | null, after: readon
     return eventsBetween(statusOf(was), statusOf(item)).map((event) => ({ issue: item.number, event }));
   });
 }
-
-/** The estimate field of a Project: its first number field whose name contains `estimate` or `days`, without case; none when it has no such field. */
-export const estimateField = (fields: readonly GitHubField[]): GitHubField | undefined => fields.find((field) => field.type === "NUMBER" && /estimate|days/i.test(field.name));
 
 /** The sprint an item is in: the title of its iteration in the sprint field, or null. */
 export function sprintOf(item: GitHubItem, fields: readonly GitHubField[]): string | null {

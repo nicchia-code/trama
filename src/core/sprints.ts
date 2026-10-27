@@ -1,4 +1,4 @@
-import type { GitHubIteration } from "./github";
+import type { GitHubField, GitHubIteration } from "./github";
 import { type Absence, addDays } from "./people";
 
 /*
@@ -17,6 +17,9 @@ export function isWorkingDay(date: string): boolean {
 
 /** `3.5`, `5`: a number of days without the unit. */
 export const numberText = (days: number): string => String(Math.round(days * 10) / 10);
+
+/** The estimate field of a Project: its first number field whose name contains `estimate` or `days`, without case; none when it has no such field. */
+export const estimateField = (fields: readonly GitHubField[]): GitHubField | undefined => fields.find((field) => field.type === "NUMBER" && /estimate|days/i.test(field.name));
 
 /** The working days (Monday to Friday) of an iteration within its dates, `YYYY-MM-DD`, in order. */
 export function workingDaysOf(iteration: Dates): string[] {

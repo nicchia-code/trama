@@ -3,7 +3,7 @@
   "displayName": "Trama",
   "description": "See your System as a layered Model of state machines, review Proposals and Drifts, and steer your coding agent from one editor tab.",
   "version": "0.1.1",
-  "publisher": "trama-dev",
+  "publisher": "nicchia",
   "license": "AGPL-3.0-only",
   "private": true,
   "engines": {

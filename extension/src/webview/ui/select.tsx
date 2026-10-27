@@ -5,7 +5,14 @@ import { cn } from "../lib/utils";
 
 const Select = SelectPrimitive.Root;
 const SelectGroup = SelectPrimitive.Group;
-const SelectValue = SelectPrimitive.Value;
+
+/** Radix drops the `className` of its value, so the layout of the chosen option sits on `SelectTrigger`, which finds the value by this `data-slot`. */
+function SelectValue(props: React.ComponentProps<typeof SelectPrimitive.Value>) {
+  return <SelectPrimitive.Value data-slot="select-value" {...props} />;
+}
+
+const VALUE_LAYOUT =
+  "[&>[data-slot=select-value]:has(>*)]:flex [&>[data-slot=select-value]:has(>*)]:min-w-0 [&>[data-slot=select-value]:has(>*)]:items-center [&>[data-slot=select-value]:has(>*)]:gap-2 [&>[data-slot=select-value]>span:not(.shrink-0)]:min-w-0 [&>[data-slot=select-value]>span:not(.shrink-0)]:truncate";
 
 function SelectTrigger({ className, children, ...props }: React.ComponentProps<typeof SelectPrimitive.Trigger>) {
   return (
@@ -13,6 +20,7 @@ function SelectTrigger({ className, children, ...props }: React.ComponentProps<t
       data-slot="select-trigger"
       className={cn(
         "flex h-8 w-fit items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 py-1 text-sm whitespace-nowrap shadow-xs transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-muted-foreground motion-reduce:transition-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        VALUE_LAYOUT,
         className,
       )}
       {...props}

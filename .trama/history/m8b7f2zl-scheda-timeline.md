@@ -1,9 +1,10 @@
 ---
 created: 2026-10-25T18:29:08.528Z
-updated: 2026-10-25T18:29:08.528Z
-summary: "La vista Team ha la scheda Timeline, fra Issues e People: la roadmap nel tempo per persona o per epica, sugli sprint settimanali del Project collegato, con carico, capacità e assenze."
+updated: 2026-10-27T06:13:12.461Z
+summary: "La vista Team ha la scheda Timeline: la roadmap per persona o per epica sugli sprint del Project collegato, con carico, capacità e assenze. I blocchi mostrano sempre per intero `#<n>` e la stima; il titolo solo nello spazio che avanza."
 tasks:
   - 9gqbrxai
+  - eahljm03
 ---
 # Scheda Timeline
 

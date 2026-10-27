@@ -133,6 +133,28 @@ test("an estimate over 5 days fills the cell, none is the narrowest block, and i
   expect(none).toMatchObject({ days: null, fraction: 0, name: "#2 No idea · no estimate · In progress" });
 });
 
+test("a block's width is its share of the cell, whatever the estimate says", () => {
+  const model = timelineOf(input([row({ id: "iiiiiii1", number: 14 }, { number: 14, estimate: 2 }), row({ id: "iiiiiii2", number: 13 }, { number: 13, estimate: 3 }), row({ id: "iiiiiii3", number: 15, title: "No idea" }, { number: 15, estimate: null })]));
+  const [two, three, none] = model.lanes[0]?.cells[0]?.blocks ?? [];
+  expect(two).toMatchObject({ fraction: 0.4 });
+  expect(three).toMatchObject({ fraction: 0.6 });
+  expect(none).toMatchObject({ days: null, fraction: 0 });
+});
+
+test("a narrow block is never narrower than its content, which keeps its number and estimate whole and a title that gives way", () => {
+  const { open } = page();
+  open();
+  const block = screen.getByRole("button", { name: "#129 Address form · 2 d · Closed" });
+  expect(block.style.width).toBe("40%");
+  expect(block.className).toContain("min-w-max");
+  expect(within(block).getByText("#129").className).toContain("shrink-0");
+  expect(within(block).getByText("2 d").className).toContain("shrink-0");
+  // The title has no width of its own, so the block's content width is the dot, the number and the estimate only.
+  const title = within(block).getByText("Address form");
+  expect(title.className).toContain("truncate");
+  expect(title.parentElement?.className).toContain("w-0");
+});
+
 test("the blocks of a cell keep the order the issues were published in, which is the order of their dependencies", () => {
   const rows = [row({ id: "iiiiiii1", number: 130 }, { number: 130 }), row({ id: "iiiiiii2", number: 129 }, { number: 129 }), row({ id: "iiiiiii3", number: 140 }, { number: 140 })];
   const numbers = timelineOf(input(rows)).lanes[0]?.cells[0]?.blocks.map((b) => (b.kind === "issue" ? b.number : 0));

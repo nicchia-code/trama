@@ -20,7 +20,7 @@ code --install-extension trama-<platform>-<version>.vsix
 ```step
 title: Install Trama and open its menu
 text: |
-  Open the [Trama page on the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=trama-dev.trama) and press **Install**, or search for **Trama** in the Extensions view. Then click the Trama icon, the woven bars of the logo, in the activity bar: the side menu opens.
+  Open the [Trama page on the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=nicchia.trama) and press **Install**, or search for **Trama** in the Extensions view. Then click the Trama icon, the woven bars of the logo, in the activity bar: the side menu opens.
 scene: menu-get-started
 alt: "VS Code with the Trama icon selected in the activity bar and Trama's side menu open on a folder that is not a Trama project, offering Get Started at the top and Settings at the bottom."
 eager: true

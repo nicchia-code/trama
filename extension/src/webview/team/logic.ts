@@ -1,6 +1,6 @@
 import type { Snapshot } from "../../../../src/core/snapshot";
 import type { GitHubIteration, ProjectFields } from "../../../../src/core/github";
-import { absenceDaysIn, capacityIn, lacksSprints, lastDayOf, loadIn, numberText, type OpenLoad, sprintsShown, workingDaysOf } from "../../../../src/core/sprints";
+import { absenceDaysIn, capacityIn, estimateField, lacksSprints, lastDayOf, loadIn, numberText, type OpenLoad, sprintsShown, workingDaysOf } from "../../../../src/core/sprints";
 import type { IssueOnGitHub, IssueStatus, SignalKind } from "../../../../src/core/timeline";
 import type { ToWebview } from "../../protocol";
 import {
@@ -294,8 +294,8 @@ const initialsOf = (handle: string): string => handle.slice(0, 2).toUpperCase();
 
 /**
  * The fields of an issue's preview, in order: `Assignee`, `Reviewer`, `Estimate (days)`, `Sprint`, then every other field of the linked Project in the Project's order
- * (a single-select as a `Select`, a number or a text as an input); the iteration fields other than the sprint and the fields Trama cannot set are left out. Without a
- * read Project only the four first fields stand, the sprint with the value it has and `No sprint`.
+ * (a single-select as a `Select`, a number or a text as an input); the iteration fields other than the sprint, the Project's estimate field (`Estimate (days)` fills it) and the
+ * fields Trama cannot set are left out. Without a read Project only the four first fields stand, the sprint with the value it has and `No sprint`.
  */
 export function fieldEditors(
   issue: Pick<HandoffIssueData, "values" | "agent" | "changed">,
@@ -320,9 +320,10 @@ export function fieldEditors(
     base("estimate", "Estimate (days)", "estimate", text(issue.values.estimate), text(issue.agent.estimate)),
     base("sprint", "Sprint", "sprint", sprintValue, text(issue.agent.sprint), sprints.some((s) => s.value === sprintValue) || sprintValue === "" ? sprints : [...sprints, { value: sprintValue, label: sprintValue }]),
   ];
+  const estimate = estimateField(project?.fields ?? []);
   for (const field of project?.fields ?? []) {
-    // The iteration fields (the sprint is edited above) and the fields a Project has of its own are not shown.
-    if (field.type === "ITERATION" || OWN_FIELD_TYPES.has(field.type)) continue;
+    // The iteration fields (the sprint is edited above), the estimate field (`Estimate (days)` above) and the fields a Project has of its own are not shown.
+    if (field.type === "ITERATION" || field === estimate || OWN_FIELD_TYPES.has(field.type)) continue;
     const key = `fields.${field.name}`;
     const value = text(issue.values.fields[field.name]);
     const agent = text(issue.agent.fields[field.name]);

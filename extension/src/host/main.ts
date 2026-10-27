@@ -8,7 +8,7 @@ import { agentTabName, watchAgentTerminal, configuredOmpPath, configuredSkillsDi
 import { Controller, describeError } from "./controller";
 import { startExecutionCheck } from "./execution-check";
 import { DesignRequests } from "./design-requests";
-import { bundledTrama } from "./bundled";
+import { bundledTrama, setExtensionId } from "./bundled";
 import { startCursorApiKey } from "./cursor-api-key";
 import { startNtfyToken } from "./ntfy-token";
 import { findProject } from "./project";
@@ -43,6 +43,7 @@ function guarded<A extends unknown[]>(action: (...args: A) => Promise<void>): (.
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+  setExtensionId(context.extension.id);
   const session = new QuestionSession(() => trama.revealForQuestions(), agentTabName, { opened: roundOpened, closed: roundClosed });
   // The Manager's people live only in this window's global state, never synchronised: `setKeysForSync` is never called for `trama.team`.
   const people = new People(context.globalState);

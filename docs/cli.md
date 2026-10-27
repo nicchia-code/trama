@@ -731,12 +731,12 @@ Runs at once; writes in `.trama/`, counts as the agent's activity.
 
 #### `trama issue fields`
 
-Reads, with the GitHub command line (`gh`), the fields of the GitHub Project linked in the Team view, each with its options, and the iterations of its sprint field with their dates, marking the sprint field (the first iteration field) and the current sprint (the one that contains today). Read-only, on GitHub and in the project. Fails, with exit code 1, when no Project is linked (`No GitHub Project is linked: link one in the Team view.`), when `gh` is not installed, is not logged in or cannot read Projects, with the reason the Team view shows, and with the reason of Manager mode when Team is not available.
+Reads, with the GitHub command line (`gh`), the fields of the GitHub Project linked in the Team view, each with its options, and the iterations of its sprint field with their dates, marking the sprint field (the first iteration field), the estimate field (the first number field whose name contains `estimate` or `days`, without case, which publication fills with the issue's estimate) and the current sprint (the one that contains today). Read-only, on GitHub and in the project. Fails, with exit code 1, when no Project is linked (`No GitHub Project is linked: link one in the Team view.`), when `gh` is not installed, is not logged in or cannot read Projects, with the reason the Team view shows, and with the reason of Manager mode when Team is not available.
 
 Output (`--json`):
 
 - project: { owner: string, number: number, title: string }, required. The linked GitHub Project.
-- fields: { id: string, name: string, type: string, options?: { id: string, name: string }[], sprint: boolean }[], required
+- fields: { id: string, name: string, type: string, options?: { id: string, name: string }[], sprint: boolean, estimate: boolean }[], required
 - iterations: { id: string, title: string, startDate: string, duration: number, current: boolean }[], required. The iterations of the sprint field, oldest first.
 
 Runs and waits for the editor; read-only.

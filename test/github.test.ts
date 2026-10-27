@@ -73,6 +73,7 @@ const PROJECT_ANSWER = JSON.stringify({
             { id: "F2", name: "Status", dataType: "SINGLE_SELECT", options: [{ id: "O1", name: "Todo" }, { id: "O2", name: "Done" }] },
             { id: "F3", name: "Sprint", dataType: "ITERATION", configuration: { iterations: [{ id: "I2", title: "Sprint 2", startDate: "2026-10-26", duration: 7 }], completedIterations: [{ id: "I1", title: "Sprint 1", startDate: "2026-10-19", duration: 7 }] } },
             { id: "F4", name: "Other", dataType: "ITERATION", configuration: { iterations: [{ id: "X", title: "Other 1", startDate: "2026-01-01", duration: 14 }] } },
+            { id: "F5", name: "Estimate (days)", dataType: "NUMBER" },
           ],
         },
       },
@@ -171,7 +172,7 @@ describe("a read of GitHub", () => {
   test("the fields of the linked Project with their options, and the iterations of the first iteration field, oldest first", async () => {
     const reading = await readGitHub("acme/web", { owner: "acme", number: 1, title: "Roadmap" }, fakeGh().deps);
     if (!reading.ok || reading.project === null) throw new Error("not read");
-    expect(reading.project.fields.map((field) => field.name)).toEqual(["Title", "Status", "Sprint", "Other"]);
+    expect(reading.project.fields.map((field) => field.name)).toEqual(["Title", "Status", "Sprint", "Other", "Estimate (days)"]);
     expect(reading.project.fields[1]?.options).toEqual([{ id: "O1", name: "Todo" }, { id: "O2", name: "Done" }]);
     expect(sprintField(reading.project.fields)?.name).toBe("Sprint");
     expect(reading.project.iterations.map((iteration) => iteration.title)).toEqual(["Sprint 1", "Sprint 2"]);
@@ -454,10 +455,12 @@ describe("trama issue fields", () => {
     const env = { PATH: `${bin}:/usr/bin:/bin` };
     const json = JSON.parse((await execute(["--root", base, "--json", "issue", "fields"], base, { env })).out);
     expect(json.project).toEqual({ owner: "acme", number: 1, title: "Roadmap" });
-    expect(json.fields.map((f: { name: string; sprint: boolean }) => [f.name, f.sprint])).toEqual([["Title", false], ["Status", false], ["Sprint", true], ["Other", false]]);
+    expect(json.fields.map((f: { name: string; sprint: boolean; estimate: boolean }) => [f.name, f.sprint, f.estimate])).toEqual([["Title", false, false], ["Status", false, false], ["Sprint", true, false], ["Other", false, false], ["Estimate (days)", false, true]]);
     expect(json.iterations.map((i: { title: string }) => i.title)).toEqual(["Sprint 1", "Sprint 2"]);
     const md = (await execute(["--root", base, "issue", "fields"], base, { env })).out;
     expect(md).toContain("- Sprint (ITERATION) — sprint field");
+    expect(md).toContain("- Estimate (days) (NUMBER) — estimate field");
+    expect(md).not.toContain("- Sprint (ITERATION) — estimate field");
     expect(md).toContain("- Status (SINGLE_SELECT): Todo, Done");
     expect(md).toContain("Sprint 1: 2026-10-19 to 2026-10-25 (7 days)");
   });
