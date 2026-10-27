@@ -1,6 +1,6 @@
 import { FIX_OPTIONS } from "./fix-options";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli/main";
@@ -9,13 +9,14 @@ import { getProposal, listProposals, newProposal } from "../src/core/proposals";
 import { createdNow, newCardId, type Project, projectAt } from "../src/core/store";
 import { cardName } from "../src/core/short-numbers";
 import { getDrift, getTask, listTasks, newDrift, newTask } from "../src/core/work";
+import { copyShop } from "./shop-project";
 
 let dir: string;
 let p: Project;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "trama-id-"));
-  cpSync(join(import.meta.dir, "../examples/shop"), dir, { recursive: true });
+  copyShop(dir);
   p = projectAt(dir);
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));

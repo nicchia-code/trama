@@ -4,6 +4,8 @@
 
 ![Trama in VS Code: the Board with a Proposal to approve, the Diagram of the app's states and a Drift to resolve](./docs/images/demo.gif)
 
+**[Read the guide](https://nicchia-code.github.io/trama/)**
+
 Trama keeps a map of your app next to your code, as plain Markdown in `.trama/` drawn for you as a diagram. Your agent reads the map before it writes a line, and every change arrives as a Proposal you approve before any code exists.
 
 ## How it works
@@ -59,6 +61,9 @@ code --install-extension trama-<platform>-<version>.vsix
 
 ## Learn more
 
+The details of the features live in the [guide on the website](https://nicchia-code.github.io/trama/guide/), with the [changelog](./CHANGELOG.md), the [command line reference](./docs/cli.md) and the description of each setting in the editor.
+
+- [Website and guide](https://nicchia-code.github.io/trama/)
 - [What the words mean](./CONTEXT.md)
 - [Model file format](./docs/model-format.md)
 - [Command line reference](./docs/cli.md)

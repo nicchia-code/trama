@@ -1,0 +1,24 @@
+{
+  "marks": [
+    {
+      "id": "m1",
+      "type": "underline",
+      "from": [
+        29.51,
+        9.33
+      ],
+      "to": [
+        69.44,
+        9.33
+      ]
+    }
+  ],
+  "notes": [
+    {
+      "text": "Describe the change here",
+      "x": 38.89,
+      "y": 16.67,
+      "mark": "m1"
+    }
+  ]
+}

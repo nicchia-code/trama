@@ -1,0 +1,58 @@
+---
+// The switch between the light and the dark theme. Its choice is kept in `localStorage` and read by every page
+// through the class `dark` on the root element; until the visitor chooses, the system's preference decides.
+---
+
+<button type="button" class="icon-button theme-toggle" role="switch" aria-checked="false" aria-label="Dark theme" data-theme-toggle>
+  <svg class="theme-icon theme-icon-sun" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+    <circle cx="12" cy="12" r="4"></circle>
+    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path>
+  </svg>
+  <svg class="theme-icon theme-icon-moon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+    <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
+  </svg>
+</button>
+
+<script>
+  import { THEME_KEY, parseTheme, resolveTheme } from "../lib/theme";
+
+  const root = document.documentElement;
+  const dark = matchMedia("(prefers-color-scheme: dark)");
+
+  function stored() {
+    try {
+      return parseTheme(localStorage.getItem(THEME_KEY));
+    } catch {
+      return null;
+    }
+  }
+
+  function show() {
+    const isDark = root.classList.contains("dark");
+    for (const button of document.querySelectorAll("[data-theme-toggle]")) button.setAttribute("aria-checked", String(isDark));
+  }
+
+  function apply() {
+    root.classList.toggle("dark", resolveTheme(stored(), dark.matches) === "dark");
+    show();
+  }
+
+  for (const button of document.querySelectorAll("[data-theme-toggle]")) {
+    button.addEventListener("click", () => {
+      const next = root.classList.contains("dark") ? "light" : "dark";
+      try {
+        localStorage.setItem(THEME_KEY, next);
+      } catch {
+        // Storage is blocked: the choice lasts until the page closes.
+      }
+      root.classList.toggle("dark", next === "dark");
+      show();
+    });
+  }
+  // The system's preference moves the page only while the visitor has not chosen; another tab's choice moves every tab.
+  dark.addEventListener("change", apply);
+  addEventListener("storage", (event) => {
+    if (event.key === THEME_KEY) apply();
+  });
+  show();
+</script>

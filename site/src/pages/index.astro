@@ -1,0 +1,64 @@
+---
+import Steps from "../components/Steps.astro";
+import Base from "../layouts/Base.astro";
+import { MARKETPLACE, RELEASES, withBase } from "../lib/links";
+
+const base = import.meta.env.BASE_URL;
+---
+
+<Base title="Trama">
+  <section class="hero">
+    <div class="container hero-inner">
+      <p class="eyebrow">For VS Code and omp</p>
+      <h1>Your AI agent writes code fast. <span class="hero-accent">Trama makes sure it's the code you meant.</span></h1>
+      <p class="hero-lead">
+        Trama keeps a map of your app next to your code, as plain Markdown in <code>.trama/</code> drawn for you as a diagram. Your
+        agent reads the map before it writes a line, and every change arrives as a Proposal you approve before any code exists.
+      </p>
+      <figure class="hero-media">
+        <img
+          src={withBase(base, "docs-images/demo.gif")}
+          alt="Trama at work in VS Code: a change is described, the agent asks questions, and the Proposal, Tasks and Drifts move across the Board"
+          width="1280"
+          height="804"
+          decoding="async"
+        />
+      </figure>
+      <p class="hero-actions">
+        <a class="button button-primary button-large" href={withBase(base, "guide/")}>Read the guide</a>
+        <a class="button button-secondary button-large" href={MARKETPLACE}>Install</a>
+      </p>
+    </div>
+  </section>
+
+  <Steps />
+
+  <section class="container getting" aria-labelledby="getting-title">
+    <h2 id="getting-title" class="section-title">Requirements and install</h2>
+    <div class="getting-grid">
+      <div class="card">
+        <h3>What you need</h3>
+        <ul class="check-list">
+          <li>VS Code 1.106 or later, the only editor Trama supports.</li>
+          <li>Linux (x64), macOS (Apple silicon) or Windows (x64, in preview).</li>
+          <li>omp, the only agent Trama supports.</li>
+          <li>The GitHub CLI (<code>gh</code>), only for Team.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Install</h3>
+        <p>
+          Install Trama from the <a href={MARKETPLACE}>VS Code Marketplace</a>, or download the <code>.vsix</code> for your platform from
+          <a href={RELEASES}>Releases</a> and run <strong>Extensions: Install from VSIX…</strong> from the command palette.
+        </p>
+        <p class="button-row">
+          <a class="button button-primary" href={MARKETPLACE}>Install</a>
+          <a class="button button-secondary" href={withBase(base, "guide/getting-started/install/")}>Read the install guide</a>
+        </p>
+        <p class="note">
+          Windows is in preview: <code>trama.exe</code> is not signed, so SmartScreen or an antivirus may warn the first time it runs.
+        </p>
+      </div>
+    </div>
+  </section>
+</Base>

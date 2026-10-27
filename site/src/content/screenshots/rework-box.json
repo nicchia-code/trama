@@ -1,0 +1,50 @@
+{
+  "marks": [
+    {
+      "id": "m1",
+      "type": "rectangle",
+      "x": 29.31,
+      "y": 3.11,
+      "w": 41.53,
+      "h": 4.0
+    },
+    {
+      "id": "a1",
+      "type": "arrow",
+      "from": [
+        75.76,
+        26.47
+      ],
+      "to": [
+        53.03,
+        7.57
+      ]
+    },
+    {
+      "id": "m2",
+      "type": "underline",
+      "from": [
+        30.0,
+        11.56
+      ],
+      "to": [
+        69.44,
+        11.56
+      ]
+    }
+  ],
+  "notes": [
+    {
+      "text": "Write the feedback",
+      "x": 73.61,
+      "y": 31.11,
+      "mark": "a1"
+    },
+    {
+      "text": "Leave empty to redo it",
+      "x": 61.11,
+      "y": 18.89,
+      "mark": "m2"
+    }
+  ]
+}

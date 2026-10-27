@@ -1,0 +1,35 @@
+---
+import { getCollection } from "astro:content";
+import GuideLayout from "../../layouts/GuideLayout.astro";
+import { buildGuideNav } from "../../lib/guide";
+import { withBase } from "../../lib/links";
+
+const base = import.meta.env.BASE_URL;
+const pages = await getCollection("guide");
+const nav = buildGuideNav(pages.map((p) => ({ id: p.id, title: p.data.title, order: p.data.order })));
+const descriptions = new Map(pages.map((p) => [p.id, p.data.description]));
+---
+
+<GuideLayout title="Guide" description="How to use Trama: getting started, the concepts, the workflows and the panel with its settings." nav={nav}>
+  <p>
+    Trama keeps a map of your app next to your code and turns every change your agent makes into a Proposal you approve first. The
+    guide explains how to use it, in four sections.
+  </p>
+  <div class="guide-cards">
+    {
+      nav.map((section) => (
+        <section class="card">
+          <h2>{section.title}</h2>
+          <ul>
+            {section.pages.map((page) => (
+              <li>
+                <a href={withBase(base, `guide/${page.id}/`)}>{page.title}</a>
+                {descriptions.get(page.id) && <span class="muted"> — {descriptions.get(page.id)}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))
+    }
+  </div>
+</GuideLayout>

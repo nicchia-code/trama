@@ -1,0 +1,87 @@
+{
+  "marks": [
+    {
+      "id": "m1",
+      "type": "rectangle",
+      "x": 24.79,
+      "y": 28.11,
+      "w": 16.25,
+      "h": 21.89
+    },
+    {
+      "id": "a1",
+      "type": "arrow",
+      "from": [
+        36.1,
+        79.89
+      ],
+      "to": [
+        33.85,
+        50.99
+      ]
+    },
+    {
+      "id": "m2",
+      "type": "ellipse",
+      "x": 70.02,
+      "y": 28.5,
+      "w": 8.92,
+      "h": 4.78
+    },
+    {
+      "id": "a2",
+      "type": "arrow",
+      "from": [
+        71.04,
+        21.11
+      ],
+      "to": [
+        73.33,
+        27.63
+      ]
+    },
+    {
+      "id": "m3",
+      "type": "rectangle",
+      "x": 64.03,
+      "y": 72.11,
+      "w": 14.24,
+      "h": 4.67
+    },
+    {
+      "id": "a3",
+      "type": "arrow",
+      "from": [
+        70.79,
+        79.89
+      ],
+      "to": [
+        70.93,
+        77.77
+      ]
+    }
+  ],
+  "notes": [
+    {
+      "text": "All the questions",
+      "x": 27.78,
+      "y": 85.56,
+      "mark": "a1",
+      "busy": true
+    },
+    {
+      "text": "Ask more opens a chat",
+      "x": 59.03,
+      "y": 15.56,
+      "mark": "a2",
+      "busy": true
+    },
+    {
+      "text": "Skip all, Skip or Next",
+      "x": 59.72,
+      "y": 85.56,
+      "mark": "a3",
+      "busy": true
+    }
+  ]
+}

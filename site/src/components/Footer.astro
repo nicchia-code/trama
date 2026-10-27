@@ -1,0 +1,28 @@
+---
+import { CLI_REFERENCE, LICENSE, MODEL_FORMAT, REPOSITORY, withBase } from "../lib/links";
+import Logo from "./Logo.astro";
+
+const base = import.meta.env.BASE_URL;
+---
+
+<footer class="site-footer">
+  <div class="site-footer-inner">
+    <div class="footer-brand">
+      <a class="brand" href={withBase(base, "")}>
+        <Logo size={22} />
+        <span>Trama</span>
+      </a>
+      <p>Your AI agent writes code fast. Trama makes sure it's the code you meant.</p>
+    </div>
+    <nav aria-label="Footer">
+      <ul class="footer-links">
+        <li><a href={withBase(base, "guide/")}>Guide</a></li>
+        <li><a href={REPOSITORY}>GitHub repository</a></li>
+        <li><a href={CLI_REFERENCE}>Command line reference</a></li>
+        <li><a href={MODEL_FORMAT}>Model file format</a></li>
+        <li><a href={LICENSE}>License (GNU AGPL v3)</a></li>
+      </ul>
+    </nav>
+  </div>
+  <p class="footer-copy">Copyright © 2026 Luca Soda</p>
+</footer>

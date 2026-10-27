@@ -1,0 +1,38 @@
+---
+import Footer from "../components/Footer.astro";
+import Header from "../components/Header.astro";
+import { THEME_INIT_SCRIPT } from "../lib/theme";
+import { withBase } from "../lib/links";
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  description?: string;
+  /** The section of the header to mark as the current one. */
+  current?: "guide";
+}
+const { title, description = "Trama keeps a map of your app next to your code, and every change your AI agent makes arrives as a Proposal you approve first.", current } = Astro.props;
+const base = import.meta.env.BASE_URL;
+const fullTitle = title === "Trama" ? "Trama — the map of your app, next to your code" : `${title} · Trama`;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="description" content={description} />
+    <title>{fullTitle}</title>
+    <link rel="icon" type="image/svg+xml" href={withBase(base, "favicon.svg")} />
+    <script is:inline set:html={THEME_INIT_SCRIPT}></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to the content</a>
+    <Header current={current} />
+    <main id="main" class:list={["site-main", current && `site-main-${current}`]}>
+      <slot />
+    </main>
+    <Footer />
+  </body>
+</html>

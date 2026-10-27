@@ -1,0 +1,25 @@
+---
+import { renderScreenshot } from "../lib/screenshots";
+import "../styles/shots.css";
+
+// An annotated screenshot, named by its scene: the two images, the marks drawn at build time and the notes. The guide's
+// Markdown pages get the same markup from the plugin `remark-screenshots.ts`. See `lib/screenshots.ts`.
+interface Props {
+  /** The name of the scene: `public/screenshots/<scene>.{light,dark}.png` and `src/content/screenshots/<scene>.json`. */
+  scene: string;
+  /** What the screenshot shows; the notes are read after it. */
+  alt: string;
+  /** Load the image at once instead of lazily, for a screenshot on the first screen. */
+  eager?: boolean;
+}
+// The site's folder, which `astro.config.mjs` defines for the build.
+declare const __SITE_ROOT__: string;
+const { scene, alt, eager } = Astro.props;
+const html = renderScreenshot({ siteRoot: __SITE_ROOT__, base: import.meta.env.BASE_URL, scene, alt, eager });
+---
+
+<Fragment set:html={html} />
+
+<script>
+  import "../scripts/shots-init";
+</script>

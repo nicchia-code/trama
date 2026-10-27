@@ -3,3 +3,5 @@ dist
 extension/dist
 extension/bin
 extension/LICENSE
+site/.astro
+site/public/docs-images

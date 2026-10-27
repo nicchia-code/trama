@@ -1,10 +1,11 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DocumentCache } from "../src/core/document-cache";
 import { buildSnapshot } from "../src/core/snapshot";
 import { projectAt } from "../src/core/store";
+import { copyShop } from "./shop-project";
 
 const DRIFTS = 300;
 const UNIFIED_TARGETS = 10;
@@ -19,7 +20,7 @@ const instant = (n: number) => `2026-10-01T10:${String(Math.floor(n / 60) % 60).
 /** The shop example with a few hundred Drifts (some unified), Tasks, Proposals (some open, with Task files) and History entries, written straight as files. */
 function bigProject(): string {
   const root = mkdtempSync(join(tmpdir(), "trama-picture-"));
-  cpSync(join(import.meta.dir, "../examples/shop"), root, { recursive: true });
+  copyShop(root);
   const dir = join(root, ".trama");
   for (const folder of ["drifts", "tasks", "proposals", "history"]) mkdirSync(join(dir, folder), { recursive: true });
   const drift = (n: number, extra: string, status = "open") =>

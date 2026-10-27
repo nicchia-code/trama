@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli/main";
@@ -8,13 +8,14 @@ import { cardName } from "../src/core/short-numbers";
 import { editInProposal, getProposal, listProposals, newProposal, submitProposal } from "../src/core/proposals";
 import { type Project, projectAt } from "../src/core/store";
 import { coverWithTask } from "./cover";
+import { copyShop } from "./shop-project";
 
 let dir: string;
 let p: Project;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "trama-requests-"));
-  cpSync(join(import.meta.dir, "../examples/shop"), dir, { recursive: true });
+  copyShop(dir);
   p = projectAt(dir);
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));

@@ -1,0 +1,90 @@
+---
+import GuideNav from "../components/GuideNav.astro";
+import { neighbours, sectionOf, type GuideSection } from "../lib/guide";
+import { withBase } from "../lib/links";
+import Base from "./Base.astro";
+import "../styles/shots.css";
+
+interface Heading {
+  depth: number;
+  slug: string;
+  text: string;
+}
+interface Props {
+  title: string;
+  description?: string;
+  nav: GuideSection[];
+  /** The id of the page, `<section>/<page>`; none for the guide's front page. */
+  currentId?: string;
+  /** The headings of the page (depth 2 and 3 make its table of contents). */
+  headings?: Heading[];
+}
+const { title, description, nav, currentId, headings = [] } = Astro.props;
+const base = import.meta.env.BASE_URL;
+const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
+const { previous, next } = currentId ? neighbours(nav, currentId) : {};
+const section = currentId ? sectionOf(nav, currentId) : undefined;
+---
+
+<Base title={title} description={description} current="guide">
+  <div class="container guide-layout">
+    <aside class="guide-sidebar">
+      <details class="guide-menu">
+        <summary>Guide menu</summary>
+        <GuideNav nav={nav} currentId={currentId} label="Guide (menu)" />
+      </details>
+      <div class="guide-sidebar-desktop">
+        <GuideNav nav={nav} currentId={currentId} label="Guide" />
+      </div>
+    </aside>
+
+    <article class="guide-article">
+      {section && <p class="guide-kicker">{section.title}</p>}
+      <h1>{title}</h1>
+      <div class="prose">
+        <slot />
+      </div>
+      {
+        (previous || next) && (
+          <nav class="guide-pager" aria-label="Previous and next page">
+            {previous ? (
+              <a class="pager-link pager-previous" href={withBase(base, `guide/${previous.id}/`)} rel="prev">
+                <span class="pager-label">Previous</span>
+                <span class="pager-title">{previous.title}</span>
+              </a>
+            ) : (
+              <span></span>
+            )}
+            {next && (
+              <a class="pager-link pager-next" href={withBase(base, `guide/${next.id}/`)} rel="next">
+                <span class="pager-label">Next</span>
+                <span class="pager-title">{next.title}</span>
+              </a>
+            )}
+          </nav>
+        )
+      }
+    </article>
+
+    {
+      toc.length > 0 && (
+        <aside class="guide-toc">
+          <nav aria-label="On this page">
+            <p class="guide-nav-title">On this page</p>
+            <ul>
+              {toc.map((h) => (
+                <li class={h.depth === 3 ? "toc-sub" : undefined}>
+                  <a href={`#${h.slug}`}>{h.text}</a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        </aside>
+      )
+    }
+  </div>
+</Base>
+
+<script>
+  import "../scripts/shots-init";
+</script>

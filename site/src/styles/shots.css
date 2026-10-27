@@ -1,0 +1,232 @@
+/*
+ * Annotated screenshots and the steps of the guide. The markup comes from `lib/screenshots.ts`; `scripts/shots.ts` adds the
+ * class `in-view` the first time a screenshot enters the screen and opens the enlarged view. One accent colour per theme, a
+ * warm red on the light page and a warm yellow on the dark one: 6.6:1 and 11.9:1 against the page's own colours, so the notes
+ * pass WCAG 2.1 AA (4.5:1) even on their soft background.
+ */
+
+/* The font is the site's own file (`public/fonts`, with its OFL licence beside it). Vite adds the base path to the url. */
+@font-face {
+  font-family: "Excalifont";
+  src: url("/fonts/Excalifont-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ---------- Steps ---------- */
+
+.guide-article { counter-reset: guide-step; }
+.guide-step { counter-increment: guide-step; margin-top: 2.25rem; }
+.guide-step .guide-step-title { display: flex; align-items: center; gap: 0.75rem; margin-top: 0; font-size: 1.2rem; line-height: 1.3; }
+.guide-step .guide-step-title::before {
+  content: counter(guide-step);
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.guide-step-text { margin-top: 0.5rem; }
+.guide-step-text > * + * { margin-top: 0.5rem; }
+.guide-step .shot { margin-top: 1rem; }
+
+/* ---------- Annotated screenshot ---------- */
+
+.shot {
+  --shot-accent: #b42318;
+  position: relative;
+  container: shot / inline-size;
+  width: 100%;
+  margin: 0;
+  font-family: "Excalifont", "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive;
+}
+.dark .shot { --shot-accent: #fbbf24; }
+.prose > .shot { margin-top: 1.5rem; }
+
+.shot-frame { position: relative; }
+
+.shot-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  cursor: zoom-in;
+}
+.shot-open:focus-visible { outline: 3px solid var(--ring); outline-offset: 3px; }
+
+/* The image of the site's theme; the marks and notes stay where they are when the theme changes. */
+.shot-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.shot-image.shot-dark, .dark .shot-image.shot-light { display: none; }
+.dark .shot-image.shot-dark { display: block; }
+
+.shot-marks {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--background) 75%, transparent));
+}
+.shot-marks path {
+  fill: none;
+  stroke: var(--shot-accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+
+/* Notes: HTML text on the screenshot, as wide as a line and a half of their words, in step with the width of the column. */
+.shot .shot-notes {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  pointer-events: none;
+  font-size: 2.3cqw;
+  line-height: 1.15;
+}
+.shot .shot-note {
+  position: absolute;
+  left: calc(var(--x) * 1%);
+  top: calc(var(--y) * 1%);
+  transform: translate(var(--tx), -50%);
+  width: max-content;
+  max-width: calc(var(--chars) * 0.56em);
+  margin: 0;
+  color: var(--shot-accent);
+  text-shadow: 0 0 0.3em var(--background), 0 0 0.12em var(--background);
+}
+.shot .shot-note-busy {
+  padding: 0.15em 0.45em;
+  border-radius: 0.5em;
+  background: color-mix(in srgb, var(--background) 88%, transparent);
+  text-shadow: none;
+}
+
+/* The numbers of the marks, shown only when the notes are a list under the screenshot. */
+.shot .shot-badges { display: none; position: absolute; inset: 0; margin: 0; padding: 0; list-style: none; pointer-events: none; }
+.shot .shot-badge {
+  position: absolute;
+  left: calc(var(--x) * 1%);
+  top: calc(var(--y) * 1%);
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: 0;
+  border-radius: 50%;
+  background: var(--shot-accent);
+  color: var(--background);
+  font-size: 1rem;
+  line-height: 1;
+}
+
+/* Narrow: below this width a note is too small to read, so the notes become a numbered list under the screenshot. */
+@container shot (max-width: 34rem) {
+  .shot .shot-badges { display: block; }
+  .shot .shot-notes {
+    position: static;
+    margin-top: 0.75rem;
+    padding-left: 1.6rem;
+    list-style: decimal;
+    pointer-events: auto;
+    font-size: 1.15rem;
+  }
+  .shot .shot-note { position: static; transform: none; width: auto; max-width: none; margin-top: 0.2rem; padding: 0; background: none; text-shadow: none; }
+  .shot .shot-note::marker { color: var(--shot-accent); }
+}
+
+/* ---------- Drawing ---------- */
+
+@keyframes shot-draw {
+  0% { opacity: 0; stroke-dashoffset: 1; }
+  1% { opacity: 1; stroke-dashoffset: 1; }
+  100% { opacity: 1; stroke-dashoffset: 0; }
+}
+@keyframes shot-note-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/*
+ * Before a screenshot first enters the screen its marks and notes are not drawn (only with scripts, and only when the
+ * visitor accepts motion); after, each mark draws as if traced by a pen and its note appears right after. Without
+ * scripts, with reduced motion, or in the enlarged copy, everything is drawn.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .js .shot:not(.in-view):not(.shot-static) .shot-marks path { opacity: 0; stroke-dashoffset: 1; }
+  .js .shot:not(.in-view):not(.shot-static) .shot-note { opacity: 0; }
+  .shot.in-view:not(.shot-static) .shot-marks path { animation: shot-draw var(--dur) ease-out var(--start) both; }
+  .shot.in-view:not(.shot-static) .shot-note { animation: shot-note-in 250ms ease-out var(--at) both; }
+
+  /* In the list under a narrow screenshot the notes are just there. */
+  @container shot (max-width: 34rem) {
+    .js .shot:not(.in-view):not(.shot-static) .shot-note { opacity: 1; }
+    .shot.in-view:not(.shot-static) .shot-note { animation: none; }
+  }
+}
+
+/* ---------- Enlarged view ---------- */
+
+.shot-modal-open { overflow: hidden; }
+.shot-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  width: min(96vw, calc(88vh * var(--ratio, 1.6)));
+  max-width: 96vw;
+  max-height: 94vh;
+  overflow: auto;
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: var(--shadow);
+}
+.shot-dialog::backdrop { background: oklch(0 0 0 / 70%); }
+.shot-dialog .shot { margin: 0; }
+.shot-dialog .shot-image { border: 0; border-radius: 0; box-shadow: none; }
+.shot-dialog .shot-notes { pointer-events: none; }
+.shot-close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.shot-close:hover { background: var(--muted); }
+@media (prefers-reduced-motion: no-preference) {
+  .shot-dialog[open] { animation: shot-note-in 150ms ease-out; }
+}

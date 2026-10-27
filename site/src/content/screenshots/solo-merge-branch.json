@@ -1,0 +1,32 @@
+{
+  "marks": [
+    {
+      "id": "m1",
+      "type": "rectangle",
+      "x": 29.31,
+      "y": 6.78,
+      "w": 41.53,
+      "h": 6.0
+    },
+    {
+      "id": "a1",
+      "type": "arrow",
+      "from": [
+        73.07,
+        17.92
+      ],
+      "to": [
+        59.15,
+        12.99
+      ]
+    }
+  ],
+  "notes": [
+    {
+      "text": "Choose the branch to merge",
+      "x": 73.61,
+      "y": 22.22,
+      "mark": "a1"
+    }
+  ]
+}

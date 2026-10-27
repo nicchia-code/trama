@@ -1,7 +1,7 @@
 import { cardName } from "../src/core/short-numbers";
 import { FIX_OPTIONS } from "./fix-options";
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type MergedState, mergeMachine } from "../src/core/merge";
@@ -14,6 +14,7 @@ import { moveTask, newDrift, newTask } from "../src/core/work";
 import type { FileMap, Machine } from "../src/core/types";
 import { announce, bindDraft, declareNote, listAnnouncements, removeBoundTo } from "../src/core/announcements";
 import { resolveDriftInProposal } from "../src/core/resolution";
+import { copyShop } from "./shop-project";
 
 
 const ACTOR = "# U\n\n## Events\n\n### GO\nx\n\n### STOP\nx\n";
@@ -76,7 +77,7 @@ let dir: string;
 let p: Project;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "trama-snap-"));
-  cpSync(join(import.meta.dir, "../examples/shop"), dir, { recursive: true });
+  copyShop(dir);
   p = projectAt(dir);
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));

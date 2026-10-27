@@ -30,6 +30,10 @@ The technologies this project is built, tested and released with, from the devel
 - yaml: front matter and settings files
 - zod 4: input schemas of the command line
 - Agent Client Protocol SDK: `@agentclientprotocol/sdk`, the client side of ACP that omp Chat uses to talk to `omp acp`, bundled into the extension host
+- Astro: the documentation site in `site/`, without Starlight; static output for GitHub Pages
+- Rough.js: draws the hand-drawn arrows, circles and underlines of the guide's annotated screenshots as SVG at build time, with a fixed seed
+- Playwright: only in the script that takes the guide's screenshots: drives the real VS Code through its Electron process; not part of the tests (chosen by the agent: drives an Electron application and its webviews and takes window screenshots)
+- @vscode/test-electron: downloads the pinned version of VS Code that the screenshot script launches, independent of the developer's own VS Code (chosen by the agent: the official way to download and launch a given VS Code build with an extension under development)
 
 ## Testing
 
@@ -39,11 +43,12 @@ The technologies this project is built, tested and released with, from the devel
 
 ## CI
 
-- GitHub Actions: tagged releases on Bun 1.4.0, one `.vsix` per platform
+- GitHub Actions: tagged releases on Bun 1.4.0, one `.vsix` per platform; a second workflow builds and publishes the site to GitHub Pages on every push to `main` that touches the site or the settings of the extension; it never takes screenshots
 
 ## Deployment
 
 - VS Code Marketplace package: one `.vsix` per platform (`linux-x64`, `darwin-arm64`, `win32-x64`), with the `trama` binary inside
+- GitHub Pages: the documentation site at `https://nicchia-code.github.io/trama/`, published by the GitHub Actions workflow with `actions/deploy-pages`
 
 ## Infrastructure as code
 

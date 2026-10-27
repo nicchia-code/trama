@@ -1,0 +1,46 @@
+{
+  "marks": [
+    {
+      "id": "m1",
+      "type": "rectangle",
+      "x": 62.15,
+      "y": 40.56,
+      "w": 24.17,
+      "h": 12.22
+    },
+    {
+      "id": "a1",
+      "type": "arrow",
+      "from": [
+        74.18,
+        54.88
+      ],
+      "to": [
+        74.19,
+        53.78
+      ]
+    },
+    {
+      "id": "m2",
+      "type": "ellipse",
+      "x": 79.36,
+      "y": 89.87,
+      "w": 8.02,
+      "h": 6.71
+    }
+  ],
+  "notes": [
+    {
+      "text": "Start from Scratch chosen",
+      "x": 63.19,
+      "y": 60.0,
+      "mark": "a1"
+    },
+    {
+      "text": "Next is now enabled",
+      "x": 66.67,
+      "y": 85.56,
+      "mark": "m2"
+    }
+  ]
+}

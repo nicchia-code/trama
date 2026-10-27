@@ -1,0 +1,51 @@
+{
+  "marks": [
+    {
+      "id": "m1",
+      "type": "underline",
+      "from": [
+        29.51,
+        9.33
+      ],
+      "to": [
+        69.44,
+        9.33
+      ]
+    },
+    {
+      "id": "m2",
+      "type": "ellipse",
+      "x": 91.67,
+      "y": 0.11,
+      "w": 3.06,
+      "h": 4.45
+    },
+    {
+      "id": "a2",
+      "type": "arrow",
+      "from": [
+        92.17,
+        9.35
+      ],
+      "to": [
+        92.73,
+        5.53
+      ]
+    }
+  ],
+  "notes": [
+    {
+      "text": "Grey hint, then write",
+      "x": 38.89,
+      "y": 15.56,
+      "mark": "m1"
+    },
+    {
+      "text": "Send to agent",
+      "x": 97.22,
+      "y": 14.44,
+      "mark": "a2",
+      "align": "right"
+    }
+  ]
+}

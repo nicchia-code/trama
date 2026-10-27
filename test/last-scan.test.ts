@@ -1,18 +1,18 @@
 import { afterEach, expect, test } from "bun:test";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readLastScan, writeLastScan } from "../src/core/last-scan";
 import { buildSnapshot } from "../src/core/snapshot";
 import { projectAt } from "../src/core/store";
 import { moveTask, newTask } from "../src/core/work";
+import { copyShop } from "./shop-project";
 
 const dir = mkdtempSync(join(tmpdir(), "trama-last-scan-"));
-const example = join(import.meta.dir, "../examples/shop");
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 test("initializes an ignored timestamp, repairs invalid data, and atomically replaces it", () => {
-  cpSync(example, dir, { recursive: true });
+  copyShop(dir);
   rmSync(join(dir, ".trama", "last-scan"), { recursive: true, force: true });
   const p = projectAt(dir);
   const path = join(p.dir, "last-scan/system");
@@ -29,7 +29,7 @@ test("initializes an ignored timestamp, repairs invalid data, and atomically rep
 });
 
 test("reads a last-scan record saved with CRLF line endings as the same instant", () => {
-  cpSync(example, dir, { recursive: true });
+  copyShop(dir);
   const p = projectAt(dir);
   mkdirSync(join(p.dir, "last-scan"), { recursive: true });
   writeFileSync(join(p.dir, "last-scan/system"), "2026-10-03T10:00:00.000Z\r\n");
@@ -37,7 +37,7 @@ test("reads a last-scan record saved with CRLF line endings as the same instant"
 });
 
 test("counts only currently Done Tasks finished strictly after the remembered scan", () => {
-  cpSync(example, dir, { recursive: true });
+  copyShop(dir);
   const p = projectAt(dir);
   const scan = "2026-10-01T10:00:00.000Z";
   writeLastScan(p, scan);

@@ -1,6 +1,6 @@
 import { FIX_OPTIONS } from "./fix-options";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli/main";
@@ -11,6 +11,7 @@ import { loadModel, type Project, projectAt } from "../src/core/store";
 import { type CardKind, syncShortNumbers } from "../src/core/short-numbers";
 import { declareProgress, type Drift, driftOptions, driftSides, getDrift, getTask, listDrifts, listTasks, moveTask, newDrift, newTask, releaseTasks, resolveDrift } from "../src/core/work";
 import { coverWithTask } from "./cover";
+import { copyShop } from "./shop-project";
 
 /** The fields of a Drift filed from the command line, as its input takes them. */
 const NEW_DRIFT = { title: "Cli", where: "src/refund.ts", refs: ["order"], happens: "Code does it.", should: "Model says so.", options: FIX_OPTIONS };
@@ -24,7 +25,7 @@ let p: Project;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "trama-"));
-  cpSync(join(import.meta.dir, "../examples/shop"), dir, { recursive: true });
+  copyShop(dir);
   p = projectAt(dir);
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));

@@ -18,6 +18,9 @@ bun run build            # dist/trama, a single binary
 bun run build:extension  # extension/dist/{host,webview}.js
 bun run harness          # extension/dist/harness.html: the webview in a plain browser, demo data
 bun run package          # a .vsix per platform (linux-x64, darwin-arm64, win32-x64) with the CLI inside
+bun run site:dev        # the website (site/, Astro): copies the docs images, then serves with live reload
+bun run site:build      # the same, then the website into site/dist/ (not committed)
+bun run site:screenshots # builds the extension and the trama binary, launches a pinned VS Code (Playwright, @vscode/test-electron) with a stand-in omp and takes every screenshot of the guide, light and dark, into site/public/screenshots/ (scenes in scripts/screenshots/scenes.ts; `bun run site:screenshots <scene> --theme light --skip-build --trace <folder>` to work on one): run it when the extension's interface changes, and commit the images
 ```
 
 If the shell was launched as a Trama agent, use `env -u TRAMA_AGENT bun test`: the isolated test fixtures exercise developer-only commands as well.
@@ -39,6 +42,7 @@ To run the extension, open `extension/` in VS Code and press F5 after `bun run b
 - `extension/`: the VS Code extension.
 - `skills/`: the agent skills `trama project new` installs.
 - `docs/`: [file format](./docs/model-format.md), [CLI](./docs/cli.md), [decisions](./docs/adr).
+- `site/`: the [website](https://nicchia-code.github.io/trama/): the landing page, the guide (`site/src/content/guide/`, one Markdown file per page). The guide changes with any behaviour it describes. `.github/workflows/pages.yml` publishes it on every push to `main` that touches the site, `docs/images/` or the extension's settings (`extension/package.json`).
 
 Read [CONTEXT.md](./CONTEXT.md) first: Trama's words (Model, Machine, Proposal, Drift…) have precise meanings, used the same way in code, docs and skills.
 

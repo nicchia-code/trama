@@ -1,0 +1,17 @@
+---
+import Base from "../layouts/Base.astro";
+import { withBase } from "../lib/links";
+
+const base = import.meta.env.BASE_URL;
+---
+
+<Base title="Page not found">
+  <section class="container not-found">
+    <h1>Page not found</h1>
+    <p>This page does not exist on the Trama site.</p>
+    <p class="button-row">
+      <a class="button button-primary" href={withBase(base, "")}>Back to the home page</a>
+      <a class="button button-secondary" href={withBase(base, "guide/")}>Open the guide</a>
+    </p>
+  </section>
+</Base>

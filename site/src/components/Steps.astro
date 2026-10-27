@@ -1,0 +1,134 @@
+---
+import { withBase } from "../lib/links";
+
+// The loop of Trama in five steps: one section each, with a short text and the real panel's view that shows it. Each
+// section animates once when it first enters the screen (`reveal.ts` adds the class `in-view`); the sample card on top
+// of each view only shows the step happening, so it is hidden from assistive technology.
+const base = import.meta.env.BASE_URL;
+const steps = [
+  {
+    id: "describe",
+    title: "Describe a change",
+    text: "Say what you want in plain words, as you'd tell a colleague. The request lands on the Board, ready for the agent.",
+    image: "docs-images/board.png",
+    width: 2880,
+    height: 1800,
+    alt: "The Trama Board in VS Code, with the Backlog, the active Tasks and the Add Work Item button",
+  },
+  {
+    id: "answer",
+    title: "Answer the agent's questions",
+    text: "Only what it can't decide alone, with its recommendation already selected. Pick an option, or say something else.",
+    image: "docs-images/questions.png",
+    width: 1920,
+    height: 1122,
+    alt: "The Questions from the agent dialog: three options for one question, the recommended one selected",
+  },
+  {
+    id: "approve",
+    title: "Approve the Proposal",
+    text: "The change drawn on the map, with every decision and assumption beside it. Nothing is built until you approve.",
+    image: "docs-images/proposal.png",
+    width: 2880,
+    height: 1920,
+    alt: "A Proposal drawn on the diagram: the new and changed states in blue, and its list of changes in the side panel",
+  },
+  {
+    id: "run",
+    title: "Run the Tasks",
+    text: "The agent builds what you approved, one Task at a time or all together, while you follow along on the Board.",
+    image: "docs-images/diagram.png",
+    width: 2880,
+    height: 1200,
+    alt: "The diagram of one Feature: its states, the events between them and the details of the selected state",
+  },
+  {
+    id: "resolve",
+    title: "Resolve the Drifts",
+    text: "When the code and the map stop telling the same story, Trama raises a Drift. Fix the code, or keep it and update the map: you decide which one is right.",
+    image: "docs-images/drift.png",
+    width: 1392,
+    height: 736,
+    alt: "A Drift dialog: what happens in the code, what should happen according to the Model, and the Ask more and Close buttons",
+  },
+];
+---
+
+<section class="steps" aria-labelledby="loop-title">
+  <div class="container">
+    <h2 id="loop-title" class="section-title">The loop, in five steps</h2>
+    <p class="section-lead">From a sentence to running code, with you deciding at every turn.</p>
+  </div>
+  <ol class="step-list">
+    {
+      steps.map((step, i) => (
+        <li class="step" data-reveal data-step={step.id}>
+          <div class="container step-grid">
+            <div class="step-text reveal-text">
+              <p class="step-number" aria-hidden="true">{i + 1}</p>
+              <h3>
+                <span class="sr-only">Step {i + 1}: </span>{step.title}
+              </h3>
+              <p>{step.text}</p>
+            </div>
+            <figure class="step-view reveal-view">
+              <img
+                src={withBase(base, step.image)}
+                width={step.width}
+                height={step.height}
+                alt={step.alt}
+                loading="lazy"
+                decoding="async"
+              />
+              <div class="happening" aria-hidden="true">
+                {step.id === "describe" && (
+                  <div class="happening-card happening-describe">
+                    <p class="happening-label">New request</p>
+                    <p class="happening-typed">Customers may send a shipped order back.</p>
+                    <p class="happening-arrived">Proposal · Returns after shipping</p>
+                  </div>
+                )}
+                {step.id === "answer" && (
+                  <div class="happening-card happening-answer">
+                    <p class="happening-label">Your answer</p>
+                    <p class="happening-choice">
+                      <span class="happening-check">✓</span> Within 30 days <span class="happening-tag">recommended</span>
+                    </p>
+                  </div>
+                )}
+                {step.id === "approve" && (
+                  <div class="happening-card happening-approve">
+                    <p class="happening-label">Proposal</p>
+                    <p class="happening-approve-row">
+                      <span class="happening-button">Approve</span>
+                      <span class="happening-approved">Approved ✓</span>
+                    </p>
+                  </div>
+                )}
+                {step.id === "run" && (
+                  <div class="happening-card happening-run">
+                    <p class="happening-label">Running 3 Tasks</p>
+                    <div class="happening-bar"><span></span></div>
+                    <p class="happening-small">Task 3 of 3 · Returns after shipping</p>
+                  </div>
+                )}
+                {step.id === "resolve" && (
+                  <div class="happening-card happening-resolve">
+                    <p class="happening-label happening-label-alert">Drift</p>
+                    <p class="happening-small">The code and the map disagree: you choose which is right.</p>
+                  </div>
+                )}
+              </div>
+            </figure>
+          </div>
+        </li>
+      ))
+    }
+  </ol>
+</section>
+
+<script>
+  import { revealOnScroll } from "../scripts/reveal";
+
+  revealOnScroll(document.querySelectorAll<HTMLElement>("[data-reveal]"));
+</script>

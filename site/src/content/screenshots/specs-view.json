@@ -1,0 +1,62 @@
+{
+  "marks": [
+    {
+      "id": "m1",
+      "type": "rectangle",
+      "x": 26.46,
+      "y": 14.33,
+      "w": 8.75,
+      "h": 3.56
+    },
+    {
+      "id": "a1",
+      "type": "arrow",
+      "from": [
+        55.0,
+        17.9
+      ],
+      "to": [
+        35.83,
+        16.48
+      ]
+    },
+    {
+      "id": "m2",
+      "type": "underline",
+      "from": [
+        26.25,
+        35.33
+      ],
+      "to": [
+        35.56,
+        35.33
+      ]
+    },
+    {
+      "id": "a2",
+      "type": "arrow",
+      "from": [
+        55.0,
+        37.78
+      ],
+      "to": [
+        34.8,
+        35.73
+      ]
+    }
+  ],
+  "notes": [
+    {
+      "text": "A technology, with its version",
+      "x": 55.56,
+      "y": 18.89,
+      "mark": "a1"
+    },
+    {
+      "text": "A field with its entries",
+      "x": 55.56,
+      "y": 38.89,
+      "mark": "a2"
+    }
+  ]
+}

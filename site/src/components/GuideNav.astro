@@ -1,0 +1,55 @@
+---
+import type { GuideSection } from "../lib/guide";
+import { CLI_REFERENCE, MODEL_FORMAT, withBase } from "../lib/links";
+
+interface Props {
+  nav: GuideSection[];
+  /** The id of the page being read, to mark it as the current one. */
+  currentId?: string;
+  /** Distinguishes the two copies of the nav on one page (the sidebar and the menu of narrow screens). */
+  label: string;
+}
+const { nav, currentId, label } = Astro.props;
+const base = import.meta.env.BASE_URL;
+const reference = [
+  { title: "Command line reference", href: CLI_REFERENCE },
+  { title: "Model file format", href: MODEL_FORMAT },
+];
+---
+
+<nav class="guide-nav" aria-label={label}>
+  {
+    nav.map((section) => (
+      <div class="guide-nav-group">
+        <p class="guide-nav-title">{section.title}</p>
+        <ul>
+          {section.pages.map((page) => (
+            <li>
+              <a href={withBase(base, `guide/${page.id}/`)} aria-current={page.id === currentId ? "page" : undefined}>
+                {page.title}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    ))
+  }
+  <div class="guide-nav-group">
+    <p class="guide-nav-title">Reference</p>
+    <ul>
+      {
+        reference.map((link) => (
+          <li>
+            <a class="external-link" href={link.href}>
+              {link.title}
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                <path d="M7 17 17 7M8 7h9v9"></path>
+              </svg>
+              <span class="sr-only"> (external link, opens GitHub)</span>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</nav>

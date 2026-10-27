@@ -1,0 +1,58 @@
+{
+  "marks": [
+    {
+      "id": "m1",
+      "type": "rectangle",
+      "x": 27.08,
+      "y": 21.11,
+      "w": 70.0,
+      "h": 16.56
+    },
+    {
+      "id": "a1",
+      "type": "arrow",
+      "from": [
+        47.87,
+        44.17
+      ],
+      "to": [
+        53.6,
+        38.21
+      ]
+    },
+    {
+      "id": "m2",
+      "type": "rectangle",
+      "x": 91.04,
+      "y": 32.22,
+      "w": 4.86,
+      "h": 3.89
+    },
+    {
+      "id": "a2",
+      "type": "arrow",
+      "from": [
+        90.68,
+        41.67
+      ],
+      "to": [
+        92.43,
+        36.97
+      ]
+    }
+  ],
+  "notes": [
+    {
+      "text": "Level, skills, capacity, absences",
+      "x": 29.17,
+      "y": 48.89,
+      "mark": "a1"
+    },
+    {
+      "text": "Actions on each person",
+      "x": 79.17,
+      "y": 46.67,
+      "mark": "a2"
+    }
+  ]
+}

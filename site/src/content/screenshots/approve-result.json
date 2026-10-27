@@ -1,0 +1,89 @@
+{
+  "marks": [
+    {
+      "id": "m1",
+      "type": "underline",
+      "from": [
+        62.29,
+        16.33
+      ],
+      "to": [
+        72.01,
+        16.33
+      ]
+    },
+    {
+      "id": "a1",
+      "type": "arrow",
+      "from": [
+        51.02,
+        17.2
+      ],
+      "to": [
+        61.67,
+        16.63
+      ]
+    },
+    {
+      "id": "m2",
+      "type": "rectangle",
+      "x": 84.44,
+      "y": 16.33,
+      "w": 5.14,
+      "h": 4.22
+    },
+    {
+      "id": "a2",
+      "type": "arrow",
+      "from": [
+        86.13,
+        24.9
+      ],
+      "to": [
+        86.59,
+        21.53
+      ]
+    },
+    {
+      "id": "m3",
+      "type": "rectangle",
+      "x": 60.97,
+      "y": 90.56,
+      "w": 34.24,
+      "h": 4.22
+    },
+    {
+      "id": "a3",
+      "type": "arrow",
+      "from": [
+        77.44,
+        86.22
+      ],
+      "to": [
+        77.78,
+        89.57
+      ]
+    }
+  ],
+  "notes": [
+    {
+      "text": "The Task, waiting to run",
+      "x": 29.86,
+      "y": 17.78,
+      "mark": "a1"
+    },
+    {
+      "text": "Run builds this Task",
+      "x": 94.44,
+      "y": 30.0,
+      "mark": "a2",
+      "align": "right"
+    },
+    {
+      "text": "Run all builds every Task",
+      "x": 65.97,
+      "y": 81.11,
+      "mark": "a3"
+    }
+  ]
+}

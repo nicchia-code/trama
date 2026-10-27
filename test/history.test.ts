@@ -1,18 +1,19 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli/main";
 import { addHistory, getHistory, listHistory, updateHistory } from "../src/core/history";
 import { buildSnapshot } from "../src/core/snapshot";
 import { type Project, projectAt } from "../src/core/store";
+import { copyShop } from "./shop-project";
 
 let dir: string;
 let p: Project;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "trama-history-"));
-  cpSync(join(import.meta.dir, "../examples/shop"), dir, { recursive: true });
+  copyShop(dir);
   p = projectAt(dir);
   writeCard("tasks", "bbbbbbbb-done.md", "column: done\ntechnical: true\nrefs: []\nfinished: 2020-06-01T00:00:00.000Z", "# Done\n\nFinished.\n");
   writeCard("tasks", "cccccccc-todo.md", "column: todo\ntechnical: true\nrefs: []", "# Todo\n\nNot yet.\n");

@@ -1,0 +1,21 @@
+---
+import "../styles/shots.css";
+import Screenshot from "./Screenshot.astro";
+import { STEP_TITLE_CLASS } from "../lib/screenshots";
+
+// A step of a guide page: its number in a circle (the stylesheet counts the steps of the page), its short title, one or two
+// sentences (the slot) and its annotated screenshot below, as wide as the text column.
+interface Props {
+  title: string;
+  scene: string;
+  alt: string;
+  eager?: boolean;
+}
+const { title, scene, alt, eager } = Astro.props;
+---
+
+<section class="guide-step">
+  <h3 class={STEP_TITLE_CLASS}>{title}</h3>
+  <div class="guide-step-text"><slot /></div>
+  <Screenshot scene={scene} alt={alt} eager={eager} />
+</section>

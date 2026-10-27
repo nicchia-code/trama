@@ -94,5 +94,6 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Timeline and signals** (`timeline.md`): Use when building how Trama reads published issues from GitHub, the signals, load and capacity, the Timeline tab, Comment update and the Scan of a closed issue. Sections: `issue/Published`.
 - **Attesa di fine turno** (`turn-wait.md`): Usa per l'attesa di fine turno delle schede appena consegnate sulla Board. Sections: `panel/Board`.
 - **Unify Drifts technology** (`unify-drifts.md`): Usa quando lavori al codice di Unify Drifts: voce disabilitabile del pulsante diviso, messaggio e lancio dall'host, file di istruzioni inline, lavoro di unificazione e `trama drift new` con `unifies`. Sections: `developer.UNIFY_DRIFTS`, `agent.UNIFY_DRIFTS`.
+- **Website** (`website.md`): Use when building or deploying the website in site/, its annotated screenshots or the script that takes them. Sections: `website`.
 - **Tecnologia dei Task** (`work.md`): Usa quando lavori sui Task. Sections: `task`.
 - **Avviso di yolo** (`yolo-notice.md`): Usa quando implementi l'avviso, mostrato una volta, che omp Chat esegue i comandi senza chiedere (yolo). Sections: `omp-chat-conversation/Agent running`.

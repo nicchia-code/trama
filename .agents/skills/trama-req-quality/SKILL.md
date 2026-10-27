@@ -27,3 +27,4 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Raffinamento delle Proposal obsolete** (`raffinamento.md`): Usa per sicurezza, affidabilità e collaudo di Auto-update Stale Proposals. Sections: `raffinamento`.
 - **System certificates** (`system-certificates.md`): Use when work on System Certificates or on certificate error messages touches security, privacy, reliability or accessibility. Sections: `developer.REFRESH_SYSTEM_CERTIFICATES`.
 - **Team** (`team.md`): Use when the work touches the privacy of the people of the Manager's team or the accessibility of the Team view. Sections: `person`.
+- **Website** (`website.md`): Use when the work on the website touches performance, accessibility, privacy or reduced motion. Sections: `website`.

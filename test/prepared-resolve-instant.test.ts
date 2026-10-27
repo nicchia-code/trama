@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeEach, expect, mock, test } from "bun:test";
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { editDrift, type PreparedQuestion, preparedOutcome, preparedStatus } from "../src/core/prepared";
@@ -9,6 +9,7 @@ import type { QuestionRequest, QuestionResult } from "../src/core/questions";
 import { type Project, projectAt } from "../src/core/store";
 import { getDrift, newDrift } from "../src/core/work";
 import { FIX_OPTIONS } from "./fix-options";
+import { copyShop } from "./shop-project";
 
 let asyncResolver = true;
 const messages: string[] = [];
@@ -29,13 +30,14 @@ mock.module("vscode", () => ({
 }));
 const { Controller } = await import("../extension/src/host/controller");
 const { driftWork, localProjectJobs } = await import("../extension/src/host/drift-resolution");
+const { setOmpLauncher } = await import("../extension/src/host/omp-launch");
 
 let dir: string;
 let p: Project;
 beforeEach(() => {
   asyncResolver = true;
   dir = mkdtempSync(join(tmpdir(), "trama-instant-"));
-  cpSync(join(import.meta.dir, "../examples/shop"), dir, { recursive: true });
+  copyShop(dir);
   p = projectAt(dir);
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
@@ -183,10 +185,22 @@ test("with the setting off Resolve does not open the prepared question", async (
   const d = preparedDrift();
   asyncResolver = false;
   let asked = false;
+  // The agent's launch starts by finding omp and checking for an update (a child process and the network): the test does not run it, it only sees that the launch is reached.
+  // `setOmpLauncher` is loaded after the `vscode` mock, at the top of the file.
+  let launches = 0;
+  setOmpLauncher(async () => {
+    launches++;
+    return undefined;
+  });
   const { controller, internals } = controllerAnswering(async () => { asked = true; return answered(d.id, ["Keep"]); });
-  await internals.launchAction(p, { kind: "resolve-drifts", drift: d.id }).catch(() => undefined);
-  expect(asked).toBe(false);
-  controller.dispose();
+  try {
+    await internals.launchAction(p, { kind: "resolve-drifts", drift: d.id }).catch(() => undefined);
+    expect(asked).toBe(false);
+    expect(launches).toBe(1);
+  } finally {
+    setOmpLauncher();
+    controller.dispose();
+  }
 });
 
 test("while a prepared job is open, Run, Run all and Resolve on other Drifts are blocked with the resolving reason", async () => {

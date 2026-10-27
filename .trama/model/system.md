@@ -7,3 +7,5 @@ Il Modello e i Requisiti sono file del progetto. Le modifiche vengono proposte e
 A developer who leads a team can turn on Manager mode and become its Manager: Trama then also keeps, in his editor, the people of the team, so that work can be planned for them as well as for the agent (see Team).
 
 Trama is used from two surfaces that share one behaviour: a command line, which is how the agent reaches Trama, and the editor extension.
+
+Trama also has a website, the documentation site on GitHub Pages, where a visitor reads the guide, illustrated with screenshots of the editor extension annotated with hand-drawn arrows and notes (see Website).

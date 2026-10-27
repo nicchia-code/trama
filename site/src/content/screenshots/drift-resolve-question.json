@@ -1,0 +1,63 @@
+{
+  "marks": [
+    {
+      "id": "m1",
+      "type": "rectangle",
+      "x": 48.47,
+      "y": 37.33,
+      "w": 43.89,
+      "h": 10.0
+    },
+    {
+      "id": "a1",
+      "type": "arrow",
+      "from": [
+        45.92,
+        42.25
+      ],
+      "to": [
+        47.85,
+        42.25
+      ]
+    },
+    {
+      "id": "m2",
+      "type": "rectangle",
+      "x": 48.47,
+      "y": 56.0,
+      "w": 43.89,
+      "h": 9.78
+    },
+    {
+      "id": "m3",
+      "type": "rectangle",
+      "x": 86.74,
+      "y": 75.56,
+      "w": 5.62,
+      "h": 4.67
+    }
+  ],
+  "notes": [
+    {
+      "text": "Recommended",
+      "x": 32.99,
+      "y": 42.22,
+      "mark": "a1",
+      "busy": true
+    },
+    {
+      "text": "Dismiss the Drift",
+      "x": 32.99,
+      "y": 61.11,
+      "mark": "m2",
+      "busy": true
+    },
+    {
+      "text": "Review, then Send",
+      "x": 72.92,
+      "y": 87.78,
+      "mark": "m3",
+      "busy": true
+    }
+  ]
+}

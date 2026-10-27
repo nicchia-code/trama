@@ -1,0 +1,84 @@
+{
+  "marks": [
+    {
+      "id": "m1",
+      "type": "ellipse",
+      "x": 0.07,
+      "y": 24.11,
+      "w": 3.81,
+      "h": 6.55
+    },
+    {
+      "id": "a1",
+      "type": "arrow",
+      "from": [
+        28.61,
+        27.34
+      ],
+      "to": [
+        4.5,
+        27.38
+      ]
+    },
+    {
+      "id": "m2",
+      "type": "rectangle",
+      "x": 3.68,
+      "y": 4.56,
+      "w": 20.14,
+      "h": 4.44
+    },
+    {
+      "id": "a2",
+      "type": "arrow",
+      "from": [
+        28.62,
+        10.39
+      ],
+      "to": [
+        23.5,
+        9.15
+      ]
+    },
+    {
+      "id": "m3",
+      "type": "rectangle",
+      "x": 3.68,
+      "y": 90.89,
+      "w": 20.14,
+      "h": 4.44
+    },
+    {
+      "id": "a3",
+      "type": "arrow",
+      "from": [
+        28.61,
+        90.67
+      ],
+      "to": [
+        24.44,
+        91.36
+      ]
+    }
+  ],
+  "notes": [
+    {
+      "text": "The Trama icon",
+      "x": 29.17,
+      "y": 27.33,
+      "mark": "a1"
+    },
+    {
+      "text": "Get Started puts Trama in this folder",
+      "x": 29.17,
+      "y": 14.44,
+      "mark": "a2"
+    },
+    {
+      "text": "Settings: omp and models",
+      "x": 29.17,
+      "y": 88.89,
+      "mark": "a3"
+    }
+  ]
+}

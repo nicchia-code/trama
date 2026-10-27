@@ -1,0 +1,47 @@
+---
+// Every setting of the extension, built at build time from `contributes.configuration` of `extension/package.json`
+// (the text the editor shows), in the groups of the Settings tab, so this page never disagrees with the editor.
+import manifest from "../../../extension/package.json";
+import { describeSettings, renderInlineMarkdown, settingAnchor } from "../lib/settings";
+
+const groups = describeSettings(manifest);
+---
+
+<div class="settings-list">
+  {
+    groups.map((group) => (
+      <section class="settings-group">
+        <h2 id={settingAnchor(group.title)}>{group.title}</h2>
+        {group.sections.map((section) => {
+          const Heading = section.title ? "h4" : "h3";
+          return (
+            <>
+              {section.title && <h3 id={settingAnchor(section.title)}>{section.title}</h3>}
+              {section.settings.map((setting) => (
+                <article class="setting" id={setting.key}>
+                  <Heading>
+                    <a class="anchor" href={`#${setting.key}`}>{setting.title}</a>
+                  </Heading>
+                  <p class="setting-key">
+                    <code>{setting.key}</code> · {setting.kind} · default: {setting.defaultText === "empty" ? <em>empty</em> : <code>{setting.defaultText}</code>}
+                  </p>
+                  <p set:html={renderInlineMarkdown(setting.description)} />
+                  {setting.options.length > 0 && (
+                    <ul class="setting-options">
+                      {setting.options.map((option) => (
+                        <li>
+                          <code>{option.value}</code>
+                          {option.description && <span> — {option.description}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </article>
+              ))}
+            </>
+          );
+        })}
+      </section>
+    ))
+  }
+</div>

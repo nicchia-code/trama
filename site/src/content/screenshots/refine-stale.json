@@ -1,0 +1,59 @@
+{
+  "marks": [
+    {
+      "id": "m1",
+      "type": "rectangle",
+      "x": 31.53,
+      "y": 11.11,
+      "w": 4.79,
+      "h": 3.11
+    },
+    {
+      "id": "a1",
+      "type": "arrow",
+      "from": [
+        38.34,
+        13.45
+      ],
+      "to": [
+        36.94,
+        13.2
+      ]
+    },
+    {
+      "id": "m2",
+      "type": "rectangle",
+      "x": 37.29,
+      "y": 22.56,
+      "w": 7.15,
+      "h": 4.11
+    },
+    {
+      "id": "a2",
+      "type": "arrow",
+      "from": [
+        40.86,
+        32.66
+      ],
+      "to": [
+        40.87,
+        27.67
+      ]
+    }
+  ],
+  "notes": [
+    {
+      "text": "Stale: to refine",
+      "x": 38.89,
+      "y": 15.0,
+      "mark": "a1",
+      "busy": true
+    },
+    {
+      "text": "Approve refines it first",
+      "x": 30.56,
+      "y": 37.78,
+      "mark": "a2"
+    }
+  ]
+}

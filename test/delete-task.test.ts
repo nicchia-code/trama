@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli/main";
@@ -12,6 +12,7 @@ import { buildSnapshot } from "../src/core/snapshot";
 import { type Project, projectAt } from "../src/core/store";
 import { blockedTasks, getDrift, getTaskOrNull, listDrifts, listTasks, moveTask, newDrift, newTask, resolveDrift } from "../src/core/work";
 import { FIX_OPTIONS } from "./fix-options";
+import { copyShop } from "./shop-project";
 
 let dir: string;
 let p: Project;
@@ -20,7 +21,7 @@ const SCAN = "2026-10-01T10:00:00.000Z";
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "trama-delete-task-"));
-  cpSync(join(import.meta.dir, "../examples/shop"), dir, { recursive: true });
+  copyShop(dir);
   p = projectAt(dir);
   writeLastScan(p, SCAN);
 });
