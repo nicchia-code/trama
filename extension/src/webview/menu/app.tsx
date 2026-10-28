@@ -21,11 +21,13 @@ const ICONS: Record<MenuViewName, LucideIcon> = {
 function Entry({ view, state, post }: { view: MenuViewName; state: MenuState; post: (message: ToMenuHost) => void }) {
   const Icon = ICONS[view];
   const shown = state.panelView === view;
-  const awaiting = view === "board" ? state.decisions : view === "team" ? (state.handoffs ?? 0) : 0;
+  // The number of handoffs is the Manager's: with Manager mode off the entry has none, whatever the state carries.
+  const handoffs = state.manager === true ? (state.handoffs ?? 0) : 0;
+  const awaiting = view === "board" ? state.decisions : view === "team" ? handoffs : 0;
   return (
     <Button
       variant="ghost"
-      aria-label={entryName(view, state.decisions, state.handoffs ?? 0)}
+      aria-label={entryName(view, state.decisions, handoffs)}
       aria-current={shown ? "page" : undefined}
       className={cn("w-full justify-start @max-[56px]:justify-center aria-[current=page]:bg-accent aria-[current=page]:text-accent-foreground")}
       onClick={() => post({ type: "show", view })}
@@ -106,21 +108,23 @@ function Bottom({ state, post }: { state: MenuState; post: (message: ToMenuHost)
 export function MenuApp({ state, post }: { state: MenuState | null; post: (message: ToMenuHost) => void }) {
   if (state === null) return <div />;
   return (
-    <nav aria-label="Trama" className="@container flex h-full min-h-0 flex-col gap-1 p-2">
-      {state.situation === "noFolder" ? (
-        <>
-          <p className="px-2 py-1 text-sm text-muted-foreground @max-[56px]:hidden">Open a folder to use Trama.</p>
-          <Button aria-label="Open Folder" className="w-full justify-start @max-[56px]:justify-center" onClick={() => post({ type: "openFolder" })}>
-            <FolderOpen aria-hidden="true" focusable="false" className="size-4" />
-            <span className="@max-[56px]:hidden">Open Folder</span>
-          </Button>
-        </>
-      ) : state.situation === "notProject" ? (
-        <Entry view="getstarted" state={state} post={post} />
-      ) : (
-        projectEntries(state).map((view) => <Entry key={view} view={view} state={state} post={post} />)
-      )}
-      <Bottom state={state} post={post} />
+    <nav aria-label="Trama" className="@container h-full min-h-0">
+      <div className="flex h-full min-h-0 flex-col gap-1 p-2">
+        {state.situation === "noFolder" ? (
+          <>
+            <p className="px-2 py-1 text-sm text-muted-foreground @max-[56px]:hidden">Open a folder to use Trama.</p>
+            <Button aria-label="Open Folder" className="w-full justify-start @max-[56px]:justify-center" onClick={() => post({ type: "openFolder" })}>
+              <FolderOpen aria-hidden="true" focusable="false" className="size-4" />
+              <span className="@max-[56px]:hidden">Open Folder</span>
+            </Button>
+          </>
+        ) : state.situation === "notProject" ? (
+          <Entry view="getstarted" state={state} post={post} />
+        ) : (
+          projectEntries(state).map((view) => <Entry key={view} view={view} state={state} post={post} />)
+        )}
+        <Bottom state={state} post={post} />
+      </div>
     </nav>
   );
 }

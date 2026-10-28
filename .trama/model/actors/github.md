@@ -1,6 +1,6 @@
 # GitHub
 
-The project's repository and its linked GitHub Project, as Trama sees them when it reads them through the GitHub command line (see the GitHub project). The people of the team work there; Trama only reads. Every Event is what a read finds changed since the read before, for an issue Trama published: an Event is not seen at the moment it happens on GitHub, but at the next read.
+The project's repository and its linked GitHub Project, as Trama sees them when it reads them through the GitHub command line (see the GitHub project and the PR Check). The people of the team work there; Trama only reads. Every Event is what a read finds changed since the read before, for an issue Trama published or for a pull request with a report of the PR Check: an Event is not seen at the moment it happens on GitHub, but at the next read.
 
 ## Events
 
@@ -24,3 +24,6 @@ The issue was closed as not planned.
 
 ### ISSUE_REOPENED
 A closed issue was reopened.
+
+### PULL_REQUEST_GONE
+A pull request with a report of the PR Check is no longer among the open pull requests that are ready for review: it was merged, closed or turned back into a draft.

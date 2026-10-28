@@ -11,8 +11,8 @@ import { type ShortNumbers, syncShortNumbers } from "../core/short-numbers";
 import { formatDiagnostic } from "../core/model";
 import { type Blocker, concernSameThing } from "../core/blocking";
 import { TramaError, UsageError } from "../core/errors";
-import { attachedDrift, BATCH_DEFAULT, blockedTasks, closedUnchanged, COLUMNS, type Drift, driftBody, driftCandidates, driftOptions, driftSides, getTask, listDrifts, listTasks, nextTask, type ProposalFilter, type Task, taskProgress, unifiedCandidates, withoutPrepared } from "../core/work";
-import { type PreparedDecision, preparedFlag, type PreparedStatus, preparedStatus, preparedStatusText, unpreparedDrifts } from "../core/prepared";
+import { attachedDrift, BATCH_DEFAULT, blockedTasks, closedUnchanged, COLUMNS, differenceOf, differenceTitle, differenceViews, type Drift, driftBody, driftCandidates, driftOptions, driftSides, getTask, hasDifferences, listDrifts, listTasks, nextTask, openDifferences, type ProposalFilter, type Task, taskProgress, unifiedCandidates, withoutPrepared } from "../core/work";
+import { type PreparedDecision, preparedFlagOf, preparedRound, type PreparedStatus, preparedStatus, preparedStatusText, unpreparedDrifts } from "../core/prepared";
 import type { Result } from "./result";
 import type { AgentOrigin } from "../core/announcements";
 import { recordTiming } from "../core/timings";
@@ -40,16 +40,19 @@ export function proposalListView(p: Project, all: boolean): Result {
   return { md: `# Proposals\n\n${md}`, json: { proposals: items } };
 }
 
-/** The Drifts a resolution lists, in creation order, each with the decision approving it applies; a Drift resolved another way says so. */
+/** The Drifts a resolution lists, in creation order, each with the decision approving it applies; a Drift resolved another way says so. A unified Drift with differences has a line for each difference the resolution decides, titled with the difference. */
 function resolvedDriftsOf(p: Project, proposal: Proposal) {
-  return listDrifts(p).flatMap((drift) => {
-    const d = proposal.data.drifts.find((x) => x.drift === drift.id);
-    if (!d) return [];
-    const already = drift.data.status === "resolved" && drift.data.resolvedBy !== proposal.id;
-    const option = d.option === undefined ? undefined : driftOptions(drift)[d.option - 1]?.title;
-    const decision = already ? "(already resolved)" : decisionText(d.decision, option);
-    return [{ ...d, title: drift.title, decision, already, ...(already ? { note: undefined } : {}) }];
-  });
+  return listDrifts(p).flatMap((drift) =>
+    proposal.data.drifts
+      .filter((x) => x.drift === drift.id)
+      .map((d) => {
+        const difference = d.difference === undefined ? null : differenceOf(drift, d.difference);
+        const already = difference === null ? drift.data.status === "resolved" && drift.data.resolvedBy !== proposal.id : difference.decision !== null && difference.resolvedBy !== proposal.id;
+        const option = d.option === undefined ? undefined : driftOptions(drift, d.difference)[d.option - 1]?.title;
+        const decision = already ? "(already resolved)" : decisionText(d.decision, option);
+        return { ...d, title: d.difference === undefined ? drift.title : differenceTitle(drift, d.difference), decision, already, ...(already ? { note: undefined } : {}) };
+      }),
+  );
 }
 
 /** An issue of a handoff as `proposal show` lists it: the title, then each field as the Manager left it, with `(changed by the Manager)` on those that have a value in `manager`, the dependencies and the references. */
@@ -112,7 +115,7 @@ export function proposalShowView(p: Project, proposal: Proposal): Result {
     "",
     ...(proposal.tasks.length === 0 ? [] : ["## Tasks", bullets(proposal.tasks.map((t) => `- \`${t.id}\` ${t.title}${t.technical ? " (technical)" : ""}${t.refs.length === 0 ? "" : ` · ${t.refs.map((r) => `\`${r}\``).join(", ")}`}`)), ""]),
     ...(handoff ? ["## Issues", bullets(proposal.issues.map(handoffIssueLine), "_No issues yet._"), ""] : []),
-    ...(proposal.data.kind === "resolution" ? ["Resolves Drifts", bullets(resolvedDrifts.map((r) => `- ${numbers.name("drift", r.drift)} ${r.title}: ${r.decision}${r.note === undefined ? "" : ` · ${r.note}`}`), "_None yet._"), ""] : []),
+    ...(proposal.data.kind === "resolution" ? ["Resolves Drifts", bullets(resolvedDrifts.map((r) => `- ${numbers.name("drift", r.drift)}${r.difference === undefined ? "" : `, difference ${numbers.name("drift", r.difference)}`} ${r.title}: ${r.decision}${r.note === undefined ? "" : ` · ${r.note}`}`), "_None yet._"), ""] : []),
     ...(coverage === null || coverage.removals.length === 0 ? [] : ["## Created on approval", bullets(coverage.removals.map((r) => `- Remove code of \`${r.ref}\`${r.coveredBy === null ? "" : ` → \`${r.coveredBy}\``}`)), ""]),
     ...(coverage === null ? [] : ["## Scope", bullets(coverage.scope.map((e) => `- \`${e.ref}\` (${e.reason}) — ${e.coveredBy}`), "_Nothing to scan._"), ""]),
     ...(handoffScope === null ? [] : ["## Scope", bullets(handoffScope.map((e) => `- \`${e.ref}\` (${e.reason}) — ${e.coveredBy.length === 0 ? "not covered (warning)" : e.coveredBy.map((id) => `\`${id}\``).join(", ")}`), "_Nothing to scan._"), ""]),
@@ -193,7 +196,11 @@ function withCheckNote(task: Task): string {
   return [...lines.slice(0, title + 1), "", "Closed without changes.", "", "## Check note", "", task.data.unchanged, ...lines.slice(title + 1)].join("\n");
 }
 
-const driftSummary = (d: Drift, numbers: ShortNumbers, closed: { task: string; note: string | null } | null) => ({ id: d.id, number: numbers.label("drift", d.id), title: d.title, status: d.data.status, resolution: d.data.resolution, refs: d.data.refs, proposal: d.data.proposal, task: d.data.task, origin: d.data.origin, previous: d.data.previous, unifies: d.data.unifies, unifiedInto: d.data.unifiedInto, merge: d.data.merge, job: d.data.job, closedUnchanged: closed });
+const driftSummary = (d: Drift, numbers: ShortNumbers, closed: { task: string; note: string | null } | null) => ({ id: d.id, number: numbers.label("drift", d.id), title: d.title, status: d.data.status, resolution: d.data.resolution, refs: d.data.refs, proposal: d.data.proposal, task: d.data.task, origin: d.data.origin, previous: d.data.previous, unifies: d.data.unifies, unifiedInto: d.data.unifiedInto, differences: hasDifferences(d) ? { total: d.data.differences.length, open: openDifferences(d).length } : null, merge: d.data.merge, job: d.data.job, closedUnchanged: closed });
+
+/** The mark of a unified Drift in a list: `(unifies 3)`, or, with differences, `(unifies 3, 2 open)`. */
+const unifiesMark = (d: { unifies: readonly string[]; differences: { total: number; open: number } | null }): string =>
+  d.unifies.length === 0 ? "" : d.differences === null ? ` (unifies ${d.unifies.length})` : ` (unifies ${d.unifies.length}, ${d.differences.open} open)`;
 
 function refsBlock(project: ProjectModel, refs: string[], full = false): string {
   return bullets(refs.map((r) => `- \`${r}\`\n${describeRef(project, r, full).split("\n").map((l) => `  > ${l}`).join("\n")}`), "_No references._");
@@ -301,16 +308,55 @@ export function taskGroupsView(p: Project, filter: ProposalFilter = {}, max?: nu
 
 /**
  * The "Prepared question" block of `drift show` and its JSON: the status, the question and each option with its decision, the recommended one marked.
- * No block without the section. An unreadable section shows only its status and counts as absent in the JSON.
+ * No block without the section. An unreadable section shows only its status and counts as absent in the JSON. `heading` names the block, for the question of a difference.
  */
-function preparedBlock(status: PreparedStatus | null, fixOptions: { title: string }[]): { md: string[]; json: { valid: boolean; question: unknown; decisions: unknown } | null } {
+function preparedBlock(status: PreparedStatus | null, fixOptions: { title: string }[], heading = "Prepared question"): { md: string[]; json: { valid: boolean; question: unknown; decisions: unknown } | null } {
   if (status === null) return { md: [], json: null };
-  if (status.state === "unreadable") return { md: ["", "## Prepared question", "", `Status: **${preparedStatusText(status)}**`], json: null };
+  if (status.state === "unreadable") return { md: ["", `## ${heading}`, "", `Status: **${preparedStatusText(status)}**`], json: null };
   const { question, decisions } = status.value;
   const decided = (d: PreparedDecision) => (d.decision === "fix-code" ? `fix the code, option ${d.option}${fixOptions[d.option - 1] ? ` (${fixOptions[d.option - 1]?.title})` : ""}` : d.decision === "proposal" ? "accept the attached Proposal" : "close without changes");
   const options = question.options.flatMap((o, i) => ["", `${i + 1}. **${o.label}**${i === question.recommended ? " (recommended)" : ""} → ${decided(decisions[i] as PreparedDecision)}`, "", `   ${o.description}`]);
-  const md = ["", "## Prepared question", "", `Status: **${preparedStatusText(status)}**`, "", question.question, ...(question.context === undefined ? [] : ["", question.context]), ...options];
+  const md = ["", `## ${heading}`, "", `Status: **${preparedStatusText(status)}**`, "", question.question, ...(question.context === undefined ? [] : ["", question.context]), ...options];
   return { md, json: { valid: status.state === "valid", question, decisions } };
+}
+
+/** The prepared round of a unified Drift with differences for `drift show` and its JSON: the question of each open difference with its status, null in the JSON without any. */
+function preparedRoundBlock(p: Project, drift: Drift, project: ProjectModel, numbers: ShortNumbers): { md: string[]; json: { valid: boolean; questions: unknown[] } | null; status: string | null } {
+  const round = preparedRound(p, drift, project);
+  const present = round.filter((q) => q.status !== null);
+  if (present.length === 0) return { md: [], json: null, status: null };
+  const blocks = round.flatMap((q) => preparedBlock(q.status, driftOptions(drift, q.difference), `Prepared question: difference ${numbers.name("drift", q.difference)} ${differenceTitle(drift, q.difference)}`).md);
+  const valid = round.every((q) => q.status?.state === "valid");
+  const questions = round.map((q) => ({ difference: q.difference, status: q.status === null ? null : preparedStatusText(q.status), ...(preparedBlock(q.status, driftOptions(drift, q.difference)).json ?? { valid: false, question: null, decisions: null }) }));
+  return { md: blocks, json: { valid, questions }, status: valid ? "valid" : `${round.filter((q) => q.status?.state === "valid").length} of ${round.length} open differences have a valid question` };
+}
+
+/** The blocks of the differences of a unified Drift for `drift show`, in order: `Difference <number or identity of its Drift> <title>`, its state, `Linked to …` and, for an open one, its two sides, where in the code, fix options and attached Proposal. */
+function differenceBlocks(p: Project, drift: Drift, numbers: ShortNumbers, taskName: (id: string) => string): string[] {
+  const label = (id: string) => `${numbers.name("drift", id)} ${differenceTitle(drift, id)}`;
+  return differenceViews(drift).flatMap((d) => {
+    const chosen = d.option === null ? undefined : d.options[d.option - 1];
+    const state = d.decision === null ? "open" : d.decision === "fix-code" ? `fix code${chosen ? `: ${chosen.title}` : ""}${d.task ? ` (Task ${taskName(d.task)})` : ""}` : d.decision === "proposal" ? "adapt model" : "dismissed";
+    const numbered = d.options.flatMap((o, i) => ["", `${i + 1}. **${o.title}**${i === 0 ? " (recommended)" : ""}`, "", ...o.text.split("\n").map((l) => (l ? `   ${l}` : l))]);
+    const attached = d.proposal === null ? [] : ["", `Attached Proposal: ${numbers.name("proposal", d.proposal)} (${proposalStatus(p, d.proposal)})`];
+    const sides = d.sides === null ? [] : ["", "### What happens", "", d.sides.happens, "", "### What should happen", "", d.sides.should, ...(d.options.length > 0 ? ["", "### Fix options", ...numbered] : []), ...(d.where === null ? [] : ["", "### Where in the code", "", d.where])];
+    return [
+      "",
+      `Difference ${label(d.drift)}`,
+      state,
+      ...(d.linked.length === 0 ? [] : [`Linked to ${d.linked.map(label).join(", ")}`]),
+      ...(d.open ? [...sides, ...attached] : []),
+    ];
+  });
+}
+
+/** The state of a Proposal for a line of `drift show`; `missing` when it no longer exists. */
+function proposalStatus(p: Project, id: string): string {
+  try {
+    return getProposal(p, id).data.status;
+  } catch {
+    return "missing";
+  }
 }
 
 export function driftShowView(p: Project, drift: Drift): Result {
@@ -323,17 +369,20 @@ export function driftShowView(p: Project, drift: Drift): Result {
   const taskName = (id: string): string => (tasks.some((t) => t.id === id) ? numbers.name("task", id) : `${id} (no longer exists)`);
   const bodyText = driftBody(drift);
   const status = preparedStatus(p, drift, project);
-  const prepared = preparedBlock(status, driftOptions(drift));
+  const round = hasDifferences(drift) ? preparedRoundBlock(p, drift, project, numbers) : null;
+  const prepared = round ?? preparedBlock(status, driftOptions(drift));
   const options = driftOptions(drift);
   const numbered = options.flatMap((o, i) => ["", `${i + 1}. **${o.title}**${i === 0 ? " (recommended)" : ""}`, "", ...o.text.split("\n").map((l) => (l ? `   ${l}` : l))]);
   const chosen = drift.data.option === null ? undefined : options[drift.data.option - 1];
-  const description = sides
-    ? [
-        "## What happens", "", sides.happens, "", "## What should happen", "", sides.should,
-        ...(options.length > 0 ? ["", "## Fix options", ...numbered] : []),
-        ...(sides.where ? ["", "## Where in the code", "", sides.where] : []),
-      ]
-    : ["## Description", "", bodyText];
+  const description = hasDifferences(drift)
+    ? differenceBlocks(p, drift, numbers, taskName)
+    : sides
+      ? [
+          "## What happens", "", sides.happens, "", "## What should happen", "", sides.should,
+          ...(options.length > 0 ? ["", "## Fix options", ...numbered] : []),
+          ...(sides.where ? ["", "## Where in the code", "", sides.where] : []),
+        ]
+      : ["## Description", "", bodyText];
   const decision = [
     ...(drift.data.option !== null ? ["", "## Chosen option", "", `${drift.data.option}${chosen ? `. ${chosen.title}` : ""}`] : []),
     ...(drift.data.note ? ["", "## Note", "", drift.data.note] : []),
@@ -388,7 +437,7 @@ export function driftShowView(p: Project, drift: Drift): Result {
     refsBlock(project, drift.data.refs),
     ...(hasRequirements(project) ? ["", "## Requirements", requirementsBlock(project, drift.data.refs)] : []),
   ].join("\n");
-  return { md, json: { ...driftSummary(drift, numbers, closed), prepared: prepared.json, preparedStatus: status === null ? null : preparedStatusText(status), body: withoutPrepared(drift.body).trim(), happens: sides?.happens ?? null, should: sides?.should ?? null, where: sides?.where ?? null, options, option: drift.data.option, note: drift.data.note, proposalBlock: block, ...resolutionJson } };
+  return { md, json: { ...driftSummary(drift, numbers, closed), differences: differenceViews(drift), prepared: prepared.json, preparedStatus: round !== null ? round.status : status === null ? null : preparedStatusText(status), body: withoutPrepared(drift.body).trim(), happens: sides?.happens ?? null, should: sides?.should ?? null, where: sides?.where ?? null, options, option: drift.data.option, note: drift.data.note, proposalBlock: block, ...resolutionJson } };
 }
 
 export function driftListView(p: Project, all: boolean, refs: string[] = [], filter: { job?: string; unprepared?: boolean } = {}): Result {
@@ -407,22 +456,25 @@ export function driftListView(p: Project, all: boolean, refs: string[] = [], fil
   const drifts = filter.unprepared === true ? unpreparedDrifts(p, concerned) : concerned;
   const tasks = listTasks(p);
   const md = bullets(
-    drifts.map((d) => `- ${numbers.name("drift", d.id)} [${d.data.status}] ${d.title}${d.data.previous.length === 0 ? "" : " (recurring)"}${d.data.merge ? " (merge)" : ""}${d.data.unifies.length === 0 ? "" : ` (unifies ${d.data.unifies.length})`}${d.data.unifiedInto === null ? "" : ` (unified into ${numbers.name("drift", d.data.unifiedInto)})`}${closedUnchanged(p, d, tasks) ? " (dismissed, no changes)" : ""}${d.data.proposal ? ` (Proposal ${numbers.name("proposal", d.data.proposal)})` : ""}`),
+    drifts.map((d) => `- ${numbers.name("drift", d.id)} [${d.data.status}] ${d.title}${d.data.previous.length === 0 ? "" : " (recurring)"}${d.data.merge ? " (merge)" : ""}${unifiesMark(driftSummary(d, numbers, null))}${d.data.unifiedInto === null ? "" : ` (unified into ${numbers.name("drift", d.data.unifiedInto)})`}${closedUnchanged(p, d, tasks) ? " (dismissed, no changes)" : ""}${d.data.proposal ? ` (Proposal ${numbers.name("proposal", d.data.proposal)})` : ""}`),
     "_No Drifts._",
   );
-  return { md: `# Drifts\n\n${md}`, json: { drifts: drifts.map((d) => ({ ...driftSummary(d, numbers, closedUnchanged(p, d, tasks)), prepared: preparedFlag(preparedStatus(p, d, model)) })) } };
+  return { md: `# Drifts\n\n${md}`, json: { drifts: drifts.map((d) => ({ ...driftSummary(d, numbers, closedUnchanged(p, d, tasks)), prepared: preparedFlagOf(p, d, model) })) } };
 }
 
-/** The Tasks a new Drift with these references and this origin would block, by number or identity and title; writes nothing. */
+/**
+ * The Tasks a new Drift with these references and this origin would block, by number or identity and title; writes nothing. With `unifies`, the Tasks
+ * a unified Drift of those Drifts would block: `refs` are those of its differences when the agent already has them, otherwise those of the Drifts, and the origins are theirs.
+ */
 export function driftCandidatesView(p: Project, refs: string[], originArg: string | undefined, unifies?: string[]): Result {
-  if (refs.length === 0) throw new UsageError("Name at least one reference in `refs`");
+  if (unifies === undefined && refs.length === 0) throw new UsageError("Name at least one reference in `refs`");
   const numbers = syncShortNumbers(p);
   let candidates: Task[];
   try {
     candidates =
       unifies === undefined
         ? driftCandidates(p, refs, originArg === undefined ? [] : [getTask(p, originArg, true).id])
-        : unifiedCandidates(p, unifies, refs);
+        : unifiedCandidates(p, unifies, refs.length === 0 ? undefined : refs);
   } catch (error) {
     if (error instanceof TramaError) throw new UsageError(error.message);
     throw error;
@@ -457,7 +509,7 @@ export function boardView(p: Project): Result {
     if (proposal?.data.kind !== "resolution") return "";
     return resolvedDriftsOf(p, proposal)
       .filter((r) => openById.has(r.drift))
-      .map((r) => `\n  - Drift ${numbers.name("drift", r.drift)}: ${r.title} · ${r.decision}${attachedLine(openById.get(r.drift)?.data.proposal ?? null, "    ")}`)
+      .map((r) => `\n  - Drift ${numbers.name("drift", r.drift)}${r.difference === undefined ? "" : `, difference ${numbers.name("drift", r.difference)}`}: ${r.title} · ${r.decision}${attachedLine((r.difference === undefined ? openById.get(r.drift)?.data.proposal : openById.get(r.drift)?.data.differences.find((x) => x.drift === r.difference)?.proposal) ?? null, "    ")}`)
       .join("");
   };
   const blocked = blockedTasks(p);
@@ -492,7 +544,7 @@ export function boardView(p: Project): Result {
       ...proposals.map((i) => `- Proposal ${i.number ?? i.id}${i.stale ? " (stale)" : ""}${i.refining ? " (refining)" : ""}: ${i.title}${resolvesMark(i)}${nestedDrifts(i.id)}`),
       ...drifts.map((d) => {
         const nested = attachedLine(d.proposal, "  ");
-        return `- Drift ${d.number ?? d.id}: ${d.title}${d.previous.length === 0 ? "" : " (recurring)"}${d.merge ? " (merge)" : ""}${d.unifies.length === 0 ? "" : ` (unifies ${d.unifies.length})`}${nested || (d.proposal ? ` (Proposal ${numbers.name("proposal", d.proposal)})` : "")}`;
+        return `- Drift ${d.number ?? d.id}: ${d.title}${d.previous.length === 0 ? "" : " (recurring)"}${d.merge ? " (merge)" : ""}${unifiesMark(d)}${nested || (d.proposal ? ` (Proposal ${numbers.name("proposal", d.proposal)})` : "")}`;
       }),
     ]),
     "",

@@ -2,7 +2,12 @@ import type { Snapshot } from "../../../../src/core/snapshot";
 import type { GitHubIteration, ProjectFields } from "../../../../src/core/github";
 import { absenceDaysIn, capacityIn, estimateField, lacksSprints, lastDayOf, loadIn, numberText, type OpenLoad, sprintsShown, workingDaysOf } from "../../../../src/core/sprints";
 import type { IssueOnGitHub, IssueStatus, SignalKind } from "../../../../src/core/timeline";
-import type { ToWebview } from "../../protocol";
+import type { ReportRow, ReportSection } from "../../../../src/core/pr-check";
+import { resolveRef } from "../../../../src/core/refs";
+import { SPEC_FIELDS } from "../../../../src/core/specs";
+import type { Model } from "../../../../src/core/types";
+import type { PullRequestReportView, PullRequestView, ToWebview } from "../../protocol";
+import { REQUIREMENTS_PREFIX } from "../requirements/logic";
 import {
   type Absence,
   DEFAULT_CAPACITY,
@@ -180,6 +185,27 @@ export function gateOf(github: GitHubMessage | null, picking: boolean): "loading
   if (github.state !== "ready") return null;
   return github.linked === null || picking ? "link" : null;
 }
+
+// ---- the tabs of the view (`ui#panel/Team`) ----
+
+/** The tabs of the Team view, in the order Manager mode shows them. */
+export const TEAM_TABS = ["decisions", "issues", "pull-requests", "timeline", "people"] as const;
+export type TeamTab = (typeof TEAM_TABS)[number];
+
+/** The text of each tab: English whatever `trama.language` says. */
+export const TEAM_TAB_LABELS: Record<TeamTab, string> = { decisions: "Decisions", issues: "Issues", "pull-requests": "Pull Requests", timeline: "Timeline", people: "People" };
+
+/** The tabs the view has: with Manager mode on all of them (`Decisions`, `Issues`, `Pull Requests`, `Timeline`, `People`); with it off only `Pull Requests`. */
+export const teamTabs = (manager: boolean): TeamTab[] => (manager ? [...TEAM_TABS] : ["pull-requests"]);
+
+/** The tab the view shows: the one the developer chose while the view still has it, otherwise its first tab (`Decisions` with Manager mode on, `Pull Requests` with it off). */
+export function shownTab(chosen: string | null, manager: boolean): TeamTab {
+  const tabs = teamTabs(manager);
+  return tabs.find((tab) => tab === chosen) ?? tabs[0] ?? "pull-requests";
+}
+
+/** The title of the box of a failed read without Manager mode, when the view reads only the pull requests: English whatever `trama.language` says. */
+export const PULL_REQUESTS_READ_ERROR_TITLE = "Couldn't read the pull requests";
 
 // ---- Decisions and Issues (`ui#proposal/Open`, `ui#issue`) ----
 
@@ -679,4 +705,157 @@ export function sprintLoadNote(
   const days = loadIn(loads, member.handle, iteration.title).days + own + proposed;
   const capacity = capacityIn(member, iteration);
   return { text: `${firstName(member.name)} has ${numberText(days)} / ${numberText(capacity)} d in this sprint`, over: days > capacity };
+}
+
+// ---- the Pull Requests tab (`ui#pull-request-check`) ----------------------------------------------------------------
+
+/** What the host sent last about the pull requests. */
+export type PullRequestsMessage = Extract<ToWebview, { type: "pullRequests" }>;
+
+/** Under this width each row of the tab becomes a block. */
+export const NARROW_PULL_REQUESTS = 640;
+
+export const PULL_REQUESTS_EMPTY = "No open pull requests ready for review.";
+export const OUTDATED_TOOLTIP = "New commits since this check";
+export const CHECK_RUNNING_REASON = "A PR Check is running";
+export const RUN_IN_PROGRESS_REASON = "A run is in progress";
+export const CANNOT_READ_REASON = "Can't read GitHub";
+
+/** `3 open pull requests ready for review`, `1 open pull request ready for review`. */
+export const pullRequestsSummary = (count: number): string => `${count} open pull ${count === 1 ? "request" : "requests"} ready for review`;
+
+/** The pull requests the highest number first; the order the host sends them in, kept here so the tab does not depend on it. */
+export const orderPullRequests = (items: readonly PullRequestView[]): PullRequestView[] => [...items].sort((a, b) => b.number - a.number);
+
+/** `ada · main ← feature`: the author, then the branch the pull request goes into and its own. */
+export const pullRequestLine = (item: Pick<PullRequestView, "author" | "baseRefName" | "headRefName">): string => `${item.author} · ${branchesLine(item.baseRefName, item.headRefName)}`;
+
+/** How a row says where its pull request is: the look decides the icon and the style, the label is always written, so the state is never told by colour alone. */
+export interface PullRequestStatus {
+  look: "not-checked" | "checking" | "checked";
+  label: string;
+  /** The `Outdated` badge: the pull request has new commits since the report on show. Never while the check runs. */
+  outdated: boolean;
+}
+
+/** The status of a row: `Checking…` while its own PR Check runs, `Checked <time ago>` with a report (outdated or not) and `Not checked` otherwise. */
+export function pullRequestStatus(item: Pick<PullRequestView, "number" | "report">, running: number | null, now: number): PullRequestStatus {
+  if (running === item.number) return { look: "checking", label: "Checking…", outdated: false };
+  if (item.report === null) return { look: "not-checked", label: "Not checked", outdated: false };
+  return { look: "checked", label: `Checked ${timeAgo(item.report.checkedAt, now)}`, outdated: item.report.outdated };
+}
+
+/** Why `Check` is disabled on every row, or null: another PR Check of this window runs, a Run of this window is in progress, or the last read of GitHub failed, in this order. */
+export function checkDisabledReason(message: Pick<PullRequestsMessage, "blocked" | "error">): string | null {
+  if (message.blocked === "running") return CHECK_RUNNING_REASON;
+  if (message.blocked === "run") return RUN_IN_PROGRESS_REASON;
+  return message.error === null ? null : CANNOT_READ_REASON;
+}
+
+/** What a row offers: `stop` in place of `check` while its own PR Check runs; `check` is `Check again` with a report, disabled with `reason` as tooltip; `report` only with a report. */
+export interface PullRequestActions {
+  check: { label: "Check" | "Check again"; reason: string | null } | null;
+  stop: boolean;
+  report: boolean;
+}
+
+export function pullRequestActions(item: Pick<PullRequestView, "number" | "report">, message: Pick<PullRequestsMessage, "running" | "blocked" | "error">): PullRequestActions {
+  const report = item.report !== null;
+  if (message.running === item.number) return { check: null, stop: true, report };
+  return { check: { label: report ? "Check again" : "Check", reason: checkDisabledReason(message) }, stop: false, report };
+}
+
+// ---- the report of a PR Check (`ui#pull-request-report`) ------------------------------------------------------------
+
+/** Under this width each row of the report becomes a block. */
+export const NARROW_REPORT = 640;
+
+/** The sections of a report, in the order they are shown, with their names. */
+export const REPORT_SECTIONS: readonly { id: ReportSection; name: string }[] = [
+  { id: "model", name: "Model" },
+  { id: "model-problems", name: "Model problems" },
+  { id: "code", name: "Code" },
+  { id: "open-work", name: "Open work" },
+];
+
+export const REPORT_OUTDATED = "The pull request has new commits since this check.";
+export const REPORT_EMPTY = "No differences found.";
+/** What an empty cell of the table shows. */
+export const REPORT_NO_VALUE = "–";
+
+/** A section of the table: its rows in the order they came, with its name; the number shown next to the name is `rows.length`. */
+export interface ReportGroup {
+  section: ReportSection;
+  name: string;
+  rows: ReportRow[];
+}
+
+/** The rows grouped by section in the order `Model`, `Model problems`, `Code`, `Open work`; a section with no rows is not there. Within a section the rows keep their order. */
+export function groupReportRows(rows: readonly ReportRow[]): ReportGroup[] {
+  return REPORT_SECTIONS.map(({ id, name }) => ({ section: id, name, rows: rows.filter((row) => row.section === id) })).filter((group) => group.rows.length > 0);
+}
+
+/** The line in the warning colour when the report is outdated (the head of the pull request moved since), else null. */
+export const outdatedNote = (report: Pick<PullRequestReportView, "outdated">): string | null => (report.outdated ? REPORT_OUTDATED : null);
+
+/** `#12 · Refund on cancel`. */
+export const reportTitle = (number: number, title: string): string => `#${number} · ${title}`;
+
+/** The first seven characters of a commit. */
+export const shortCommit = (commit: string): string => commit.slice(0, 7);
+
+/** The date and time a check was made, as the editor's language writes them; `timeZone` is for tests. */
+export function checkedAtText(checkedAt: string, locale?: string, timeZone?: string): string {
+  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short", ...(timeZone === undefined ? {} : { timeZone }) }).format(new Date(checkedAt));
+}
+
+/** `Checked 28 Oct 2026, 10:30 on 1a2b3c4 · Solo`, or `· Collaborative`. */
+export function checkedLine(report: Pick<PullRequestReportView, "checkedAt" | "head" | "variant">, locale?: string, timeZone?: string): string {
+  return `Checked ${checkedAtText(report.checkedAt, locale, timeZone)} on ${shortCommit(report.head)} · ${report.variant === "solo" ? "Solo" : "Collaborative"}`;
+}
+
+/** `main ← feature`: the branch the pull request goes into, then its own. */
+export const branchesLine = (base: string, head: string): string => `${base} ← ${head}`;
+
+/** What a cell of the table shows: its text, or `–` when it is empty. */
+export const reportCell = (value: string | null): string => (value === null || value.trim() === "" ? REPORT_NO_VALUE : value);
+
+const modelOfView = new WeakMap<Snapshot, Model>();
+
+/** The Model of the snapshot as `resolveRef` reads it: the Features, Machines and Actors of the open folder. */
+function modelOf(snapshot: Snapshot): Model {
+  let model = modelOfView.get(snapshot);
+  if (model === undefined) {
+    model = {
+      system: { file: "system.md", name: snapshot.system.name, description: snapshot.system.description },
+      actors: new Map(snapshot.actors.map((actor) => [actor.id, actor])),
+      features: new Map(snapshot.features.map((feature) => [feature.id, feature])),
+      machines: new Map(snapshot.machines.map((machine) => [machine.id, machine])),
+      diagnostics: [],
+    };
+    modelOfView.set(snapshot, model);
+  }
+  return model;
+}
+
+/** Whether a reference of a row exists in the open folder: the Model element, the Area or section of the Requirements, the Specs or its field. Without a snapshot none does. */
+export function referenceExists(snapshot: Snapshot | null, ref: string): boolean {
+  if (snapshot === null) return false;
+  if (ref === "specs") return snapshot.specsPresent;
+  if (ref.startsWith("specs#")) return snapshot.specsPresent && (SPEC_FIELDS as readonly string[]).includes(ref.slice("specs#".length));
+  if (ref.startsWith(REQUIREMENTS_PREFIX)) {
+    const rest = ref.slice(REQUIREMENTS_PREFIX.length);
+    const hash = rest.indexOf("#");
+    const area = snapshot.areas.find((candidate) => candidate.id === (hash < 0 ? rest : rest.slice(0, hash)));
+    if (area === undefined) return false;
+    if (hash < 0) return true;
+    const wanted = rest.slice(hash + 1).toLowerCase();
+    return area.fragments.some((fragment) => fragment.sections.some((section) => (section.ref ?? "General").toLowerCase() === wanted));
+  }
+  try {
+    resolveRef(modelOf(snapshot), ref);
+    return true;
+  } catch {
+    return false;
+  }
 }

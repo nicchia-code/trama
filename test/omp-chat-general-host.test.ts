@@ -440,14 +440,29 @@ describe("General in the host", () => {
     expect(s.view.last?.phase).toBe("ready");
   });
 
-  test("a saved session that does not come back is dropped and a new session starts", async () => {
+  test("a saved session that does not come back after a reload is dropped and a new, empty session starts without the line about the agent not remembering", async () => {
     const s = setup({ saved, resumeFails: true });
     s.general.start();
     await settle();
     expect(s.client.resumes).toHaveLength(1);
     expect(s.client.starts).toHaveLength(1);
     expect(s.view.last?.phase).toBe("ready");
+    expect(s.view.last?.newSession).toBeUndefined();
     expect((s.store.get(GENERAL_KEY) as SavedGeneral).sessionId).toBe("s1");
+  });
+
+  test("a session that does not reopen after omp closed by itself starts a new one and tells the agent does not remember the history above", async () => {
+    const s = setup();
+    s.general.start();
+    await settle();
+    s.client.sessions[0]!.exit({ code: 1, signal: null });
+    await settle();
+    s.client.resumeFails = true;
+    s.view.emit("message", sent("again"));
+    await settle();
+    expect(s.client.resumes).toHaveLength(1);
+    expect(s.view.last?.phase).toBe("ready");
+    expect(s.view.last?.newSession).toBe(true);
   });
 
   test("an exit that was not asked for stops General; the next message resumes its saved session", async () => {

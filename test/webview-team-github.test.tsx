@@ -91,7 +91,7 @@ test("what stands in place of the tabs that need a Project: the skeleton at the 
 
 test("the header has the Project's button with the repository in monospace, the time of the last read and Refresh", () => {
   const { posted, post } = posting();
-  render(<GitHubHeader github={message({ readAt: new Date(Date.now() - 120_000).toISOString() })} post={post} onPickAnother={() => {}} />);
+  render(<GitHubHeader github={message({ readAt: new Date(Date.now() - 120_000).toISOString() })} manager post={post} onPickAnother={() => {}} />);
   const button = screen.getByRole("button", { name: "GitHub Project: acme/web · Roadmap" });
   expect(button.querySelector(".font-mono")?.textContent).toBe("acme/web");
   expect(screen.getByText("Updated 2 min ago")).not.toBeNull();
@@ -101,9 +101,9 @@ test("the header has the Project's button with the repository in monospace, the 
 
 test("while a read runs Refresh is unavailable; the first read says Loading from GitHub… and no button of a Project without one linked", () => {
   const { post } = posting();
-  const view = render(<GitHubHeader github={message({ reading: true })} post={post} onPickAnother={() => {}} />);
+  const view = render(<GitHubHeader github={message({ reading: true })} manager post={post} onPickAnother={() => {}} />);
   expect((screen.getByRole("button", { name: "Refresh" }) as HTMLButtonElement).disabled).toBe(true);
-  view.rerender(<GitHubHeader github={message({ state: "loading", reading: true, linked: null, readAt: null })} post={post} onPickAnother={() => {}} />);
+  view.rerender(<GitHubHeader github={message({ state: "loading", reading: true, linked: null, readAt: null })} manager post={post} onPickAnother={() => {}} />);
   expect(screen.getByText("Loading from GitHub…")).not.toBeNull();
   expect(screen.queryByRole("button", { name: /GitHub Project/ })).toBeNull();
 });
@@ -111,7 +111,7 @@ test("while a read runs Refresh is unavailable; the first read says Loading from
 // These tests do not wait with Testing Library: bun's fake clock, used by another file of the suite, would not hand the waiting back (see the last test of `webview-team.test.tsx`).
 test("the popover Change GitHub Project searches the Projects of the owner, checks the linked one and links another with its owner and number", () => {
   const { posted, post } = posting();
-  render(<GitHubHeader github={message()} post={post} onPickAnother={() => {}} />);
+  render(<GitHubHeader github={message()} manager post={post} onPickAnother={() => {}} />);
   fireEvent.click(screen.getByRole("button", { name: "GitHub Project: acme/web · Roadmap" }));
   expect(screen.getByText("Change GitHub Project")).not.toBeNull();
   expect(screen.getByPlaceholderText("Search Projects of acme…")).not.toBeNull();
@@ -126,7 +126,7 @@ test("the popover Change GitHub Project searches the Projects of the owner, chec
 test("Link another Project… opens the picker page and Unlink unlinks, both closing the popover; choosing the linked Project again does nothing", () => {
   const { posted, post } = posting();
   let picked = 0;
-  render(<GitHubHeader github={message()} post={post} onPickAnother={() => void picked++} />);
+  render(<GitHubHeader github={message()} manager post={post} onPickAnother={() => void picked++} />);
   const open = () => {
     fireEvent.click(screen.getByRole("button", { name: "GitHub Project: acme/web · Roadmap" }));
     expect(screen.getByText("Change GitHub Project")).not.toBeNull();
@@ -144,11 +144,20 @@ test("Link another Project… opens the picker page and Unlink unlinks, both clo
   expect(posted).toEqual([{ type: "unlinkGitHubProject" }]);
 });
 
+test("without Manager mode the header has no button of a Project, only Updated and Refresh", () => {
+  const { posted, post } = posting();
+  render(<GitHubHeader github={message({ linked: null, readAt: new Date(Date.now() - 120_000).toISOString() })} manager={false} post={post} onPickAnother={() => {}} />);
+  expect(screen.queryByRole("button", { name: /GitHub Project/ })).toBeNull();
+  expect(screen.getByText("Updated 2 min ago")).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  expect(posted).toEqual([{ type: "refreshTeam" }]);
+});
+
 // ---- The boxes ----
 
 test("gh not installed: the box names it, Install gh opens cli.github.com and Refresh reads again", () => {
   const { posted, post } = posting();
-  render(<GitHubBanner github={message({ state: "not-installed", linked: null, error: "GitHub CLI is not installed" })} post={post} />);
+  render(<GitHubBanner github={message({ state: "not-installed", linked: null, error: "GitHub CLI is not installed" })} manager post={post} />);
   expect(screen.getByText("GitHub CLI is not installed")).not.toBeNull();
   expect(screen.getByText(/Install it, then select Refresh\./)).not.toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Install gh" }));
@@ -158,7 +167,7 @@ test("gh not installed: the box names it, Install gh opens cli.github.com and Re
 
 test("not logged in: the box says what Trama will read and Log in to GitHub asks the host for the terminal", () => {
   const { posted, post } = posting();
-  render(<GitHubBanner github={message({ state: "not-logged-in", error: "You're not logged in to GitHub" })} post={post} />);
+  render(<GitHubBanner github={message({ state: "not-logged-in", error: "You're not logged in to GitHub" })} manager post={post} />);
   const box = screen.getByRole("status");
   expect(box.textContent).toContain("You're not logged in to GitHub");
   expect(box.textContent).toContain("Log in so Team can read acme/web · Roadmap and publish approved issues. This runs gh auth login in a terminal.");
@@ -168,7 +177,7 @@ test("not logged in: the box says what Trama will read and Log in to GitHub asks
 
 test("gh without access to Projects: Give access runs the refresh in a terminal", () => {
   const { posted, post } = posting();
-  render(<GitHubBanner github={message({ state: "no-project-access", error: "gh returned errors: needs read:project" })} post={post} />);
+  render(<GitHubBanner github={message({ state: "no-project-access", error: "gh returned errors: needs read:project" })} manager post={post} />);
   expect(screen.getByText("GitHub CLI can't read Projects")).not.toBeNull();
   expect(screen.getByRole("status").textContent).toContain("Give gh access to Projects. This runs gh auth refresh in a terminal.");
   fireEvent.click(screen.getByRole("button", { name: "Give access" }));
@@ -178,7 +187,7 @@ test("gh without access to Projects: Give access runs the refresh in a terminal"
 test("a read error shows the reason in monospace, how old the data on show is, Retry and Show details", () => {
   const { posted, post } = posting();
   const readAt = new Date(Date.now() - 3_600_000).toISOString();
-  render(<GitHubBanner github={message({ state: "read-error", readAt, error: "gh exited with code 1: HTTP 502" })} post={post} />);
+  render(<GitHubBanner github={message({ state: "read-error", readAt, error: "gh exited with code 1: HTTP 502" })} manager post={post} />);
   const box = screen.getByRole("alert");
   expect(within(box).getByText("gh exited with code 1: HTTP 502").className).toContain("font-mono");
   expect(within(box).getByText("Showing data from 1 h ago.")).not.toBeNull();
@@ -189,19 +198,37 @@ test("a read error shows the reason in monospace, how old the data on show is, R
 
 test("a read error without data from before does not say how old it is; Retry waits while a read runs", () => {
   const { post } = posting();
-  render(<GitHubBanner github={message({ state: "read-error", readAt: null, reading: true, error: "boom" })} post={post} />);
+  render(<GitHubBanner github={message({ state: "read-error", readAt: null, reading: true, error: "boom" })} manager post={post} />);
   expect(screen.queryByText(/Showing data from/)).toBeNull();
   expect((screen.getByRole("button", { name: "Retry" }) as HTMLButtonElement).disabled).toBe(true);
 });
 
 test("no box while the first read runs or when all is well", () => {
   const { post } = posting();
-  const view = render(<GitHubBanner github={message({ state: "loading", readAt: null })} post={post} />);
+  const view = render(<GitHubBanner github={message({ state: "loading", readAt: null })} manager post={post} />);
   expect(view.container.textContent).toBe("");
-  view.rerender(<GitHubBanner github={message()} post={post} />);
+  view.rerender(<GitHubBanner github={message()} manager post={post} />);
   expect(view.container.textContent).toBe("");
-  view.rerender(<GitHubBanner github={null} post={post} />);
+  view.rerender(<GitHubBanner github={null} manager post={post} />);
   expect(view.container.textContent).toBe("");
+});
+
+test("without Manager mode the boxes name the pull requests, Log in to GitHub stays and there is no GitHub CLI can't read Projects nor Give access", () => {
+  const { posted, post } = posting();
+  const view = render(<GitHubBanner github={message({ state: "not-installed", linked: null, error: "GitHub CLI is not installed" })} manager={false} post={post} />);
+  expect(view.container.textContent).toContain("Team uses gh to read the pull requests. Install it, then select Refresh.");
+  expect(view.container.textContent).not.toContain("Project");
+  view.rerender(<GitHubBanner github={message({ state: "not-logged-in", linked: null, error: "You're not logged in to GitHub" })} manager={false} post={post} />);
+  expect(screen.getByRole("status").textContent).toContain("Log in so Trama can read the pull requests of acme/web. This runs gh auth login in a terminal.");
+  fireEvent.click(screen.getByRole("button", { name: "Log in to GitHub" }));
+  expect(posted).toEqual([{ type: "logInGitHub" }]);
+  // A missing access to Projects, left over from a read made with Manager mode on, is not shown.
+  view.rerender(<GitHubBanner github={message({ state: "no-project-access", linked: null, error: "gh returned errors: needs read:project" })} manager={false} post={post} />);
+  expect(view.container.textContent).toBe("");
+  expect(screen.queryByRole("button", { name: "Give access" })).toBeNull();
+  view.rerender(<GitHubBanner github={message({ state: "read-error", linked: null, error: "gh exited with code 1: HTTP 502" })} manager={false} post={post} />);
+  expect(screen.getByText("Couldn't read the pull requests")).not.toBeNull();
+  expect(screen.queryByText("Couldn't read the GitHub Project")).toBeNull();
 });
 
 test("the skeleton says Loading from GitHub… to a reader and animates only without motion-reduce", () => {
@@ -256,7 +283,7 @@ test("with no Project of the owner the page says so and Link Project is unavaila
 
 test("the Team page puts the Project's button on the title's line and the box above the tabs", () => {
   const { post } = posting();
-  render(<TeamPage team={null} rejection={null} post={post} github={message({ state: "read-error", error: "boom" })} />);
+  render(<TeamPage manager team={null} rejection={null} post={post} github={message({ state: "read-error", error: "boom" })} />);
   const title = screen.getByRole("heading", { name: "Team" });
   expect(title.parentElement?.contains(screen.getByRole("button", { name: "GitHub Project: acme/web · Roadmap" }))).toBe(true);
   const box = screen.getByRole("alert");

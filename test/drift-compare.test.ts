@@ -12,6 +12,7 @@ const drift = (over: Partial<DriftView> = {}): DriftView => ({
   task: null,
   unifies: [],
   unifiedInto: null,
+  differences: [],
   sides: { happens: "Refunds go through after pickup.", should: "No refund after pickup.", where: "`src/refund.ts`" },
   options: [{ title: "Refuse the refund", text: "x" }],
   option: null,

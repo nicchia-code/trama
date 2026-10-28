@@ -156,13 +156,13 @@ const conversationPath = (): Record<string, string> => (bundledCliDir === undefi
  * `trama.ompChatApproval` from the user settings only, read when the conversation opens: `ask` is ask, any other value or none is `yolo`. With no user value at all
  * the developer never chose, and the one-time notice is shown (not waited for): a resumed conversation never comes here.
  */
-function conversationLaunch(root: string, options: string[][], endpoint: string, terminalId: string, jobId?: string, advisor = false, run = false, task?: string, parallel = false): OmpLaunch {
+function conversationLaunch(root: string, options: string[][], endpoint: string, terminalId: string, jobId?: string, advisor = false, run = false, task?: string, parallel = false, editorProject?: string): OmpLaunch {
   const chosen = settings().inspect<unknown>("ompChatApproval")?.globalValue;
   const approval = chosen === "ask" ? "ask" : "yolo";
   if (chosen === undefined) showYoloNoticeOnce();
   // Intent Tracing is off only when `trama.ompChatIntentTracing` is `false` in the user settings, read when the conversation opens.
   const intentTracing = settings().inspect<unknown>("ompChatIntentTracing")?.globalValue === false ? "0" : "1";
-  return { args: ompArguments(options, approval), env: { ...terminalEnv(endpoint, terminalId, jobId, advisor, run, task, parallel), ...conversationPath(), TRAMA_ACP: "1", PI_INTENT_TRACING: intentTracing }, cwd: root };
+  return { args: ompArguments(options, approval), env: { ...terminalEnv(endpoint, terminalId, jobId, advisor, run, task, parallel, editorProject), ...conversationPath(), TRAMA_ACP: "1", PI_INTENT_TRACING: intentTracing }, cwd: root };
 }
 
 /** Opens the conversation; false, after the warning, when omp does not start: the caller's instruction then goes to a terminal. */
@@ -470,6 +470,19 @@ export function agentTabName(terminal: string): string | undefined {
   return general?.owns(terminal) === true ? "General" : undefined;
 }
 
+/**
+ * Stops the agent of the terminal or omp Chat conversation `id`, working or idle, without asking: the terminal is closed and the conversation ended, and the end of the work follows as for
+ * any close (`terminal.CLOSED`, `developer.CLOSE_CHAT_CONVERSATION`). Returns whether this window had such an agent.
+ */
+export function stopAgent(id: string): boolean {
+  for (const [terminal, info] of [...agentTerminals, ...idleTerminals]) {
+    if (info.id !== id) continue;
+    terminal.dispose();
+    return true;
+  }
+  return chatConversations?.close(id) === true;
+}
+
 /** This window stops following `terminal`. */
 function unfollowTerminal(terminal: vscode.Terminal): void {
   agentTerminals.delete(terminal);
@@ -728,6 +741,8 @@ export interface LaunchJobOptions {
   subAgents?: boolean;
   /** Called once, with the identity of the terminal (or omp Chat conversation) the instruction goes to, when the launch is sure to go on: the publication of issues records there who publishes them. */
   onStarted?: (terminal: string) => void;
+  /** The folder the terminal or the conversation works in; absent, `root`. The PR Check works in its worktree while the job, the announcement and the question channel stay on the open folder. */
+  cwd?: string;
 }
 
 export async function launchAgent(
@@ -762,6 +777,8 @@ export async function launchAgent(
     if (!canSend()) return undefined;
     if (!endpoint) throw new TramaError("The launching editor window's question channel is not available.");
     const terminalId = newTerminalId();
+    // A job that works in another folder (the PR Check's worktree) still talks to the editor of the project: its terminal carries that project's identity.
+    const editorProject = jobOptions.cwd === undefined ? undefined : questionProjectId(projectAt(root));
     jobOptions.onStarted?.(terminalId);
     // With omp Chat in use the instruction opens a conversation; its card and job are written first, under the identity a terminal would have, so a failed start hands them to that terminal.
     let writtenFor: "conversation" | undefined;
@@ -778,7 +795,7 @@ export async function launchAgent(
         if (started !== undefined && jobOptions.onEnd !== undefined) runEnds.set(started, jobOptions.onEnd);
         savedJob = { id: jobId, kind: job, name, ...(cardId === undefined ? {} : { announcement: cardId }), ...(drifts.length === 0 ? {} : { drifts: [...drifts] }) };
       }
-      const opened = await openConversation({ id: terminalId, root, name, launch: conversationLaunch(root, run.options, endpoint, terminalId, jobId, advisor, isRun, runTask, parallel), first: { text: prompt, ...(jobOptions.attachment === undefined ? {} : { attachment: jobOptions.attachment.file }) }, focus: false, hook: run.hooked, ...(savedJob === undefined ? {} : { job: savedJob }) });
+      const opened = await openConversation({ id: terminalId, root, name, launch: conversationLaunch(jobOptions.cwd ?? root, run.options, endpoint, terminalId, jobId, advisor, isRun, runTask, parallel, editorProject), first: { text: prompt, ...(jobOptions.attachment === undefined ? {} : { attachment: jobOptions.attachment.file }) }, focus: false, hook: run.hooked, ...(savedJob === undefined ? {} : { job: savedJob }) });
       if (opened) return "conversation";
       writtenFor = "conversation";
     }
@@ -789,9 +806,9 @@ export async function launchAgent(
     const shellPath = replaced ? win32.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : undefined;
     const terminal = vscode.window.createTerminal({
       name,
-      cwd: root,
+      cwd: jobOptions.cwd ?? root,
       shellPath,
-      env: { ...terminalEnv(endpoint, terminalId, jobId, advisor, isRun, runTask, parallel), ...ompTerminalEnv(omp) },
+      env: { ...terminalEnv(endpoint, terminalId, jobId, advisor, isRun, runTask, parallel, editorProject), ...ompTerminalEnv(omp) },
       ...(asTab ? { location: { viewColumn: vscode.ViewColumn.Active, preserveFocus: true } } : {}),
     });
     if (replaced) warnShellReplaced(defaultShell);

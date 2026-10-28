@@ -5,10 +5,10 @@ Use when implementing when Manager mode is available, which GitHub repository a 
 ## manager-mode
 
 - The GitHub repository of a project is read from `git remote get-url origin` in the project's folder. Origin is on GitHub when its address is `https://github.com/<owner>/<repo>`, `http://github.com/<owner>/<repo>`, `git@github.com:<owner>/<repo>` or `ssh://git@github.com/<owner>/<repo>`, each with or without a final `.git` and a final `/`. The repository is `<owner>/<repo>` in lower case. Any other host, GitHub Enterprise included, counts as not on GitHub; no origin, no git or a failed git call counts as no origin remote.
-- Team is available when Manager mode is recorded and origin is on GitHub. The repository is read again at every opening of the panel, at every picture of the panel and whenever the Team view or the Project group of the Settings tab is shown, so the side menu and the Team view follow a change of origin without reloading the window.
+- Team is available when Manager mode is recorded and origin is on GitHub. The Team view, with only its `Pull Requests` tab (`rules#pr-check`), is available in every Trama project whose origin is on GitHub, with Manager mode on or off; the tabs of the Manager, the GitHub Project and the number of handoffs need Team available. The repository is read again at every opening of the panel, at every picture of the panel and whenever the Team view or the Project group of the Settings tab is shown, so the side menu and the Team view follow a change of origin without reloading the window.
 - Turning Manager mode on without origin on GitHub is refused, from the Settings tab, the wizard and the command line, with the reason `Manager Mode needs a repository on GitHub (the origin remote).`
 - Turning Manager mode off deletes only the Manager mode file: the people in the editor and every file of Team's work in the project stay.
-- When Manager mode goes off while the panel shows the Team view, the panel passes to the Board.
+- When Manager mode goes off while the panel shows the Team view, the view keeps only `Pull Requests` and shows it. When origin stops being on GitHub while the panel shows the Team view, the panel passes to the Board.
 
 ## person
 

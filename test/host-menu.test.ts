@@ -457,7 +457,7 @@ function countingSurface() {
     scan: () => {},
     openFolder: () => {},
     mergeState: () => (calls.mergeState++, { available: true, trackedTrama: false }),
-    manager: () => (calls.manager++, true),
+    manager: () => (calls.manager++, { team: true, manager: true }),
     startMerge: () => {},
     openMergeEditor: () => {},
     reconcileMerge: () => {},
@@ -472,7 +472,7 @@ test("the model sends its last full state again with only the highlight changed,
   model.refresh();
   expect(calls).toMatchObject({ facts: 1, mergeState: 1, manager: 1 });
   const full = posted.at(-1);
-  expect(full).toMatchObject({ situation: "project", decisions: 3, tasksSinceScan: 2, handoffs: 1, manager: true, merge: { available: true, trackedTrama: false }, panelView: null });
+  expect(full).toMatchObject({ situation: "project", decisions: 3, tasksSinceScan: 2, handoffs: 1, team: true, manager: true, merge: { available: true, trackedTrama: false }, panelView: null });
 
   setView("board");
   model.highlight();

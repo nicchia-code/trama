@@ -17,6 +17,8 @@ Trama asked the agent to publish the issue and the agent is working on it. The I
 ### Not published
 The issue is not on GitHub; the Issues tab says why and offers to publish it again.
 - `developer.PUBLISH_AGAIN` → Publishing: only while Team is available and a GitHub Project is linked. Trama asks the agent to publish this issue and every other issue of the same handoff that is not published. If the instruction does not leave, nothing changes and the Issues tab says why.
+- `agent.RECORD_ISSUE_PUBLISHED` → Published: the agent had created the issue on GitHub before Trama marked it not published (for example after the agent stopped, see `time.CHECK_DUE`), and it records the publication now, without a new attempt. Trama records the moment and the version of the text of its references, as in Publishing.
+- `agent.RECORD_ISSUE_FAILED` → Not published: the agent records again that GitHub refused the issue, with the new reason, which the Issues tab shows.
 
 ### Published
 The issue is on GitHub, with the number and the address the agent recorded. From here on Trama follows it by reading GitHub, when the Team view is shown and with Refresh: where the work is, the sprint and the estimate it has now in the Project, who it is assigned to, its pull requests. Trama never changes it on GitHub. A change made on GitHub by the team, a new assignee, another sprint or estimate, is what the Team view shows, and Trama's card keeps the published values only as history.

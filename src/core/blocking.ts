@@ -68,26 +68,49 @@ export function blockedByDrift(project: ProjectModel, tasks: Task[], refs: strin
 }
 
 /**
+ * The references and origins an open Drift blocks with: its own, or, for a unified Drift with differences, those of its open
+ * differences only; the origins of a difference are those of the Drift it comes from, read from that Drift's file in `all`.
+ */
+export function openExtent(drift: Drift, all: ReadonlyMap<string, Drift>): { refs: string[]; origin: string[] } {
+  if (drift.data.differences.length === 0) return { refs: drift.data.refs, origin: drift.data.origin };
+  const open = drift.data.differences.filter((d) => d.decision === null);
+  return {
+    refs: [...new Set(open.flatMap((d) => d.refs))],
+    origin: [...new Set(open.flatMap((d) => all.get(d.drift)?.data.origin ?? []))],
+  };
+}
+
+/**
  * The blocked Tasks and why, by Task ID. An open Drift blocks its origin Task and every Task that is not Done and
- * concerns the same thing; the origin of a Drift fixed in the code waits for the Task created for the fix. A Done Task
- * is never blocked and a Drift that is not open blocks nothing by itself.
+ * concerns the same thing (a unified Drift with differences, only with the references and origins of its open differences);
+ * the origin of a Drift fixed in the code, or of a difference fixed in the code, waits for the Task created for the fix.
+ * A Done Task is never blocked and a Drift that is not open blocks nothing by itself.
  */
 export function computeBlocked(project: ProjectModel, tasks: Task[], drifts: Drift[]): Map<string, Blocker[]> {
   const blocked = new Map<string, Blocker[]>();
   const add = (task: Task, blocker: Blocker) => blocked.set(task.id, [...(blocked.get(task.id) ?? []), blocker]);
   const byId = new Map(tasks.map((t) => [t.id, t]));
+  const all = new Map<string, Drift>();
+  for (const drift of drifts) if (!all.has(drift.id)) all.set(drift.id, drift);
   for (const drift of drifts) {
     if (drift.data.status === "open") {
-      for (const task of blockedByDrift(project, tasks, drift.data.refs, drift.data.origin)) add(task, { kind: "drift", drift: drift.id, title: drift.title });
-    } else if (drift.data.resolution === "fix-code" && drift.data.task !== null) {
-      const fix = byId.get(drift.data.task);
-      for (const id of drift.data.origin) {
-        const origin = byId.get(id);
-        if (origin && fix && origin.data.column !== "done" && fix.data.column !== "done") add(origin, { kind: "fix", task: fix.id, title: fix.title, drift: drift.id, driftTitle: drift.title });
-      }
+      const { refs, origin } = openExtent(drift, all);
+      for (const task of blockedByDrift(project, tasks, refs, origin)) add(task, { kind: "drift", drift: drift.id, title: drift.title });
     }
+    if (drift.data.status === "resolved" && drift.data.resolution === "fix-code" && drift.data.task !== null) waitsFor(drift, drift.data.task, drift.data.origin);
+    // Each difference fixed in the code makes the origins of its own Drift wait for its fix Task, shared with the differences linked to it.
+    for (const difference of drift.data.differences) if (difference.decision === "fix-code" && difference.task !== null) waitsFor(drift, difference.task, all.get(difference.drift)?.data.origin ?? []);
   }
   return blocked;
+
+  function waitsFor(drift: Drift, taskId: string, origins: readonly string[]) {
+    const fix = byId.get(taskId);
+    for (const id of origins) {
+      const origin = byId.get(id);
+      const waiting = blocked.get(id)?.some((b) => b.kind === "fix" && b.task === taskId);
+      if (origin && fix && !waiting && origin.data.column !== "done" && fix.data.column !== "done") add(origin, { kind: "fix", task: fix.id, title: fix.title, drift: drift.id, driftTitle: drift.title });
+    }
+  }
 }
 
 /** What the agent is told when it tries to start a blocked Task: each blocker by name (short number, else identity) and title, and whose decision it is. */

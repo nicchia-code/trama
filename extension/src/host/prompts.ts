@@ -3,7 +3,9 @@ import type { Question } from "../../../src/core/questions";
 
 /** An action whose free text has been collected. */
 export type ResolvedAction =
-  | Exclude<AgentAction, { kind: "resolve-drifts" | "unify-drifts" }>
+  | Exclude<AgentAction, { kind: "resolve-drifts" | "unify-drifts" | "prCheck" }>
+  /** The PR Check of pull request `number`: the scan of the whole System in the worktree of the pull request, with the `instruction` its preparation decided (`prCheckInstruction`): terminal named `PR #<number>`, scan role. */
+  | { kind: "prCheck"; number: number; instruction: string }
   /** A written design request, saved as `.trama/requests/<request>.md`. */
   | { kind: "written-design"; request: string }
   /** A written design request that starts a project from scratch: the `trama-setup` skill, named `Setup`. */
@@ -66,6 +68,8 @@ export function buildPrompt(action: ResolvedAction): string {
       return "Use the trama-scan skill on the whole System.";
     case "mergeScan":
       return `Use the trama-scan skill on the whole System. A merge brought in \`${action.base}...${action.incoming}\`: mark \`merge\` on every Drift whose Where in the code lies in a file \`git diff --name-only ${action.base}...${action.incoming}\` lists.`;
+    case "prCheck":
+      return action.instruction;
     case "reconcileMerge":
       return `Use the trama-merge skill to resolve the conflicts of the merge of \`${action.branch}\` in progress.`;
     case "implement":
@@ -150,6 +154,8 @@ export function terminalName(action: ResolvedAction, short: (kind: "task" | "pro
       return `Update #${action.number}`;
     case "scan-issue":
       return `Scan #${action.number}`;
+    case "prCheck":
+      return `PR #${action.number}`;
     case "refine":
       return `Refine ${short("proposal", action.proposal)}`;
   }
@@ -187,6 +193,21 @@ export function reworkPrompt(drift: string, feedback: string): string {
 /** The sentence that hands the resolution agent the developer's answer to a Drift's prepared question, followed by the answer as JSON and a full stop. */
 export const PREPARED_ANSWER_SENTENCE = "The developer already answered this Drift's prepared question; do not ask again. Answer:";
 
+/** The sentence that hands the resolution agent the answers to the prepared round of a unified Drift with differences, followed by the answers by difference as JSON and a full stop. */
+export const PREPARED_ROUND_ANSWER_SENTENCE = "The developer already answered this unified Drift's prepared round. Answers:";
+
+/** The sentence added to the one above when linked differences got different decisions. */
+export const LINKED_DECISIONS_SENTENCE = "Linked differences got different decisions: reconcile them, asking again only their questions if needed.";
+
+/** The sentence that follows the Resolve instruction of a unified Drift with differences when only some open differences have a valid prepared question. */
+export const PARTLY_PREPARED_SENTENCE = "Some differences of this unified Drift have a valid prepared question: keep them, prepare the others and ask one round about every open difference.";
+
+/** The Resolve instruction of a unified Drift with differences whose prepared round the developer already answered: the answers by difference, and the linked-decisions sentence when `linked`. */
+export function preparedRoundPrompt(drift: string, answers: Readonly<Record<string, { selected: string[]; text?: string }>>, linked: boolean): string {
+  const base = `${buildPrompt({ kind: "resolve-drifts", drift })} ${PREPARED_ROUND_ANSWER_SENTENCE} ${JSON.stringify(answers)}.`;
+  return linked ? `${base} ${LINKED_DECISIONS_SENTENCE}` : base;
+}
+
 /** The sentence the parallel execution adds to the instruction of a run over several Tasks (`trama.parallelExecution`). */
 export const PARALLEL_EXECUTION_SENTENCE = 'The parallel execution is on: follow the "Parallel execution" section of the trama-implement skill.';
 
@@ -218,6 +239,9 @@ export function mayFileDrifts(action: ResolvedAction): boolean {
     case "replan-handoffs":
     case "reconcileMerge":
     case "rework-resolution":
+      return false;
+    // The scan of a PR Check files Drifts, but the Async Drift Resolver never works in a PR Check: its sentence is left out.
+    case "prCheck":
       return false;
     case "rework":
       return action.skill === "import";

@@ -8,8 +8,8 @@ export const ENTRY_LABELS: Record<MenuViewName, string> = VIEW_LABELS;
 /** The entries of a Trama project, from the top; Scan System and Settings stand together at the foot, Settings last. */
 export const PROJECT_ENTRIES = ["board", "diagram", "requirements", "specs", "history"] as const satisfies readonly MenuViewName[];
 
-/** The entries of a project's menu, from the top: `Team` joins them, right after History, only while Team is available (`ui#menu-laterale`). */
-export const projectEntries = (state: Pick<MenuState, "manager">): MenuViewName[] => (state.manager === true ? [...PROJECT_ENTRIES, "team"] : [...PROJECT_ENTRIES]);
+/** The entries of a project's menu, from the top: `Team` joins them, right after History, whenever origin is on GitHub, with Manager mode on or off (`ui#menu-laterale`). */
+export const projectEntries = (state: Pick<MenuState, "team">): MenuViewName[] => (state.team === true ? [...PROJECT_ENTRIES, "team"] : [...PROJECT_ENTRIES]);
 
 /**
  * The accessible name of an entry: its text, and for Board the number of cards awaiting a decision when there are some; for Team the number of open handoffs when there

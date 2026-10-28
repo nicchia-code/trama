@@ -17,8 +17,8 @@ import type { Result } from "./result";
 export const OBJECTS = ["model", "proposal", "task", "drift", "issue", "team", "history", "announcement", "comparison", "question", "advisor", "project", "timing", "hook"] as const;
 export type CommandObject = (typeof OBJECTS)[number];
 
-/** The verbs of the objects: seven mean the same for every object that has them; `delete` exists only for `task`, `review` only for `advisor` and `fields` only for `issue`. `hook` is the only object that does not follow them (requirements/cli#General). */
-export const VERBS = ["show", "list", "new", "edit", "move", "check", "delete", "review", "fields"] as const;
+/** The verbs of the objects: seven mean the same for every object that has them; `delete` exists only for `task` and `fields` only for `issue`. `hook` is the only object that does not follow them (requirements/cli#General). */
+export const VERBS = ["show", "list", "new", "edit", "move", "check", "delete", "fields"] as const;
 
 /** A positional argument: the identity of a card, the reference of a Model element, or the state `move` brings a card to. */
 export interface Positional {

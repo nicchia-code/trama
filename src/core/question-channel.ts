@@ -68,8 +68,16 @@ interface ServerOptions {
   onClose?: () => void;
 }
 
-/** Canonical project roots, never the caller's current directory, identify an editor. */
-export function questionProjectId(project: Project): string {
+/**
+ * The agent of a PR Check works in a worktree but talks to the editor that launched it, whose project is the open folder: its terminal carries that project's identity in this
+ * variable (`TRAMA_QUESTION_PROJECT`, set only by Trama, never by a file of a repository), and every command of the agent reaches the editor under it.
+ */
+export const QUESTION_PROJECT_ENV = "TRAMA_QUESTION_PROJECT";
+
+/** Canonical project roots, never the caller's current directory, identify an editor; the identity a launch names in `TRAMA_QUESTION_PROJECT` stands for the project of the folder it works in. */
+export function questionProjectId(project: Project, env: Record<string, string | undefined> = process.env): string {
+  const named = env[QUESTION_PROJECT_ENV];
+  if (named !== undefined && /^[0-9a-f]{64}$/.test(named)) return named;
   let root = resolve(project.root);
   try { root = realpathSync(root); } catch { /* A missing root cannot have a live editor. */ }
   if (process.platform === "win32") root = root.toLowerCase();
@@ -540,10 +548,11 @@ export const sendAgentIdle = (project: Project, terminal: string, options: { env
 export const sendAgentStarted = (project: Project, terminal: string, pid: number, options: { env?: Record<string, string | undefined>; runtimeDir?: string; timeoutMs?: number } = {}): Promise<void> =>
   tellEditor(project, { type: "agent-started", terminal, pid }, options);
 
-/** What a window answers to `check-task`: who holds the Task and is alive, or why the Task was released; `unavailable` when the window cannot tell. */
+/** What a window answers to `check-task`: who holds the Task and is alive, or why the Task was released; `unknown-holder` when the Task has no holder the window recognises; `unavailable` when the window cannot tell. */
 export type TaskCheckReply =
   | { result: "alive"; holder: string }
   | { result: "released"; reason: string }
+  | { result: "unknown-holder" }
   | { result: "unavailable" };
 
 /** How long `trama task check` waits for the window, the question to the other windows included. */
@@ -555,7 +564,7 @@ function taskCheckReply(value: unknown): TaskCheckReply | null {
   if (reply.type !== "task-checked") return null;
   if (reply.result === "alive" && typeof reply.holder === "string" && reply.holder !== "") return { result: "alive", holder: reply.holder };
   if (reply.result === "released" && typeof reply.reason === "string" && reply.reason !== "") return { result: "released", reason: reply.reason };
-  return reply.result === "unavailable" ? { result: "unavailable" } : null;
+  return reply.result === "unavailable" || reply.result === "unknown-holder" ? { result: reply.result } : null;
 }
 
 /**

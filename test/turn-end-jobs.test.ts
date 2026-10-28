@@ -24,6 +24,8 @@ const settingValues: Record<string, unknown> = { agent: "omp" };
 const inspected: Record<string, { globalValue?: unknown }> = { ompChat: { globalValue: true } };
 const errorMessages: string[] = [];
 const warningMessages: string[] = [];
+/** What the host posted to the panel's webview. */
+const panelMessages: { type: string; text?: string }[] = [];
 let workspaceRoot = "";
 /** The omp the launches find; a test makes it vanish to see what an instruction that does not start leaves. */
 let ompFound: (ompPath: string) => Promise<string | undefined> = async (ompPath) => (ompPath === "" ? "omp" : ompPath);
@@ -46,7 +48,7 @@ mock.module("vscode", () => ({
       reveal() {},
       dispose() {},
       onDidDispose: none,
-      webview: { html: "", cspSource: "", asWebviewUri: (uri: unknown) => uri, onDidReceiveMessage: none, postMessage: async () => true },
+      webview: { html: "", cspSource: "", asWebviewUri: (uri: unknown) => uri, onDidReceiveMessage: none, postMessage: async (message: { type: string; text?: string }) => (panelMessages.push(message), true) },
     }),
   },
   workspace: {
@@ -514,6 +516,7 @@ describe("the turn end of a conversation ends its refinement", () => {
 
       window.deliver(first, lastProcess().id);
       warningMessages.length = 0;
+      panelMessages.length = 0;
       ompFound = async () => undefined;
       lastProcess().endTurn({ stopReason: "end_turn" });
       await window.launches.at(-1)?.catch(() => undefined);
@@ -521,7 +524,9 @@ describe("the turn end of a conversation ends its refinement", () => {
       expect(processes).toHaveLength(before + 1);
       expect([...window.host.refinement.running.keys()]).toEqual([]);
       expect(window.host.refinement.queued).toEqual([]);
-      expect(warningMessages.filter((message) => message.includes("did not start"))).toHaveLength(1);
+      // The warning is a notice at the top of the Board, not a message of the editor.
+      expect(panelMessages.filter((message) => message.type === "notice" && message.text?.includes("did not start"))).toHaveLength(1);
+      expect(warningMessages.filter((message) => message.includes("did not start"))).toHaveLength(0);
       // Back at rest, a new Approve refines again.
       ompFound = async (ompPath) => (ompPath === "" ? "omp" : ompPath);
       await window.approve(third);

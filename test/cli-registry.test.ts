@@ -151,6 +151,8 @@ test("there is no autopilot object, and the removed delegation fields are refuse
   expect(OBJECTS as readonly string[]).not.toContain("autopilot");
   expect(() => run(["--root", dir, "autopilot", "show"], dir)).toThrow(/Unknown command "autopilot".*trama --help/);
   expect(() => run(["--root", dir, "autopilot", "move", "job-1", "failed"], dir)).toThrow(/Unknown command "autopilot".*trama --help/);
+  expect(VERBS as readonly string[]).not.toContain("review");
+  expect(() => run(["--root", dir, "advisor", "review"], dir)).toThrow(/Unknown command "advisor review".*trama --help/);
   const refused = (argv: string[], input: object) => () => run(["--root", dir, ...argv, "--input", JSON.stringify(input)], dir);
   expect(refused(["proposal", "new"], { title: "Resolve", kind: "resolution", automatic: true })).toThrow(/automatic: unknown field/);
   expect(refused(["proposal", "new"], { title: "Resolve", job: "job-1" })).toThrow(/job: unknown field/);

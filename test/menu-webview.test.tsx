@@ -146,6 +146,16 @@ test("focusing an entry shows no tooltip, and no element of the menu has a title
   expect(document.querySelectorAll("[title]").length).toBe(0);
 });
 
+test("the container the icon-only mode measures is the whole view: the margin of the menu is on a child of it, not on the container", () => {
+  setup(project());
+  const container = screen.getByRole("navigation", { name: "Trama" });
+  expect(container.className).toContain("@container");
+  expect(container.className).not.toMatch(/(^|\s)p[xy]?-/);
+  const margin = container.firstElementChild;
+  expect(margin?.className).toContain("p-2");
+  expect(margin?.contains(screen.getByRole("button", { name: "Board" }))).toBe(true);
+});
+
 test("icon-only mode hides the text, the badge and the count under 56 px, centres the icon and shows no tooltip", async () => {
   setup({ ...project({ decisions: 2, tasksSinceScan: 4 }), situation: "project" });
   const board = screen.getByRole("button", { name: "Board, 2 awaiting a decision" });
@@ -303,31 +313,33 @@ test("Merge is not drawn outside a project, whatever the state says", () => {
   expect(screen.queryByRole("button", { name: /^Merge/ })).toBeNull();
 });
 
-test("with Team available the Team entry follows History, before the line, with the same look; without it there is none and no gap", () => {
-  const { posted } = setup(project({ manager: true, panelView: "team" }));
-  expect(names()).toEqual(["Board", "Diagram", "Requirements", "Specs", "History", "Team", "Scan System", "Settings"]);
-  const team = screen.getByRole("button", { name: "Team" });
-  expect(team.getAttribute("aria-current")).toBe("page");
-  expect(team.className).toContain("w-full");
-  expect(team.className).toContain("@max-[56px]:justify-center");
-  expect(team.querySelector("svg")?.getAttribute("class")).toContain("size-4");
-  expect(team.parentElement).toBe(screen.getByRole("button", { name: "History" }).parentElement);
-  expect(team.parentElement).not.toBe(screen.getByRole("button", { name: "Settings" }).parentElement);
-  fireEvent.click(team);
-  expect(posted).toEqual([{ type: "show", view: "team" }]);
-  cleanup();
+test("with origin on GitHub the Team entry follows History, before the line, with the same look, with Manager mode on or off; without it there is none and no gap", () => {
+  for (const state of [project({ team: true, manager: true, panelView: "team" }), project({ team: true, panelView: "team" })]) {
+    const { posted } = setup(state);
+    expect(names()).toEqual(["Board", "Diagram", "Requirements", "Specs", "History", "Team", "Scan System", "Settings"]);
+    const team = screen.getByRole("button", { name: "Team" });
+    expect(team.getAttribute("aria-current")).toBe("page");
+    expect(team.className).toContain("w-full");
+    expect(team.className).toContain("@max-[56px]:justify-center");
+    expect(team.querySelector("svg")?.getAttribute("class")).toContain("size-4");
+    expect(team.parentElement).toBe(screen.getByRole("button", { name: "History" }).parentElement);
+    expect(team.parentElement).not.toBe(screen.getByRole("button", { name: "Settings" }).parentElement);
+    fireEvent.click(team);
+    expect(posted).toEqual([{ type: "show", view: "team" }]);
+    cleanup();
+  }
   setup(project());
   expect(screen.queryByRole("button", { name: "Team" })).toBeNull();
   expect(names()).toEqual(["Board", "Diagram", "Requirements", "Specs", "History", "Scan System", "Settings"]);
 });
 
 test("Team is not drawn outside a project, whatever the state says", () => {
-  setup({ ...project({ manager: true }), situation: "notProject" });
+  setup({ ...project({ team: true, manager: true }), situation: "notProject" });
   expect(screen.queryByRole("button", { name: "Team" })).toBeNull();
 });
 
 test("Team shows a badge with the handoffs that wait for a decision, named N handoffs wait for a decision; with none there is no badge, and the handoffs never move Board", () => {
-  setup(project({ manager: true, decisions: 2, handoffs: 3 }));
+  setup(project({ team: true, manager: true, decisions: 2, handoffs: 3 }));
   const team = screen.getByRole("button", { name: "Team, 3 handoffs wait for a decision" });
   const badge = within(team).getByText("3");
   expect(badge.getAttribute("data-slot")).toBe("badge");
@@ -335,12 +347,19 @@ test("Team shows a badge with the handoffs that wait for a decision, named N han
   const board = screen.getByRole("button", { name: "Board, 2 awaiting a decision" });
   expect(within(board).getByText("2").getAttribute("data-slot")).toBe("badge");
   cleanup();
-  setup(project({ manager: true, handoffs: 1 }));
+  setup(project({ team: true, manager: true, handoffs: 1 }));
   expect(screen.getByRole("button", { name: "Team, 1 handoff waits for a decision" })).not.toBeNull();
   expect(screen.getByRole("button", { name: "Board" }).querySelector('[data-slot="badge"]')).toBeNull();
   cleanup();
-  setup(project({ manager: true }));
+  setup(project({ team: true, manager: true }));
   const plain = screen.getByRole("button", { name: "Team" });
   expect(plain.querySelector('[data-slot="badge"]')).toBeNull();
   expect([entryName("team", 4), entryName("team", 4, 2), entryName("team", 0, 1), entryName("history", 0, 5)]).toEqual(["Team", "Team, 2 handoffs wait for a decision", "Team, 1 handoff waits for a decision", "History"]);
+});
+
+test("with Manager mode off the Team entry has no number, whatever the state carries", () => {
+  setup(project({ team: true, handoffs: 3 }));
+  const team = screen.getByRole("button", { name: "Team" });
+  expect(team.querySelector('[data-slot="badge"]')).toBeNull();
+  expect(team.getAttribute("aria-label")).toBe("Team");
 });

@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import type { ReactNode } from "react";
 import type { PersonView } from "../src/core/people";
 import type { ToHost, ToWebview } from "../extension/src/protocol";
+import type { TeamGitHubMessage } from "../extension/src/host/team/github";
 import { mountTeam, TeamPage } from "../extension/src/webview/team";
 import { absenceText, inputOf, newDraft, peopleCount, withSkills } from "../extension/src/webview/team/logic";
 import type { Rejection } from "../extension/src/webview/team/person-dialog";
@@ -38,9 +39,9 @@ const team = (members: PersonView[], others: PersonView[] = [], extra: Partial<T
 function setup(initial: TeamMessage | null, rejection: Rejection | null = null) {
   const posted: ToHost[] = [];
   const post = (message: ToHost) => void posted.push(message);
-  const utils = render(<TeamPage team={initial} rejection={rejection} post={post} />);
+  const utils = render(<TeamPage manager team={initial} rejection={rejection} post={post} />);
   fireEvent.mouseDown(screen.getByRole("tab", { name: "People" }));
-  const again = (next: TeamMessage | null, nextRejection: Rejection | null = rejection) => utils.rerender(<TeamPage team={next} rejection={nextRejection} post={post} />);
+  const again = (next: TeamMessage | null, nextRejection: Rejection | null = rejection) => utils.rerender(<TeamPage manager team={next} rejection={nextRejection} post={post} />);
   return { posted, again, ...utils };
 }
 
@@ -74,13 +75,36 @@ test("the tag input adds each comma-separated part once, without case, and Save 
 
 // ---- The view ----
 
-test("the view has the title Team and the tabs Decisions, Issues, Timeline and People, in this order, and opens on Decisions", () => {
-  render(<TeamPage team={null} rejection={null} post={() => {}} />);
+test("with Manager mode on the view has the title Team and the tabs Decisions, Issues, Pull Requests, Timeline and People, in this order, and opens on Decisions", () => {
+  render(<TeamPage manager team={null} rejection={null} post={() => {}} />);
   expect(screen.getByRole("heading", { name: "Team" })).not.toBeNull();
   const tabs = screen.getAllByRole("tab");
-  expect(tabs.map((tab) => tab.textContent)).toEqual(["Decisions", "Issues", "Timeline", "People"]);
-  expect(tabs.map((tab) => tab.getAttribute("aria-selected"))).toEqual(["true", "false", "false", "false"]);
+  expect(tabs.map((tab) => tab.textContent)).toEqual(["Decisions", "Issues", "Pull Requests", "Timeline", "People"]);
+  expect(tabs.map((tab) => tab.getAttribute("aria-selected"))).toEqual(["true", "false", "false", "false", "false"]);
   expect(screen.getByRole("tablist", { name: "Team" })).not.toBeNull();
+});
+
+test("with Manager mode off the bar holds only Pull Requests, the view opens there and the title line has no GitHub Project button", () => {
+  const github: TeamGitHubMessage = { type: "teamGitHub", state: "ready", reading: false, repository: "acme/web", linked: null, readAt: new Date(Date.now() - 120_000).toISOString(), project: null, issues: [], loads: [], signals: {}, actions: {}, projects: [], error: null };
+  render(<TeamPage manager={false} team={null} rejection={null} github={github} post={() => {}} />);
+  const tabs = screen.getAllByRole("tab");
+  expect(tabs.map((tab) => tab.textContent)).toEqual(["Pull Requests"]);
+  expect(tabs[0]?.getAttribute("aria-selected")).toBe("true");
+  expect(screen.getByRole("heading", { name: "Team" }).parentElement?.textContent).toBe("TeamUpdated 2 min agoRefresh");
+  expect(screen.queryByRole("button", { name: /GitHub Project/ })).toBeNull();
+  expect(screen.queryByText("Link a GitHub Project")).toBeNull();
+});
+
+test("when Manager mode goes off the view keeps only Pull Requests and shows it, and when it comes back the view opens on Decisions again", () => {
+  const props = { team: null, rejection: null, post: () => {} };
+  const { rerender } = render(<TeamPage manager {...props} />);
+  fireEvent.mouseDown(screen.getByRole("tab", { name: "Issues" }));
+  expect(screen.getByRole("tab", { name: "Issues" }).getAttribute("aria-selected")).toBe("true");
+  rerender(<TeamPage manager={false} {...props} />);
+  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Pull Requests"]);
+  expect(screen.getByRole("tab", { name: "Pull Requests" }).getAttribute("aria-selected")).toBe("true");
+  rerender(<TeamPage manager {...props} />);
+  expect(screen.getByRole("tab", { name: "Decisions" }).getAttribute("aria-selected")).toBe("true");
 });
 
 test("the tab chosen stays while the page updates", () => {
@@ -91,11 +115,14 @@ test("the tab chosen stays while the page updates", () => {
   expect(screen.getByText("Grace Hopper")).not.toBeNull();
 });
 
-test("mountTeam draws the page, takes the people and then GitHub from the host", () => {
+test("mountTeam draws the page with only Pull Requests until the host says Team is available, then takes the people and GitHub", () => {
   const posted: ToHost[] = [];
   let node: ReactNode = null;
   const view = mountTeam((next) => void (node = next), { post: (message) => void posted.push(message), navigate: () => {}, openLink: () => {} });
   const shown = render(<>{node}</>);
+  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Pull Requests"]);
+  act(() => view.receiveManager(true));
+  shown.rerender(<>{node}</>);
   fireEvent.mouseDown(screen.getByRole("tab", { name: "People" }));
   expect(screen.queryByText("Ada Lovelace")).toBeNull();
   act(() => view.receive(team([ADA])));
@@ -173,6 +200,15 @@ test("Add from other projects searches the people outside the team and adds the 
   await waitFor(() => expect(screen.queryByText("Grace Hopper")).toBeNull());
   fireEvent.click(screen.getByText("Linus Torvalds"));
   expect(posted).toEqual([{ type: "addToTeam", id: "ccccccc3" }]);
+  await waitFor(() => expect(screen.queryByPlaceholderText("Search people…")).toBeNull());
+});
+
+test("Add from other projects has Delete <name> on each person: it posts deletePerson, closes the popover and adds no one", async () => {
+  const { posted } = setup(team([ADA], [GRACE, LINUS]));
+  click("Add from other projects");
+  await screen.findByPlaceholderText("Search people…");
+  fireEvent.click(screen.getByRole("button", { name: "Delete Linus Torvalds" }));
+  expect(posted).toEqual([{ type: "deletePerson", id: "ccccccc3" }]);
   await waitFor(() => expect(screen.queryByPlaceholderText("Search people…")).toBeNull());
 });
 

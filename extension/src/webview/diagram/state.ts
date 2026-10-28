@@ -36,6 +36,8 @@ export interface DiagramState {
   resolveBlocker: string | null;
   /** The Proposal refinement, as the host carries it; off when absent. */
   refinement: RefinementView;
+  /** The block of the differences of a unified Drift that a row of a resolution asked to open: its details expand it and put the focus on its header. `n` tells one request from the next. Ends with the selection. */
+  differenceRequest: { drift: string; difference: string; n: number } | null;
 }
 
 export interface DiagramStore {
@@ -57,7 +59,8 @@ export interface DiagramStore {
   stepFocus(delta: -1 | 1): void;
   /** Takes the focus off, keeping the level, the position and the Proposal drawn. */
   clearFocus(): void;
-  navigateDrift(id: string): void;
+  /** Selects an open Drift; with `difference`, the block of that difference of a unified Drift opens too. */
+  navigateDrift(id: string, difference?: string): void;
   /** Where a node leads when drilled into. */
   drillOf(id: string): Level | null;
   /** The State a node stands for, to expand or collapse it. */
@@ -81,13 +84,17 @@ export function createDiagramStore(): DiagramStore {
     fitSmooth: false,
     resolveBlocker: null,
     refinement: REFINEMENT_OFF,
+    differenceRequest: null,
   };
   let pending: NavigateOptions | null = null;
   const expanded = new Map<string, Set<string>>();
   const listeners = new Set<() => void>();
 
   const emit = (patch: Partial<DiagramState>, fit = false) => {
-    state = { ...state, ...patch, fit: fit ? state.fit + 1 : state.fit, fitTo: fit ? (patch.fitTo ?? null) : state.fitTo, fitSmooth: fit ? (patch.fitSmooth ?? false) : state.fitSmooth };
+    // A request for a block of the differences ends with the selection it was made for.
+    const sameSelection = patch.selected === undefined || patch.selected === state.selected;
+    const differenceRequest = patch.differenceRequest !== undefined ? patch.differenceRequest : sameSelection ? state.differenceRequest : null;
+    state = { ...state, ...patch, differenceRequest, fit: fit ? state.fit + 1 : state.fit, fitTo: fit ? (patch.fitTo ?? null) : state.fitTo, fitSmooth: fit ? (patch.fitSmooth ?? false) : state.fitSmooth };
     for (const listener of listeners) listener();
   };
 
@@ -153,7 +160,7 @@ export function createDiagramStore(): DiagramStore {
    * Goes to where the open Drift is drawn (the level of its first reference that resolves) and selects it. A Drift that
    * points at no Model element is drawn floating on the System level, and that is where it is selected.
    */
-  function navigateDrift(id: string) {
+  function selectDrift(id: string) {
     const now = compute();
     if (now.scene?.unified.some((d) => d.id === id)) return redraw({ selected: `u:${id}` });
     const drift = now.scene?.drifts.find((d) => d.id === id);
@@ -162,6 +169,11 @@ export function createDiagramStore(): DiagramStore {
     const ref = drift.refs.find((r) => resolveElement(scene, r) !== null);
     if (ref) return navigateRef(ref, id);
     redraw({ level: { kind: "system" }, selected: `d:${id}` }, true);
+  }
+
+  function navigateDrift(id: string, difference?: string) {
+    selectDrift(id);
+    if (difference !== undefined) emit({ differenceRequest: { drift: id, difference, n: (state.differenceRequest?.n ?? 0) + 1 } });
   }
 
   /** A new focus replaces the old one and the Proposal drawn (only a Proposal's focus draws one), and goes to the first step. */
@@ -179,7 +191,7 @@ export function createDiagramStore(): DiagramStore {
     if (options.focus) return focusOn(options.focus);
     const { snapshot } = state;
     if (options.proposal && snapshot && snapshot.proposals.some((p) => p.id === options.proposal)) state = { ...state, proposalId: options.proposal };
-    if (options.drift) navigateDrift(options.drift);
+    if (options.drift) navigateDrift(options.drift, options.difference);
     else if (options.ref) navigateRef(options.ref);
     else redraw({});
   }

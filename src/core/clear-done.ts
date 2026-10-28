@@ -1,3 +1,4 @@
+import { openExtent } from "./blocking";
 import { removeTaskFiles } from "./delete-task";
 import { TramaError } from "./errors";
 import { type ClearedTask, type HistoryEntry, readHistory, saveHistory } from "./history";
@@ -6,15 +7,21 @@ import { listProposals, type Proposal } from "./proposals";
 import { cardName } from "./short-numbers";
 import { proposalTagOf } from "./snapshot";
 import type { Project } from "./store";
-import { getTaskOrNull, listDrifts, type Task } from "./work";
+import { getTaskOrNull, indexDrifts, listDrifts, type Task } from "./work";
 
-/** The Tasks an open Drift names, as origin or as the Task that fixes its code: Clear leaves them in Done. */
+/**
+ * The Tasks an open Drift names: its origins (for a unified Drift with differences, those of its open differences, read from
+ * the Drifts they come from) and the Task that fixes its code, or the `task` of each of its differences, open or decided. Clear leaves them in Done.
+ */
 function heldByOpenDrifts(p: Project): Set<string> {
   const held = new Set<string>();
-  for (const drift of listDrifts(p)) {
+  const drifts = listDrifts(p);
+  const all = indexDrifts(drifts);
+  for (const drift of drifts) {
     if (drift.data.status !== "open") continue;
-    for (const id of drift.data.origin) held.add(id);
+    for (const id of openExtent(drift, all).origin) held.add(id);
     if (drift.data.task !== null) held.add(drift.data.task);
+    for (const difference of drift.data.differences) if (difference.task !== null) held.add(difference.task);
   }
   return held;
 }

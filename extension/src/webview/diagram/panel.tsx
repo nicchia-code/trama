@@ -1,12 +1,12 @@
 import { Ban, Check, ChevronDown, ChevronUp, X } from "lucide-react";
-import { Fragment, type ReactNode, useMemo, useState, useSyncExternalStore } from "react";
+import { Fragment, type ReactNode, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { type CardName, type CardNumbers, ID_NAMES, cardNameOf } from "../../../../src/core/card-names";
 import { joinReasons } from "../../../../src/core/design";
 import { REQUIRED_STATUS, appliesUnder } from "../../../../src/core/required";
 import type { DriftView, ProposalView } from "../../../../src/core/snapshot";
 import type { RefinementView } from "../../protocol";
-import { decisionBlockers, decisionLabel, isRefining, MERGE_LABEL, PAUSED_TIP, QUEUED_REASON, type RefineStatus, driftReworkBlocker, finishingBlocker, recurringLabel, REFINEMENT_OFF, REFINING_REASON, refineStatus, resolvedRows, TO_REFINE_TIP, unifiedLabel } from "../board/logic";
-import { driftComparison } from "../drift-compare";
+import { decisionBlockers, decisionLabel, differenceStateLabel, isRefining, MERGE_LABEL, PAUSED_TIP, QUEUED_REASON, type RefineStatus, driftReworkBlocker, finishingBlocker, recurringLabel, REFINEMENT_OFF, REFINING_REASON, refineStatus, resolvedRows, TO_REFINE_TIP, unifiedLabel } from "../board/logic";
+import { type DriftComparison, differenceComparison, driftComparison } from "../drift-compare";
 import { dismissBlocker } from "../dismiss";
 import { InlineMarkdown, Markdown } from "../markdown";
 import { previewable, TaskImages } from "../task-images";
@@ -185,7 +185,11 @@ function Lines({ lines, className }: { lines: string[]; className: string }) {
 }
 
 export function DriftCompare({ drift, openLink }: { drift: DriftView; openLink: (url: string) => void }) {
-  const c = driftComparison(drift);
+  return <Sides comparison={driftComparison(drift)} openLink={openLink} />;
+}
+
+/** The two columns of what happens and what should happen, stacked when the panel is narrow. */
+function Sides({ comparison: c, openLink }: { comparison: DriftComparison; openLink: (url: string) => void }) {
   const column = (heading: string, source: string | null, text: string) => (
     <section className="min-w-0">
       <h4 className="mb-1 text-xs font-semibold">
@@ -200,6 +204,149 @@ export function DriftCompare({ drift, openLink }: { drift: DriftView; openLink: 
       {column("What happens", null, c.happens)}
       {column("What should happen", c.shouldSource, c.should)}
     </div>
+  );
+}
+
+/**
+ * The blocks of a unified Drift with differences, one per difference in order, in place of the two sides. The header of a block is a button that
+ * opens and closes it; a difference still open starts expanded and a decided one collapsed. `request` asks for one block to open and take the focus
+ * (a row of a resolution led here). The fix options show only where `fixOptions` is set (the Diagram); `showTask` leads to the fix Task of a decision.
+ */
+export function DifferenceBlocks({
+  drift,
+  numbers,
+  openLink,
+  fixOptions,
+  request,
+  showTask,
+}: {
+  drift: DriftView;
+  numbers: CardNumbers;
+  openLink: (url: string) => void;
+  fixOptions: boolean;
+  request: { difference: string; n: number } | null;
+  showTask: (task: string) => void;
+}) {
+  const base = useId();
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set(drift.differences.filter((d) => d.open).map((d) => d.drift)));
+  const headers = useRef(new Map<string, HTMLButtonElement>());
+  const toggle = (difference: string) => setExpanded((now) => (now.has(difference) ? new Set([...now].filter((x) => x !== difference)) : new Set([...now, difference])));
+  /** Opens the block and puts the focus on its header. */
+  const reveal = (difference: string) => {
+    setExpanded((now) => (now.has(difference) ? now : new Set([...now, difference])));
+    const header = headers.current.get(difference);
+    header?.scrollIntoView?.({ block: "nearest" });
+    header?.focus();
+  };
+  useEffect(() => {
+    if (request !== null) reveal(request.difference);
+  }, [request?.n]);
+  return (
+    <section aria-label="Differences of this Drift" className="my-2 flex flex-col gap-2 text-xs">
+      {drift.differences.map((d) => {
+        const isOpen = expanded.has(d.drift);
+        const headerId = `${base}-header-${d.drift}`;
+        const bodyId = `${base}-body-${d.drift}`;
+        const linked = d.linked.flatMap((name) => drift.differences.find((x) => x.drift === name) ?? []);
+        const chosen = d.option === null ? undefined : d.options[d.option - 1];
+        return (
+          <div key={d.drift} data-difference={d.drift} className="rounded-md border">
+            <div className="flex flex-col gap-1 p-2">
+              <button
+                type="button"
+                id={headerId}
+                ref={(node) => {
+                  if (node) headers.current.set(d.drift, node);
+                  else headers.current.delete(d.drift);
+                }}
+                aria-expanded={isOpen}
+                aria-controls={bodyId}
+                className="flex w-full flex-wrap items-baseline gap-x-2 gap-y-1 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => toggle(d.drift)}
+              >
+                {isOpen ? <ChevronUp aria-hidden="true" focusable="false" className="size-3.5 self-center" /> : <ChevronDown aria-hidden="true" focusable="false" className="size-3.5 self-center" />}
+                <span className="font-semibold break-words">{d.title}</span>
+                <IdTag name={cardNameOf(numbers, "drift", d.drift)} />
+                <span data-state={d.open ? "open" : d.decision} className="text-muted-foreground">
+                  {differenceStateLabel(d)}
+                </span>
+              </button>
+              {linked.length > 0 ? (
+                <p className="pl-5 text-muted-foreground">
+                  Linked to{" "}
+                  {linked.map((other, at) => (
+                    <Fragment key={other.drift}>
+                      {at > 0 ? ", " : ""}
+                      <button type="button" data-action={`linked:${other.drift}`} className="rounded-sm text-left text-foreground underline outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => reveal(other.drift)}>
+                        {other.title}
+                      </button>
+                    </Fragment>
+                  ))}
+                </p>
+              ) : null}
+            </div>
+            {isOpen ? (
+              <div id={bodyId} role="region" aria-labelledby={headerId} className="border-t px-2 pb-2">
+                {d.open ? (
+                  <>
+                    <Sides comparison={differenceComparison(d)} openLink={openLink} />
+                    {d.where !== null && d.where.trim() !== "" ? (
+                      <section className="my-2">
+                        <h4 className="mb-1 text-xs font-semibold">Where in the code</h4>
+                        <Markdown source={d.where} openLink={openLink} />
+                      </section>
+                    ) : null}
+                    {fixOptions && d.options.length > 0 ? (
+                      <section className="my-2">
+                        <h4 className="mb-1 text-xs font-semibold">Fix options</h4>
+                        <ol className="flex list-decimal flex-col gap-1.5 pl-4">
+                          {d.options.map((option, at) => (
+                            <li key={at} className="break-words">
+                              <span className="font-semibold">{option.title}</span>
+                              {at === 0 ? <span className="text-muted-foreground"> (recommended)</span> : null}
+                              {option.text.trim() !== "" ? <Markdown source={option.text} openLink={openLink} /> : null}
+                            </li>
+                          ))}
+                        </ol>
+                      </section>
+                    ) : null}
+                  </>
+                ) : (
+                  <div className="my-2 flex flex-col gap-1.5">
+                    <p>
+                      <span className="font-semibold">Decision</span> {differenceStateLabel(d)}
+                    </p>
+                    {chosen !== undefined ? (
+                      <p>
+                        <span className="font-semibold">Chosen option</span> {d.option}. {chosen.title}
+                      </p>
+                    ) : null}
+                    {d.note !== null && d.note.trim() !== "" ? (
+                      <section>
+                        <h4 className="mb-1 text-xs font-semibold">Note</h4>
+                        <Markdown source={d.note} openLink={openLink} />
+                      </section>
+                    ) : null}
+                    {d.task !== null ? (
+                      <p>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button type="button" data-action={`fix-task:${d.task}`} className="rounded-sm text-left outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring" onClick={() => showTask(d.task!)}>
+                              Fix Task <IdTag name={cardNameOf(numbers, "task", d.task)} />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>Show the Task on the Board</TooltipContent>
+                        </Tooltip>
+                      </p>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </section>
   );
 }
 
@@ -286,16 +433,16 @@ function ProposalTasks({ proposal, jump, openLink, openImage }: { proposal: Prop
   );
 }
 
-function ResolvesBlock({ proposal, numbers, showDrift }: { proposal: ProposalView; numbers: CardNumbers; showDrift: (drift: string) => void }) {
+function ResolvesBlock({ proposal, numbers, showDrift }: { proposal: ProposalView; numbers: CardNumbers; showDrift: (drift: string, difference?: string) => void }) {
   return (
     <>
       <div className={HEADING}>Resolves Drifts</div>
       <ul aria-label={`Drifts resolved by ${proposal.title}`} className="flex flex-col gap-0.5 text-xs">
         {resolvedRows(proposal, numbers).map((row) => (
-          <li key={row.drift}>
+          <li key={`${row.drift}:${row.difference ?? ""}`}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <button type="button" data-action={`resolves:${row.drift}`} className="flex w-full flex-wrap items-baseline gap-x-2 gap-y-1 py-px text-left hover:[&_.title]:underline" onClick={() => showDrift(row.drift)}>
+                <button type="button" data-action={`resolves:${row.drift}`} className="flex w-full flex-wrap items-baseline gap-x-2 gap-y-1 py-px text-left hover:[&_.title]:underline" onClick={() => (row.difference === null ? showDrift(row.drift) : showDrift(row.drift, row.difference))}>
                   <IdTag name={row.name} />
                   <span className="title break-words">{row.title}</span>
                   {row.unifies.length > 0 ? <UnifiedBadge count={row.unifies.length} /> : null}
@@ -304,7 +451,7 @@ function ResolvesBlock({ proposal, numbers, showDrift }: { proposal: ProposalVie
                   <span className="break-words text-muted-foreground">{row.decision}</span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent>Show the Drift on the diagram</TooltipContent>
+              <TooltipContent>{row.difference === null ? "Show the Drift on the diagram" : "Show the difference on the diagram"}</TooltipContent>
             </Tooltip>
           </li>
         ))}
@@ -441,6 +588,7 @@ export function DetailsPanel({
   proposalResolveReason,
   driftReworkReason,
   refinement = REFINEMENT_OFF,
+  differenceRequest = null,
   actions,
 }: {
   detail: Detail;
@@ -452,6 +600,8 @@ export function DetailsPanel({
   proposalResolveReason: string | null;
   /** The Proposal refinement; off by default. */
   refinement?: RefinementView;
+  /** A block of the differences of the Drift in the detail to open and focus (a row of a resolution led here), or null. */
+  differenceRequest?: { difference: string; n: number } | null;
   /** Why the arrow of «Dismiss Drift» is disabled for the Drift in the detail, or null. */
   driftReworkReason: string | null;
   actions: {
@@ -465,7 +615,8 @@ export function DetailsPanel({
     reworkDrift(id: string): void;
     openLink(url: string): void;
     openTaskImage(task: string, name: string): void;
-    showDrift(id: string): void;
+    showDrift(id: string, difference?: string): void;
+    showTask(task: string): void;
     dismiss(id: string): void;
   };
 }) {
@@ -507,7 +658,11 @@ export function DetailsPanel({
       </header>
       {drift ? (
         <>
-          <DriftCompare drift={drift} openLink={actions.openLink} />
+          {drift.differences.length > 0 ? (
+            <DifferenceBlocks drift={drift} numbers={detail.numbers} openLink={actions.openLink} fixOptions request={differenceRequest} showTask={actions.showTask} />
+          ) : (
+            <DriftCompare drift={drift} openLink={actions.openLink} />
+          )}
           {drift.unifies.length > 0 ? <UnifiesList unifies={drift.unifies} numbers={detail.numbers} show={actions.showDrift} /> : null}
           {drift.previous.length > 1 ? <FollowsList previous={drift.previous} numbers={detail.numbers} show={actions.showDrift} /> : null}
           {drift.unifiedInto != null ? (
@@ -576,6 +731,7 @@ export function DiagramDetails({ store, context }: { store: DiagramStore; contex
       proposalWait={detail.proposal && snapshot ? finishingBlocker(detail.proposal.id, snapshot.finishingProposals) : null}
       proposalResolveReason={detail.proposal?.kind === "resolution" ? state.resolveBlocker : null}
       refinement={state.refinement}
+      differenceRequest={state.differenceRequest !== null && state.differenceRequest.drift === detail.drift?.id ? state.differenceRequest : null}
       driftReworkReason={
         detail.drift && snapshot
           ? driftReworkBlocker(dismissBlocker(detail.drift.id, snapshot.resolutionDrifts, state.resolveBlocker, snapshot.finishingDrifts), state.resolveBlocker)
@@ -592,7 +748,8 @@ export function DiagramDetails({ store, context }: { store: DiagramStore; contex
         reworkDrift: (id) => context.post({ type: "reworkDrift", drift: id }),
         openLink: context.openLink,
         openTaskImage: (task, name) => context.post({ type: "openTaskImage", task, name }),
-        showDrift: (id) => store.navigateDrift(id),
+        showDrift: (id, difference) => store.navigateDrift(id, difference),
+        showTask: (task) => context.navigate("board", { task }),
         dismiss: (id) => context.post({ type: "dismissDrift", id }),
       }}
     />

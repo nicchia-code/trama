@@ -44,7 +44,7 @@ export function briefingView(p: Project, b: Briefing, announcement: string): Res
   const analysis = analyzeView(b.project.model, b.machine.id);
   const tasks = b.openTasks.map((t) => `- Task ${n.name("task", t.id)} (${t.data.column}): ${t.title}`);
   const drifts = b.openDrifts.map((d) => `- Drift ${n.name("drift", d.id)}: ${d.title}`);
-  const closed = b.closedDrifts.map((d) => `- Drift ${n.name("drift", d.id)} (${d.data.resolution ?? "resolved"}): ${d.title}${d.data.note ? `\n${quoteLines(d.data.note)}` : ""}`);
+  const closed = b.closedDrifts.map(({ drift: d, decision, note }) => `- Drift ${n.name("drift", d.id)} (${decision}): ${d.title}${note ? `\n${quoteLines(note)}` : ""}`);
   const md = [
     announcement,
     `## Machine \`${b.machine.id}\` (${b.machine.name})`,
@@ -70,7 +70,7 @@ export function briefingView(p: Project, b: Briefing, announcement: string): Res
       warnings: analysis.json,
       openTasks: b.openTasks.map((t) => ({ ...cardLine("task", t), column: t.data.column })),
       openDrifts: b.openDrifts.map((d) => ({ ...cardLine("drift", d), refs: d.data.refs })),
-      closedDrifts: b.closedDrifts.map((d) => ({ ...cardLine("drift", d), resolution: d.data.resolution, note: d.data.note })),
+      closedDrifts: b.closedDrifts.map(({ drift: d, decision, note }) => ({ ...cardLine("drift", d), resolution: decision, note })),
       publishedIssues: b.issues,
     },
   };

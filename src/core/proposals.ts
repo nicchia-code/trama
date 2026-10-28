@@ -33,7 +33,7 @@ import type { Diagnostic, FileMap } from "./types";
 import { appliesUnder, type RequiredProposal, requiredReasons } from "./required";
 import { cardName, identityOfShortNumber, savedIdentityOfShortNumber, syncShortNumbers } from "./short-numbers";
 import { isSpecsRef, SPECS_FILE } from "./specs";
-import { attachedDrift, type Drift, type DriftOutcome, fixCodeRefusal, listDrifts, listTasks, planApprovalTasks, requireNotAttached, resolveListedDrifts, writeApprovalTasks } from "./work";
+import { attachedDrift, type Drift, type DriftOutcome, differenceOf, fixCodeRefusal, hasDifferences, listDrifts, listTasks, planApprovalTasks, requireNotAttached, resolveListedDrifts, writeApprovalTasks } from "./work";
 import { IMAGE_EXTENSIONS, isImagePath, pruneTaskImages, removeTaskImage } from "./task-image-cleanup";
 import { copyTaskImages, readTaskImages } from "./task-images";
 import { removedElements, type RemovedKind, SCAN_REASONS, scanScope, type ScanScopeEntry } from "./scan-scope";
@@ -57,9 +57,13 @@ export type ProposalKind = "change" | "import" | "resolution" | "setup" | "hando
 
 export type DriftDecisionKind = "proposal" | "dismissed" | "fix-code";
 
-/** The decision taken on one Drift by a resolution Proposal; `option` and `note` go only with `fix-code`. */
+/**
+ * The decision taken on one Drift by a resolution Proposal; `option` and `note` go only with `fix-code`. `difference` is the `drift` of the
+ * difference of a unified Drift with differences that the entry decides: such a Drift appears only in entries with it, one per difference.
+ */
 export interface DriftDecision {
   drift: string;
+  difference?: string;
   decision: DriftDecisionKind;
   option?: number;
   note?: string;
@@ -181,16 +185,17 @@ function driftsField(raw: Raw, kind: ProposalKind, where: string): DriftDecision
   const v = raw["drifts"];
   if (v === undefined || v === null) return [];
   if (kind !== "resolution") throw new TramaError(`${where}: only a resolution Proposal has "drifts"`);
-  const bad = `${where}: "drifts" must be a list of { drift, decision, option?, note? } with decision one of ${DECISIONS.join(", ")}`;
+  const bad = `${where}: "drifts" must be a list of { drift, difference?, decision, option?, note? } with decision one of ${DECISIONS.join(", ")}`;
   if (!Array.isArray(v)) throw new TramaError(bad);
   const out = v.map((e): DriftDecision => {
     const drift = idField(e ?? {}, "drift", where);
     if (drift === null || !DECISIONS.includes(e.decision)) throw new TramaError(bad);
+    const difference = idField(e, "difference", where);
     const option = positiveIntOrNull(e, "option", where);
     const note = textOrNull(e, "note", where);
-    return { drift, decision: e.decision, ...(option === null ? {} : { option }), ...(note === null ? {} : { note }) };
+    return { drift, ...(difference === null ? {} : { difference }), decision: e.decision, ...(option === null ? {} : { option }), ...(note === null ? {} : { note }) };
   });
-  if (new Set(out.map((e) => e.drift)).size !== out.length) throw new TramaError(`${where}: "drifts" lists a Drift more than once`);
+  if (new Set(out.map((e) => `${e.drift} ${e.difference ?? ""}`)).size !== out.length) throw new TramaError(`${where}: "drifts" lists a Drift, or a difference of a Drift, more than once`);
   return out;
 }
 
@@ -1238,20 +1243,32 @@ export function resolutionHolding(p: Project, driftId: string, exceptId?: string
   return listProposals(p).find((r) => r.id !== exceptId && r.data.kind === "resolution" && (r.data.status === "draft" || r.data.status === "open") && r.data.drifts.some((d) => d.drift === driftId)) ?? null;
 }
 
-/** What is wrong with the Drift list of a resolution: empty, a Drift no longer open, or one also in another resolution being written or open. Empty for any other Proposal. */
+/**
+ * What is wrong with the Drift list of a resolution: empty, a Drift no longer open, or one also in another resolution being written or open;
+ * a unified Drift with differences listed without `difference`, a `difference` on any other Drift or one the Drift does not have, a difference no longer open,
+ * and a fix of the code that no Model element is left to point at, each checked for its own difference. Empty for any other Proposal.
+ */
 export function driftListProblems(p: Project, proposal: Proposal): string[] {
   if (proposal.data.kind !== "resolution") return [];
   if (proposal.data.drifts.length === 0) return ["its Drift list is empty: list at least one Drift with \"drifts\" in \"trama proposal edit\""];
   const drifts = new Map(listDrifts(p).map((d) => [d.id, d]));
   const after = buildProject(applied(p, proposal));
   const problems: string[] = [];
-  for (const { drift: id } of proposal.data.drifts) {
+  for (const id of new Set(proposal.data.drifts.map((d) => d.drift))) {
     const name = cardName(p, "drift", id);
     const drift = drifts.get(id);
     if (drift?.data.status !== "open") problems.push(`Drift ${name} is no longer open`);
-    else if (proposal.data.drifts.find((d) => d.drift === id)?.decision === "fix-code") {
-      const refusal = fixCodeRefusal(p, drift, after);
-      if (refusal) problems.push(refusal);
+    else {
+      for (const entry of proposal.data.drifts.filter((d) => d.drift === id)) {
+        const { difference } = entry;
+        if (difference === undefined && hasDifferences(drift)) problems.push(`The entry for Drift ${name} has no "difference": a unified Drift with differences is decided difference by difference`);
+        else if (difference !== undefined && differenceOf(drift, difference) === null) problems.push(`The entry for Drift ${name} names the difference ${cardName(p, "drift", difference)}, which the Drift does not have`);
+        else if (difference !== undefined && differenceOf(drift, difference)?.decision !== null) problems.push(`The difference ${cardName(p, "drift", difference)} of Drift ${name} is no longer open`);
+        else if (entry.decision === "fix-code") {
+          const refusal = fixCodeRefusal(p, drift, after, difference);
+          if (refusal) problems.push(refusal);
+        }
+      }
     }
     const other = resolutionHolding(p, id, proposal.id);
     if (other) problems.push(`Drift ${name} is also in resolution ${cardName(p, "proposal", other.id)}, which is still to be decided`);
@@ -1264,8 +1281,8 @@ export function unfixableDrifts(p: Project, proposal: Proposal, drifts?: readonl
   if (proposal.data.kind !== "resolution") return [];
   const open = new Map((drifts ?? listDrifts(p)).filter((d) => d.data.status === "open").map((d) => [d.id, d]));
   const after = buildProject(applied(p, proposal));
-  return proposal.data.drifts.flatMap(({ drift, decision }) => {
+  return proposal.data.drifts.flatMap(({ drift, difference, decision }) => {
     const d = open.get(drift);
-    return (decision === "fix-code" && d && fixCodeRefusal(p, d, after)) || [];
+    return (decision === "fix-code" && d && fixCodeRefusal(p, d, after, difference)) || [];
   });
 }

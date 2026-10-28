@@ -9,7 +9,7 @@ afterEach(cleanup);
 function setup(initial: Partial<Parameters<typeof createShellStore>[0]> = {}) {
   const views = {} as Record<ViewName, ReactNode>;
   for (const name of ["getstarted", "diagram", "board", "requirements", "specs", "history", "team", "settings"] as const) views[name] = <p data-view={name}>{`view ${name}`}</p>;
-  const store = createShellStore({ view: "board", hasProject: true, error: null, diagnostics: [], views, questions: null, githubRepo: null, teamAvailable: false, ...initial });
+  const store = createShellStore({ view: "board", hasProject: true, error: null, diagnostics: [], views, questions: null, githubRepo: null, team: false, ...initial });
   const opened: string[] = [];
   const utils = render(<Shell store={store} openModelFile={(path) => opened.push(path)} />);
   return { store, opened, ...utils };
@@ -34,21 +34,22 @@ test("with a project every view but Get Started is mounted; without one only Get
   expect(mountedViews()).toEqual(["getstarted", "settings"]);
 });
 
-test("Team is mounted, after History and before Settings, only while it is available", () => {
-  const { unmount } = setup({ teamAvailable: true });
+test("Team is mounted, after History and before Settings, whenever origin is on GitHub, with Manager mode on or off", () => {
+  // The shell store knows only whether origin is on GitHub: Manager mode changes the tabs of the view, not its presence.
+  const { unmount } = setup({ team: true });
   expect(mountedViews()).toEqual(["board", "diagram", "requirements", "specs", "history", "team", "settings"]);
   unmount();
-  setup({ teamAvailable: false });
+  setup({ team: false });
   expect(mountedViews()).not.toContain("team");
   cleanup();
-  setup({ hasProject: false, view: "getstarted", teamAvailable: true });
+  setup({ hasProject: false, view: "getstarted", team: true });
   expect(mountedViews()).toEqual(["getstarted", "settings"]);
 });
 
-test("when Team stops being available it goes away and the view shown is the one the host navigates to", () => {
-  const { store } = setup({ teamAvailable: true, view: "team" });
+test("when origin stops being on GitHub Team goes away and the view shown is the one the host navigates to", () => {
+  const { store } = setup({ team: true, view: "team" });
   expect(shown()).toEqual(["team"]);
-  act(() => store.set({ teamAvailable: false, view: "board" }));
+  act(() => store.set({ team: false, view: "board" }));
   expect(mountedViews()).not.toContain("team");
   expect(shown()).toEqual(["board"]);
 });

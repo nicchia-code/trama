@@ -37,6 +37,8 @@ export interface BoardEnv extends ViewEnv {
   openTask(task: string): void;
   /** Opens the details window of a Drift in Backlog. */
   openDrift(drift: string): void;
+  /** Replaces the Drift details window with the details window of the fix Task of a decided difference. */
+  showTask(task: string): void;
   /** Opens the whole image `name` of a Task in an editor tab. */
   openTaskImage(task: string, name: string): void;
   /** Opens the read-only details of the ghost with this key (`AnnouncedCard.key`). */
@@ -229,23 +231,28 @@ export function taskBorder(card: TaskCard): string {
   return text === null ? "border-l-border" : `border-l-[3px] ${ACCENT[tagColour(text)]}`;
 }
 
+/** One reference as a chip that opens the Diagram, Requirements or Specs with the focus of the reference through `go` (the page's own `navigate`). */
+export function RefChip({ reference, go }: { reference: string; go: ViewContext["navigate"] }) {
+  const view = viewOfRef(reference);
+  const text = view === "requirements" ? `Show ${reference} in Requirements` : view === "specs" ? `Show ${reference} in Specs` : `Show ${reference} on the diagram`;
+  return (
+    <Tip text={text}>
+      <Button variant="outline" size="sm" aria-description={text} className="h-auto max-w-full rounded-full px-1.5 py-0 text-[11px] font-normal text-primary" onClick={() => go(view, { focus: { kind: "ref", ref: reference } })}>
+        <span className="truncate">{reference}</span>
+      </Button>
+    </Tip>
+  );
+}
+
 /** Links to the Diagram, to Requirements or to Specs, one chip per reference, each opening that tab with the focus of the reference. `navigate` replaces the page's own navigation. */
 export function RefChips({ refs, navigate }: { refs: string[]; navigate?: ViewContext["navigate"] }) {
   const { context } = useViewEnv();
   const go = navigate ?? context.navigate;
   return (
     <div className="flex flex-wrap gap-1">
-      {refs.map((ref) => {
-        const view = viewOfRef(ref);
-        const text = view === "requirements" ? `Show ${ref} in Requirements` : view === "specs" ? `Show ${ref} in Specs` : `Show ${ref} on the diagram`;
-        return (
-          <Tip key={ref} text={text}>
-            <Button variant="outline" size="sm" aria-description={text} className="h-auto max-w-full rounded-full px-1.5 py-0 text-[11px] font-normal text-primary" onClick={() => go(view, { focus: { kind: "ref", ref } })}>
-              <span className="truncate">{ref}</span>
-            </Button>
-          </Tip>
-        );
-      })}
+      {refs.map((ref) => (
+        <RefChip key={ref} reference={ref} go={go} />
+      ))}
     </div>
   );
 }

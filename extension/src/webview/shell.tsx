@@ -18,8 +18,8 @@ export interface ShellState {
   questions: ReactNode;
   /** The project's GitHub repository (`owner/repo`) the host sent with the picture; null without one. */
   githubRepo: string | null;
-  /** Whether Team is available (Manager mode on and origin on GitHub): only then the panel has the Team view. */
-  teamAvailable: boolean;
+  /** Whether origin is on GitHub (Manager mode on or off): only then the panel has the Team view. */
+  team: boolean;
 }
 
 export interface ShellStore {
@@ -58,7 +58,7 @@ export function Shell({
   const state = useSyncExternalStore(store.subscribe, store.get);
   const present = state.hasProject === true;
   // Without a project the views are Get Started and Settings; with one, every view but Get Started.
-  const views = present ? PROJECT_VIEWS.filter((view) => view !== "team" || state.teamAvailable) : (["getstarted", "settings"] as const);
+  const views = present ? PROJECT_VIEWS.filter((view) => view !== "team" || state.team) : (["getstarted", "settings"] as const);
   return (
     <TooltipProvider>
       <div className="flex h-full flex-col">

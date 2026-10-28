@@ -2,7 +2,7 @@ import { stringify } from "yaml";
 import { ADVISOR_SCANNER_ENV, ADVISOR_SCANNER_ON } from "../../../src/core/advisors";
 import { TERMINAL_ENV } from "../../../src/core/announcements";
 import { PARALLEL_ENV, PARALLEL_ON, RUN_ENV, RUN_ON, TASK_ENV } from "../../../src/core/claims";
-import { QUESTION_ENDPOINT_ENV } from "../../../src/core/question-channel";
+import { QUESTION_ENDPOINT_ENV, QUESTION_PROJECT_ENV } from "../../../src/core/question-channel";
 import { quote, quoteProgram, type ShellFamily } from "./quote";
 
 /** The model roles (`trama.analysis`, `trama.scan`, `trama.execution`), trimmed; empty leaves the agent's default. */
@@ -20,13 +20,13 @@ export interface RunModel {
 
 
 /**
- * The role of an instruction, from the name of its terminal: `Design`, `Setup`, `Import`, `Drifts`, `Handoff` and `Split <n>` are analysis, `Scan` and `Scan #<n>` (the scan of
- * a closed issue) are scan, the implement runs (a Task's short number, `All tasks`), `Publish <n>` and `Update #<n>` are execution. The role
+ * The role of an instruction, from the name of its terminal: `Design`, `Setup`, `Import`, `Drifts`, `Handoff` and `Split <n>` are analysis, `Scan`, `Scan #<n>` (the scan of
+ * a closed issue) and `PR #<n>` (the PR Check of a pull request) are scan, the implement runs (a Task's short number, `All tasks`), `Publish <n>` and `Update #<n>` are execution. The role
  * only tells whether the instruction can scan: its model comes from the launch (`RunModel`).
  */
 // ponytail: the role follows the terminal name, which the Requirements tie one-to-one to the kind of instruction; pass the role explicitly if a name ever serves two roles.
 export const roleOf = (name: string): Role =>
-  name === "Design" || name === "Setup" || name === "Import" || name === "Drifts" || name === "Handoff" || name === "Replan" || name.startsWith("Split ") ? "analysis" : name === "Scan" || name.startsWith("Scan #") ? "scan" : "execution";
+  name === "Design" || name === "Setup" || name === "Import" || name === "Drifts" || name === "Handoff" || name === "Replan" || name.startsWith("Split ") ? "analysis" : name === "Scan" || name.startsWith("Scan #") || name.startsWith("PR #") ? "scan" : "execution";
 
 /** Whether instructions of `role` can scan (every scan and every implement run) and use the analysis sub-agent. */
 export const canScan = (role: Role): boolean => role !== "analysis";
@@ -94,14 +94,16 @@ export function launchOverlay({ advisor, disabledExtensions }: LaunchOverlay): s
  * terminal's ID, the job ID (`TRAMA_JOB`, which only times the phases of its work) and, only for a Run launched with the Advisor Scanner on (`advisor`),
  * `TRAMA_ADVISOR_SCANNER=1`, which Trama's advisors read through `trama advisor show`. A Run (`run`) also carries `TRAMA_RUN=1`, which makes the
  * write tools of its agents claim the files they write; with `task`, the Task it implements (`TRAMA_TASK`), and with `parallel`, the parallel
- * execution is on (`TRAMA_PARALLEL=1`): a sub-agent stopped by a claim then records the clash.
+ * execution is on (`TRAMA_PARALLEL=1`): a sub-agent stopped by a claim then records the clash. With `editorProject`, the project identity of the editor that launched the agent (the PR Check
+ * works in a worktree, not in the editor's project): its commands reach the editor under it (`QUESTION_PROJECT_ENV`).
  */
-export function terminalEnv(endpoint: string, terminalId: string, jobId?: string, advisor = false, run = false, task?: string, parallel = false): Record<string, string> {
+export function terminalEnv(endpoint: string, terminalId: string, jobId?: string, advisor = false, run = false, task?: string, parallel = false, editorProject?: string): Record<string, string> {
   return {
     TRAMA_AGENT: "1",
     [QUESTION_ENDPOINT_ENV]: endpoint,
     [TERMINAL_ENV]: terminalId,
     ...(jobId === undefined ? {} : { TRAMA_JOB: jobId }),
+    ...(editorProject === undefined ? {} : { [QUESTION_PROJECT_ENV]: editorProject }),
     ...(advisor ? { [ADVISOR_SCANNER_ENV]: ADVISOR_SCANNER_ON } : {}),
     ...(run ? { [RUN_ENV]: RUN_ON } : {}),
     ...(run && task !== undefined ? { [TASK_ENV]: task } : {}),

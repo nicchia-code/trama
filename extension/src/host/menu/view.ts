@@ -182,11 +182,12 @@ export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
       mergeState: () => this.soloMerge.state(),
       manager: () => {
         const project = findProject();
-        if (project === undefined) return false;
+        if (project === undefined) return { team: false, manager: false };
         try {
-          return managerStatus(project).available;
+          const status = managerStatus(project);
+          return { team: status.repository !== null, manager: status.available };
         } catch {
-          return false;
+          return { team: false, manager: false };
         }
       },
       startMerge: () => this.guarded(() => this.soloMerge.merge()),

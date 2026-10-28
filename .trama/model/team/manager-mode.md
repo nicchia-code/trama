@@ -4,19 +4,21 @@ Whether this working copy uses Team (see the Team feature). Manager mode is reco
 
 Manager mode needs the project's repository on GitHub: the remote the working copy calls origin points to a repository on GitHub. Without it, the Settings tab and the wizard show Manager mode off and not changeable, and say why. A Manager mode left on in a working copy whose origin no longer points to GitHub stays recorded, but Team is not available and the side menu has no Team entry until origin points to GitHub again.
 
+The Team view itself does not need Manager mode: with origin on GitHub it is there for everyone, with only the Pull Requests tab (see the PR Check). Manager mode adds the Manager's tabs, the GitHub Project and the number of handoffs.
+
 Turning Manager mode off never deletes anything: the people stay in the Manager's editor and Team's work stays in the project, and turning it on again brings everything back.
 
 ## States
 
 ### Off (initial)
-The working copy does not use Team: the side menu has no Team entry and the panel has no Team view.
-- `developer.TURN_ON_MANAGER_MODE` → On: only when origin points to a repository on GitHub. Trama records Manager mode in the project; the side menu shows the Team entry. If the write fails, nothing changes and the reason is shown.
+The working copy does not use Team: the Team view, when origin is on GitHub, shows only the Pull Requests tab, and the side menu's Team entry carries no number.
+- `developer.TURN_ON_MANAGER_MODE` → On: only when origin points to a repository on GitHub. Trama records Manager mode in the project; the Team view adds the Manager's tabs. If the write fails, nothing changes and the reason is shown.
 - `developer.INITIALIZE_PROJECT` → On: the developer chose Manager mode in the first setup of the wizard and confirmed. Trama records it as part of creating the project. If the write fails, the project is still created, Manager mode stays off and the reason is shown.
 - `developer.CONFIRM_SETUP` → On: the developer chose Manager mode in the wizard opened from Guided setup or on an empty Model, and confirmed. Trama records it as above, together with the other choices of the wizard.
 
 ### On
 The working copy uses Team.
-- `developer.TURN_OFF_MANAGER_MODE` → Off: Trama forgets Manager mode; the side menu loses the Team entry. If the write fails, nothing changes and the reason is shown.
+- `developer.TURN_OFF_MANAGER_MODE` → Off: Trama forgets Manager mode; the Team view keeps only the Pull Requests tab. If the write fails, nothing changes and the reason is shown.
 - `developer.CONFIRM_SETUP` → Off: the developer turned Manager mode off in the wizard and confirmed.
 
 ## Events

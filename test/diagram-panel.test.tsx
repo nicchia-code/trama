@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { DriftView } from "../src/core/snapshot";
 import type { ToHost } from "../extension/src/protocol";
 import { createDiagramStore } from "../extension/src/webview/diagram/state";
 import { DiagramDetails } from "../extension/src/webview/diagram/panel";
@@ -81,6 +82,58 @@ test("a unified Drift shows its badge, a Unifies list and no buttons; a merged D
   expect(screen.getByRole("button", { name: /Unified into/ }).textContent).toContain("The unified one");
   fireEvent.click(screen.getByRole("button", { name: /Unified into/ }));
   expect(screen.getByLabelText("Unifies 1 Drifts")).not.toBeNull();
+});
+
+test("a unified Drift with differences shows one collapsible block per difference with the fix options, a request opens and focuses one block, and its fix Task leads to the Board", () => {
+  const base = snapshot.drifts.find((d) => d.refs.includes("order/Shipped"));
+  expect(base).toBeDefined();
+  const difference = (over: Partial<DriftView["differences"][number]>): DriftView["differences"][number] => ({
+    drift: "diffA", title: "Wrong refund", refs: ["order/Shipped"], sides: { happens: "Refunds go through.", should: "Refunds are refused.", where: "`src/refund.ts`" }, where: "`src/refund.ts`",
+    options: [{ title: "Refuse", text: "Refuse the refund." }, { title: "Allow", text: "Allow it." }], proposal: null, linked: [], decision: null, option: null, note: null, task: null, open: true, ...over,
+  });
+  const differences = [
+    difference({ linked: ["diffB"] }),
+    difference({ drift: "diffB", title: "Late refund", linked: ["diffA"], decision: "fix-code", option: 2, note: "Mind the totals.", task: "fixTask", open: false }),
+    difference({ drift: "diffC", title: "Wrong total", decision: "proposal", open: false }),
+  ];
+  const unified = { ...base!, id: "unifiedU1", title: "The unified one", refs: ["order/Shipped"], unifies: [{ id: "mergedA1", title: "Merged one" }], differences };
+  const store = createDiagramStore();
+  const navigated: unknown[][] = [];
+  store.update({ ...snapshot, drifts: [unified] }, null);
+  render(
+    <TooltipProvider>
+      <DiagramDetails store={store} context={{ post: () => {}, navigate: (...args: unknown[]) => navigated.push(args), openLink: () => {} } as unknown as ViewContext} />
+    </TooltipProvider>,
+  );
+  act(() => store.navigateDrift("unifiedU1"));
+  const first = screen.getByRole("button", { name: /^Wrong refund .*Open$/ });
+  const second = screen.getByRole("button", { name: /^Late refund .*Fix code$/ });
+  const third = screen.getByRole("button", { name: /^Wrong total .*Adapt model$/ });
+  expect([first, second, third].map((b) => b.getAttribute("aria-expanded"))).toEqual(["true", "false", "false"]);
+  expect(screen.getAllByText("What happens")).toHaveLength(1);
+  expect(screen.getByText("Fix options")).not.toBeNull();
+  expect(screen.getByText("(recommended)")).not.toBeNull();
+  expect(screen.getByText("Where in the code")).not.toBeNull();
+  // The order of the blocks is the order of the differences, and the Unifies section follows them.
+  const order = [...document.querySelectorAll("[data-difference]")].map((block) => block.getAttribute("data-difference"));
+  expect(order).toEqual(["diffA", "diffB", "diffC"]);
+  const section = screen.getByLabelText("Differences of this Drift");
+  expect(section.compareDocumentPosition(screen.getByLabelText("Drifts unified by this Drift")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  // A row of a resolution asks for the block: it opens and takes the focus.
+  act(() => store.show({ drift: "unifiedU1", difference: "diffB" }));
+  expect(second.getAttribute("aria-expanded")).toBe("true");
+  expect(document.activeElement).toBe(second);
+  expect(screen.getByText("Mind the totals.")).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /Fix Task/ }));
+  expect(navigated).toEqual([["board", { task: "fixTask" }]]);
+  // The line of linked differences opens the block it names.
+  fireEvent.click(second);
+  expect(second.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(screen.getAllByRole("button", { name: "Late refund" })[0] as HTMLElement);
+  expect(second.getAttribute("aria-expanded")).toBe("true");
+  // The request ends with the selection.
+  act(() => store.select(null));
+  expect(store.get().differenceRequest).toBeNull();
 });
 
 test("a drawn Proposal shows Approve and Reject on what it changes, and they send the decision", () => {

@@ -39,8 +39,8 @@ function elementRef(ref: string): string | null {
 
 /**
  * The levels that show elements of the focus, in the order of the Model: the root, then each Actor level, then each Feature followed by its
- * Machines. A reference whose element is not in the drawn Model is missing; Areas, `General` sections and Specs entries are not
- * Diagram elements and are neither a step nor missing.
+ * Machines. A reference whose element is not in the drawn Model is missing; Areas, `General` sections, sections not titled to a Model
+ * element and Specs entries are not Diagram elements and are neither a step nor missing.
  */
 export function diagramSteps(scene: Scene, refs: readonly string[]): Steps<DiagramStep> {
   const found = new Map<string, Element>();
@@ -58,7 +58,7 @@ export function diagramSteps(scene: Scene, refs: readonly string[]): Steps<Diagr
           if (machine) found.set(`machine:${id}`, { kind: "machine", ref: id, machine });
         }
       }
-    } else if (!missing.includes(ref)) missing.push(ref);
+    } else if (!ref.startsWith(REQUIREMENTS_PREFIX) && !missing.includes(ref)) missing.push(ref);
   }
   const byLevel = new Map<string, Element[]>();
   for (const element of found.values()) {

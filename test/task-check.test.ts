@@ -85,6 +85,16 @@ test("without an editor, without a handler or without an answer in time the answ
   expect(await check(id, true)).toEqual({ out: { task: id, result: "unavailable" }, exit: 0 });
 });
 
+test("when the window does not recognise the holder the answer is unknown-holder, in Markdown and with --json", async () => {
+  await window(() => ({ result: "unknown-holder" }));
+  const id = task();
+  moveTask(p, id, "doing", "agent", { terminal: "aaa111" });
+  const before = readFileSync(getTask(p, id).path, "utf8");
+  expect(await check(id, true)).toEqual({ out: { task: id, result: "unknown-holder" }, exit: 0 });
+  expect((await check(id)).out).toContain("its holder is not known");
+  expect(readFileSync(getTask(p, id).path, "utf8")).toEqual(before);
+});
+
 test("a Task that does not exist is an error", async () => {
   await expect(check("zzzzzzzz")).rejects.toThrow();
 });

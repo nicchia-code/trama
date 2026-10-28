@@ -1,10 +1,10 @@
 ---
 title: "Manager mode and Team"
-description: "Plan work for the people of a team, publish it as GitHub issues and follow it on a timeline."
+description: "Plan work for the people of a team, publish it as GitHub issues, follow it on a timeline, and check a pull request against the Model."
 order: 12
 ---
 
-> **Experimental.** Manager mode and Team are still taking shape: what they show, how handoffs and issues work and the settings they use may change from one release to the next.
+> **Experimental.** Manager mode and what it adds to Team, the handoffs, the issues and the timeline, are still taking shape: what they show, how they work and the settings they use may change from one release to the next. The PR Check, at the end of this page, is not part of it.
 
 **Manager mode** is for a developer who leads a team. Besides the agent, work can then be planned for people. The people may or may not use Trama: nothing in Team expects them to, and what Team gives them never needs Trama to be read.
 
@@ -84,3 +84,22 @@ text: |
 scene: team-timeline
 alt: "The Timeline tab of the Team view with a By person and By epic toggle, a grid of the sprints Sprint 2 (current) to Sprint 5 for Ana Rossi and Marco Bianchi with their issues as blocks and the load such as 3 of 5 days, and a hatched No iteration column."
 ```
+
+## PR Check
+
+The **PR Check** is for checking a pull request of someone else against the Model before it is merged, without touching the folder you work in. Anyone can do it, with or without Manager mode, in a project whose repository is on GitHub. It needs the GitHub CLI (`gh`) logged in to github.com, and never needs access to Projects: Trama only uses `gh` to read the pull requests, and the PR Check writes nothing to GitHub.
+
+The PR Check lives in the **Pull Requests** tab of the Team view. With Manager mode off, that is the only tab, and the **Team** entry of the side menu is there as soon as the remote called `origin` points to GitHub. The tab lists the open pull requests that are ready for review, the highest number first, so a draft is left out. Each row has the number, the title, the author, the branch it goes into and the branch it comes from, and its state: `Not checked`, `Checking…` or `Checked <time ago>`, with the badge `Outdated` when the pull request has new commits since. Trama reads the list when the view is shown and with **Refresh**, never on a timer.
+
+Press **Check** on a pull request (**Check again** once it has a report). Trama picks the way it works by itself:
+
+- **Solo**, when Solo mode is on, or when the pull request has no `.trama/` folder: the others do not use Trama, so the only Model is the one of your open folder. Trama copies its own files of that folder (the Model, the Requirements, the Specs, the cards and what it installs for the agent) into the worktree, and the scan marks as coming from the pull request every Drift whose code lies in a file the pull request changed since it left the branch it goes into.
+- **Collaborative**, when Solo mode is off and the pull request has a `.trama/` folder: the pull request brings its own Model. Trama first compares the Model at the point where the pull request left the branch it goes into with the one at its head, element by element, and checks that Model; then the agent scans the code against the Model of the pull request.
+
+The pull request is taken as it is, at its head, with no merge, into a git worktree that Trama creates in the editor's private folder for the workspace, never in the project. Your open folder, its Board, its last scan and everything Trama keeps locally stay as they are, and `git status`, `git branch` and `git worktree list` show what they showed before. The agent works in that worktree and scans the whole System, like **Scan System**: it costs, and that is wanted. It is told not to run, build or install anything of the pull request, and the cards it files stay in the worktree, never on your Board. When it has finished, Trama gathers the result into a report and removes the worktree.
+
+**Report** opens the report in a window: a table with the columns `Section`, `Reference`, `Finding`, `Source` and `Where in the code`, its rows grouped by section. `Code` holds what the scan found, in both ways: a Task for what the Model asks and the code lacks, and a Drift for every difference. In Collaborative, Trama's own checks add `Model`, one row for every element of the Model, section of the Requirements and field of the Specs the pull request adds, changes or removes; `Model problems`, for the errors of the Model of the pull request, for the files of the Model changed without an approved Proposal and for what the branch it goes into also changed; and `Open work`, for the Proposals, Tasks and Drifts the pull request brings that are still open. When nothing differs, the window says `No differences found.`
+
+The report is informative: it never decides anything, never reaches GitHub and is never committed. It stays only in your working copy, one per pull request, and the next check of the same pull request replaces it. When the pull request gets new commits the report is marked `Outdated`, and when the pull request is no longer open and ready for review, because it was merged, closed or went back to draft, Trama deletes its report.
+
+**Stop**, in the row while the PR Check works, ends the agent and removes the worktree without writing any report. A PR Check that fails, stops, or ends without the agent delivering its scan leaves the previous report as it was. Only one PR Check runs at a time in a window, and **Check** is disabled, with the reason as its tooltip, while another PR Check or a Run launched from this window is in progress, and after a failed read of GitHub. A worktree left over by a window closed during the check is removed the next time the project opens.

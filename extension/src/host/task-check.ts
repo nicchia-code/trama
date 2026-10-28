@@ -9,7 +9,7 @@ import { releaseUnfollowed } from "./task-release";
  * `agent.CHECK_TASK`: this window runs at once, for the Task `taskId` only, the execution check of `rules#time`. A Task held
  * by a terminal this window follows gets the terminal check; any other Task gets the release of Tasks no window follows,
  * which asks the other windows. A release puts the Task back in To do and shows the notice on this window's Board.
- * Answers `released` with the reason, `alive` with the holder, or `unavailable` when the Task is not held by a known holder.
+ * Answers `released` with the reason, `alive` with the holder, or `unknown-holder` when the Task is not held by a holder this window recognises.
  */
 export async function checkTaskHolder(root: string, taskId: string): Promise<TaskCheckReply> {
   const project = projectAt(root);
@@ -18,7 +18,7 @@ export async function checkTaskHolder(root: string, taskId: string): Promise<Tas
     return task.data.column === "doing" && task.data.agent && isKnownHolder(task.data.holder) ? { holder: task.data.holder } : undefined;
   };
   const before = held();
-  if (before === undefined) return { result: "unavailable" };
+  if (before === undefined) return { result: "unknown-holder" };
   const terminal = (await checkAgentTerminals(before.holder)).find((checked) => checked.reason !== undefined);
   if (terminal?.reason !== undefined) return { result: "released", reason: terminal.reason };
   const after = held();

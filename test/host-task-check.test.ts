@@ -37,12 +37,12 @@ test("a Task held by a terminal no window follows is released with the Board not
   expect(notices).toHaveLength(1);
 });
 
-test("a Task whose file says `agent: true` is held by nobody, so it is unavailable and unchanged", async () => {
+test("a Task whose file says `agent: true` has no holder this window recognises: unknown-holder, and nothing changes", async () => {
   const p = projectAt(dir);
   const anonymous = newTask(p, { title: "Anon", refs: ["order"], technical: false }).id;
   moveTask(p, anonymous, "doing", "developer");
   writeFileSync(getTask(p, anonymous).path, readFileSync(getTask(p, anonymous).path, "utf8").replace(/^agent: false$/m, "agent: true"));
-  expect(await checkTaskHolder(dir, anonymous)).toEqual({ result: "unavailable" });
+  expect(await checkTaskHolder(dir, anonymous)).toEqual({ result: "unknown-holder" });
   expect(getTask(p, anonymous).data.column).toBe("doing");
 });
 

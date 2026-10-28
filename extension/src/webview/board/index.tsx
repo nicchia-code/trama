@@ -88,6 +88,8 @@ export interface BoardPageProps {
   context: ViewContext;
   /** The ghost the status bar asked for (`navigate` with `ghost`): its details open, replacing any other details window. `n` tells one request from the next for the same ghost. */
   ghostRequest?: { id: string; n: number };
+  /** The Task a Diagram link asked for (`navigate` with `task`): its details open, replacing any other details window. `n` tells one request from the next for the same Task. */
+  taskRequest?: { id: string; n: number };
   /** Counts the answers of the host to Clear (`clearDoneEnded`): each change ends the hiding of the cards Clear was deleting. */
   clearEnded?: number;
   /** The time left of the Run all of this window, as the host sends it with each picture; absent: no Run all. */
@@ -180,7 +182,7 @@ function DoneColumn({ cards, open, toggle, chevron, clear, now }: { cards: Card[
 }
 
 /** The Board: three columns of cards (Backlog, Active, Done), and the notices at its top. */
-export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, models, refinement = REFINEMENT_OFF, runEstimate = null, modelList, notices, closeNotice, context, ghostRequest, clearEnded }: BoardPageProps) {
+export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, models, refinement = REFINEMENT_OFF, runEstimate = null, modelList, notices, closeNotice, context, ghostRequest, taskRequest, clearEnded }: BoardPageProps) {
   const root = useRef<HTMLDivElement>(null);
   /** The card whose queued refining was cancelled: its Approve gets the focus once the picture no longer queues it. */
   const refocus = useRef<string | null>(null);
@@ -272,6 +274,15 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, m
     setGhostFromBar(true);
     setGhostOf(`announced:${ghostRequest.id}`);
   }, [ghostRequest]);
+  // A Task a link of the Diagram asked for replaces every other details window of the Board.
+  useEffect(() => {
+    if (taskRequest === undefined) return;
+    setBodyOf(null);
+    setDriftOf(null);
+    setModelOf(null);
+    setGhostOf(null);
+    setTaskOf(taskRequest.id);
+  }, [taskRequest]);
   const focusBacklog = () => root.current?.querySelector<HTMLElement>('[data-column="backlog"]')?.focus();
   // The details of a ghost follow it: when the ghost goes away, delivered or withdrawn, they close and the focus goes back to the column it stood in (Backlog when the status bar opened them).
   useEffect(() => {
@@ -308,6 +319,11 @@ export function BoardPage({ snapshot, asking, resolve, unify = NO_UNIFY_STATE, m
       setTaskOf(task);
     },
     openDrift: (drift) => setDriftOf(drift),
+    showTask: (task) => {
+      deleting.current = null;
+      setDriftOf(null);
+      setTaskOf(task);
+    },
     openGhost: (key) => {
       setGhostFromBar(false);
       setGhostOf(key);
@@ -508,9 +524,9 @@ export const mountBoard = (slot: Slot, context: ViewContext): BoardView => {
       render();
     },
     show(options) {
-      if (options.ghost === undefined) return;
-      page = { ...page, ghostRequest: { id: options.ghost, n: (page.ghostRequest?.n ?? 0) + 1 } };
-      render();
+      if (options.ghost !== undefined) page = { ...page, ghostRequest: { id: options.ghost, n: (page.ghostRequest?.n ?? 0) + 1 } };
+      if (options.task !== undefined) page = { ...page, taskRequest: { id: options.task, n: (page.taskRequest?.n ?? 0) + 1 } };
+      if (options.ghost !== undefined || options.task !== undefined) render();
     },
   };
 };

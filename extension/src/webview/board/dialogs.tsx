@@ -1,7 +1,7 @@
 import { MessageCircleQuestion, Tag, Trash2, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import type { ModelSuggestion } from "../../host/model-lists";
-import { DriftCompare, MergeBadge, RecurringBadge, UnifiedBadge, UnifiesList } from "../diagram/panel";
+import { DifferenceBlocks, DriftCompare, MergeBadge, RecurringBadge, UnifiedBadge, UnifiesList } from "../diagram/panel";
 import { Markdown } from "../markdown";
 import { composeRoleValue, DEFAULT_LEVEL, modelOptions, splitRoleValue, thinkingLevels, withModel } from "../settings/logic";
 import { ThinkingLevelSelect } from "../settings/thinking-level";
@@ -163,7 +163,11 @@ export function DriftDetailsDialog({ card, onClose }: { card: DriftCard | undefi
             </div>
           </DialogHeader>
           {card.refs.length > 0 ? <RefChips refs={card.refs} /> : null}
-          <DriftCompare drift={card.drift} openLink={env.context.openLink} />
+          {card.drift.differences.length > 0 ? (
+            <DifferenceBlocks drift={card.drift} numbers={env.numbers} openLink={env.context.openLink} fixOptions={false} request={null} showTask={env.showTask} />
+          ) : (
+            <DriftCompare drift={card.drift} openLink={env.context.openLink} />
+          )}
           {card.drift.unifies.length > 0 ? <UnifiesList unifies={card.drift.unifies} numbers={env.numbers} show={(drift) => env.context.navigate("diagram", { drift })} /> : null}
           <DetailsFooter kind="drift" id={card.id} name={card.name.text} />
         </DialogContent>

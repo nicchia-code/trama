@@ -11,7 +11,7 @@ import { SplitButton } from "../split-button";
 import { Progress } from "../ui/progress";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { roleLabel } from "../settings/logic";
-import { type AnnouncedCard, blockedReason, historyWhen, namesList, type Badge as BadgeData, type Card as BoardCard, type DriftBlocker, type DriftCard, type FixWait, type ProposalCard, type ResolvedRow, type TaskCard } from "./logic";
+import { type AnnouncedCard, blockedReason, differencesOpenLabel, historyWhen, namesList, type Badge as BadgeData, type Card as BoardCard, type DriftBlocker, type DriftCard, type FixWait, type ProposalCard, type ResolvedRow, type TaskCard } from "./logic";
 import { BoardButton, Head, StatusDot, Tip, TipBadge, taskBorder, useBoardEnv } from "./parts";
 
 /**
@@ -192,14 +192,14 @@ function ResolvesList({ card }: { card: ProposalCard }) {
     <>
       <div className="text-[11px] font-semibold text-muted-foreground">Resolves Drifts</div>
       <ul aria-label={`Drifts resolved by ${card.title}`} className="flex flex-col gap-1.5 text-xs">
-        {card.resolves.map((row: ResolvedRow) => (
-          <li key={row.drift} data-key={`drift:${row.drift}`} tabIndex={-1} className="flex flex-col gap-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
-            <Tip text="Show the Drift on the diagram">
+        {card.resolves.map((row: ResolvedRow, at) => (
+          <li key={`${row.drift}:${row.difference ?? ""}`} data-key={card.resolves.findIndex((x) => x.drift === row.drift) === at ? `drift:${row.drift}` : `drift:${row.drift}:${row.difference}`} tabIndex={-1} className="flex flex-col gap-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <Tip text={row.difference === null ? "Show the Drift on the diagram" : "Show the difference on the diagram"}>
               <button
                 type="button"
-                aria-description="Show the Drift on the diagram"
+                aria-description={row.difference === null ? "Show the Drift on the diagram" : "Show the difference on the diagram"}
                 className="flex w-full flex-wrap items-baseline gap-x-2 gap-y-1 rounded-sm py-px text-left outline-none hover:[&_.title]:underline focus-visible:ring-2 focus-visible:ring-ring"
-                onClick={() => env.context.navigate("diagram", { drift: row.drift })}
+                onClick={() => env.context.navigate("diagram", row.difference === null ? { drift: row.drift } : { drift: row.drift, difference: row.difference })}
               >
                 <IdTag name={row.name} className="text-[11px] font-semibold text-muted-foreground" />
                 <span className="title break-words">{row.title}</span>
@@ -305,6 +305,7 @@ function ProposalCardView({ card }: { card: ProposalCard }) {
 
 function DriftCardView({ card }: { card: DriftCard }) {
   const env = useBoardEnv();
+  const differencesOpen = differencesOpenLabel(card.drift);
   return (
     <Shell
       card={card}
@@ -320,6 +321,11 @@ function DriftCardView({ card }: { card: DriftCard }) {
       <Head kind="Drift">
         <IdTag name={card.name} className="text-[11px] font-semibold text-muted-foreground" />
         {card.drift.unifies.length > 0 ? <UnifiedBadge count={card.drift.unifies.length} /> : null}
+        {differencesOpen !== null ? (
+          <span aria-description={differencesOpen} className="text-[11px] text-muted-foreground">
+            {differencesOpen}
+          </span>
+        ) : null}
         {card.drift.previous.length > 0 ? <RecurringBadge previous={card.drift.previous} /> : null}
         {card.drift.merge ? <MergeBadge /> : null}
         {card.resolving ? <ResolvingBadge /> : null}

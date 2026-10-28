@@ -121,7 +121,7 @@ const github = (extra: Partial<GitHubMessage> = {}): GitHubMessage => ({
 function page(snapshot: Snapshot | null, over: { github?: GitHubMessage | null; fieldRejections?: Record<string, string>; notice?: string | null } = {}) {
   const posted: ToHost[] = [];
   const post = (message: ToHost) => void posted.push(message);
-  const props = { team: team(), rejection: null, github: github(), snapshot, post, ...over };
+  const props = { manager: true, team: team(), rejection: null, github: github(), snapshot, post, ...over };
   const utils = render(<TeamPage {...props} />);
   const again = (next: Snapshot | null, more: typeof over = over) => utils.rerender(<TeamPage {...props} snapshot={next} {...more} />);
   return { posted, again, ...utils };
@@ -612,6 +612,7 @@ test("mountTeam takes the snapshot, the refusals of a field and the notices from
   const posted: ToHost[] = [];
   let node: ReactNode = null;
   const view = mountTeam((next) => void (node = next), { post: (message) => void posted.push(message), navigate: () => {}, openLink: () => {} });
+  view.receiveManager(true);
   const shown = render(<>{node}</>);
   act(() => view.update(snapshotWith({ handoffs: [handoff()] })));
   shown.rerender(<>{node}</>);

@@ -6,8 +6,8 @@ import { TramaError } from "./errors";
 import { type Project, readTextLf, writeFileEnsuringDir } from "./store";
 
 /*
- * Trama's reads of GitHub (`rules#github-project`, `tech#handoff`). This is the only module that builds a `gh` command, and it only reads: it runs `gh --version`,
- * `gh auth status --hostname github.com` and `gh api graphql` with the constant queries below, with fixed arguments, without a shell and with a timeout of 20 seconds.
+ * Trama's reads of GitHub (`rules#github-project`, `tech#handoff`, `rules#pr-check`). This is the only module that builds a `gh` command, and it only reads: it runs `gh --version`,
+ * `gh auth status --hostname github.com`, `gh api graphql` with the constant queries below and `gh pr list` for the open pull requests, with fixed arguments, without a shell and with a timeout of 20 seconds.
  * The two commands that log `gh` in (`GH_LOGIN_ARGS`, `GH_ACCESS_ARGS`) run in a visible terminal of the editor, not here; they write only gh's own credentials,
  * never anything on GitHub. Writing on GitHub (issues, Project fields) is the agent's work, with its own `gh`.
  */
@@ -526,6 +526,71 @@ export async function readGitHub(repository: string, linked: LinkedProject | nul
     project = { ...read, items };
   }
   return { ok: true, readAt: (deps.now?.() ?? new Date()).toISOString(), projects, project };
+}
+
+/** What one read of the state of `gh` alone found. */
+export type GhStateReading = { ok: true; readAt: string } | ({ ok: false } & GhProblem);
+
+/**
+ * One read of the state of `gh` alone, for the Team view without Manager mode (`rules#github-project`): `gh --version` and `gh auth status --hostname github.com`, no Project and no
+ * query of Projects, so the missing scope of Projects is never a problem there. Stops at the first problem: not installed, then not logged in.
+ */
+export async function readGhState(deps: GhDeps = {}): Promise<GhStateReading> {
+  const reached = await reachGh(deps);
+  if ("problem" in reached) return { ok: false, ...reached.problem };
+  return { ok: true, readAt: (deps.now?.() ?? new Date()).toISOString() };
+}
+
+/** An open pull request that is ready for review, as the last read found it (`data#pull-request-check`). */
+export interface PullRequest {
+  number: number;
+  title: string;
+  author: string;
+  baseRefName: string;
+  headRefName: string;
+  headRefOid: string;
+  url: string;
+}
+
+/** What `gh pr list` is asked to print of every pull request: the fields of `rules#pr-check`. */
+export const PULL_REQUEST_FIELDS = "number,title,author,isDraft,baseRefName,headRefName,headRefOid,url";
+
+/** The most pull requests one read asks for. */
+export const PULL_REQUEST_LIMIT = 100;
+
+/** `<owner>/<repo>` as the origin names it; nothing else reaches `--repo`. */
+const REPOSITORY = /^[A-Za-z0-9_][A-Za-z0-9_.-]*\/[A-Za-z0-9_.-]+$/;
+
+/** The pull request of one item of `gh pr list`'s answer, or nothing when the item is a draft or lacks a field. */
+function pullRequestOf(node: unknown): PullRequest | undefined {
+  const item = record(node);
+  if (item === undefined || item["isDraft"] !== false) return undefined;
+  const { number, title, baseRefName, headRefName, headRefOid, url } = item;
+  if (typeof number !== "number" || !Number.isSafeInteger(number) || number < 1) return undefined;
+  if (typeof title !== "string" || typeof baseRefName !== "string" || typeof headRefName !== "string" || typeof headRefOid !== "string" || typeof url !== "string") return undefined;
+  const login = record(item["author"])?.["login"];
+  return { number, title, author: typeof login === "string" ? login : "", baseRefName, headRefName, headRefOid, url };
+}
+
+/**
+ * The open pull requests of `repository` (`<owner>/<repo>`) that are not drafts, the highest number first, read with `gh pr list --repo <owner>/<repo> --state open --limit 100 --json …`
+ * (`rules#pr-check`). Read-only; stops at the first problem as the other reads do: not installed, not logged in, then any failure of the call or an answer that is not a list.
+ */
+export async function readPullRequests(repository: string, deps: GhDeps = {}): Promise<{ ok: true; readAt: string; items: PullRequest[] } | ({ ok: false } & GhProblem)> {
+  const reached = await reachGh(deps);
+  if ("problem" in reached) return { ok: false, ...reached.problem };
+  if (!REPOSITORY.test(repository)) return { ok: false, reason: `"${repository}" is not a GitHub repository`, details: `"${repository}" is not a GitHub repository` };
+  const outcome = await reached.run(["pr", "list", "--repo", repository, "--state", "open", "--limit", String(PULL_REQUEST_LIMIT), "--json", PULL_REQUEST_FIELDS]);
+  if (outcome.failed !== null || outcome.status !== 0) return { ok: false, ...failure(outcome) };
+  let answer: unknown;
+  try {
+    answer = JSON.parse(outcome.stdout);
+  } catch {
+    return { ok: false, reason: "gh answered something that is not JSON", details: outcome.stdout.trim() || "gh answered nothing" };
+  }
+  if (!Array.isArray(answer)) return { ok: false, reason: "gh did not answer a list of pull requests", details: outcome.stdout.trim() };
+  const items = answer.flatMap((node) => pullRequestOf(node) ?? []).sort((a, b) => b.number - a.number);
+  return { ok: true, readAt: (deps.now?.() ?? new Date()).toISOString(), items };
 }
 
 /** The fields and iterations of the linked Project alone, for `trama issue fields`: the same steps as `readGitHub`, without the list of Projects. */

@@ -141,6 +141,7 @@ const list = defineCommand({
 const driftDecision = z
   .strictObject({
     drift: z.string().min(1).describe("The Drift: its ID or short number."),
+    difference: z.string().min(1).optional().describe("Required for a unified Drift with differences, and only for it: the `drift` of the open difference this entry decides, as its ID or short number."),
     decision: z.enum(DECISIONS).describe("`proposal`: the Model or Requirements change to match the code; `dismissed`; `fix-code`: the code is fixed."),
     option: z.number().int().min(1).optional().describe("Only with `fix-code`: the number of the chosen fix option, from 1."),
     note: z.string().optional().describe("Only with `fix-code`: a free note for the fix Task."),
@@ -160,7 +161,7 @@ const edit = defineCommand({
   mode: "immediate",
   summary: "Open a Proposal for writing: label, files and decisions on Drifts.",
   description:
-    "Every use sends an open Proposal back to Draft and says so; hand it over again with `proposal move <id> open`. Without input it only returns an open Proposal to Draft, touching no file. `rebase` records again the starting version of each file the Proposal holds, so a stale Proposal is no longer stale, and marks the Draft refining until it is handed over again; only an ordinary change Proposal not attached to a Drift can be rebased. `label` writes or changes the short label. `edit` makes each path (a Model file, `specs.yaml`, a Requirement fragment such as `requirements/<area>/<fragment>.md`, a Task as `tasks/<slug>.md`, or an issue of a handoff as `issues/<slug>.md`) editable inside the Proposal and prints the path to write for each; a new Task or issue takes a new identity, unique among the Tasks and the issues, and one is rewritten by the full name printed. `delete` marks each path for deletion, an issue file as `issues/<identity>-<slug>.md`. The Manager's changes to the fields of an issue (`manager`) are never written by this command. `drifts` records or replaces the decisions of a resolution on open Drifts, and `removeDrifts` takes Drifts out of its list. `images` ties images to the Tasks of the Proposal, a list of `{ task, path }` (`path` is a local `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` or `.svg` file, absolute or relative to the project root), and `removeImages` takes them away, a list of `{ task, name }`. " + IMAGES_RULES,
+    "Every use sends an open Proposal back to Draft and says so; hand it over again with `proposal move <id> open`. Without input it only returns an open Proposal to Draft, touching no file. `rebase` records again the starting version of each file the Proposal holds, so a stale Proposal is no longer stale, and marks the Draft refining until it is handed over again; only an ordinary change Proposal not attached to a Drift can be rebased. `label` writes or changes the short label. `edit` makes each path (a Model file, `specs.yaml`, a Requirement fragment such as `requirements/<area>/<fragment>.md`, a Task as `tasks/<slug>.md`, or an issue of a handoff as `issues/<slug>.md`) editable inside the Proposal and prints the path to write for each; a new Task or issue takes a new identity, unique among the Tasks and the issues, and one is rewritten by the full name printed. `delete` marks each path for deletion, an issue file as `issues/<identity>-<slug>.md`. The Manager's changes to the fields of an issue (`manager`) are never written by this command. `drifts` records or replaces the decisions of a resolution on open Drifts; for a unified Drift with differences each entry also gives `difference`, the `drift` of the open difference it decides, one entry per difference and only for the differences the developer answered (an entry for such a Drift without `difference`, or with it for any other Drift, is refused). `removeDrifts` takes Drifts out of its list: a Drift as an ID or short number, or `{ drift, difference }` for one difference. `images` ties images to the Tasks of the Proposal, a list of `{ task, path }` (`path` is a local `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` or `.svg` file, absolute or relative to the project root), and `removeImages` takes them away, a list of `{ task, name }`. " + IMAGES_RULES,
   positionals: [{ name: "id", description: "The Proposal: its ID, a unique prefix or its short number." }],
   input: z.strictObject({
     label: z.string().optional().describe("The short label: 1 to 30 characters, one line."),
@@ -168,7 +169,7 @@ const edit = defineCommand({
     edit: stringList.optional().describe("Paths to make editable inside the Proposal."),
     delete: stringList.optional().describe("Paths to mark for deletion."),
     drifts: z.array(driftDecision).optional().describe("The decisions to record on Drifts. Only in a resolution."),
-    removeDrifts: stringList.optional().describe("Drifts to take out of the list: IDs or short numbers."),
+    removeDrifts: z.array(z.union([z.string().min(1), z.strictObject({ drift: z.string().min(1), difference: z.string().min(1) })])).optional().describe("Drifts to take out of the list: IDs or short numbers, which takes out every entry of the Drift; `{ drift, difference }` takes out the entry of one difference."),
     images: z.array(z.strictObject({ task: imageTask, path: z.string().min(1).describe("A local `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` or `.svg` file, absolute or relative to the project root.") })).optional().describe("Images to tie to Tasks of the Proposal. " + IMAGES_RULES),
     removeImages: z.array(z.strictObject({ task: imageTask, name: z.string().min(1).describe("The name of the image file in the Task's folder.") })).optional().describe("Images to take away from Tasks of the Proposal."),
   }),
@@ -190,8 +191,11 @@ const edit = defineCommand({
         if (input.label !== undefined) setProposalLabel(project, proposalId, input.label);
         for (const path of input.edit ?? []) paths.push({ path, edit: editInProposal(project, proposalId, path) });
         for (const path of input.delete ?? []) deleteInProposal(project, proposalId, path);
-        for (const d of input.drifts ?? []) resolveDriftInProposal(project, proposalId, getDrift(project, d.drift, true).id, { decision: d.decision as DriftDecisionKind, ...(d.option === undefined ? {} : { option: d.option }), ...(d.note === undefined ? {} : { note: d.note }) });
-        for (const drift of input.removeDrifts ?? []) resolveDriftInProposal(project, proposalId, getDrift(project, drift, true).id, { remove: true });
+        for (const d of input.drifts ?? []) resolveDriftInProposal(project, proposalId, getDrift(project, d.drift, true).id, { decision: d.decision as DriftDecisionKind, ...(d.difference === undefined ? {} : { difference: getDrift(project, d.difference, true).id }), ...(d.option === undefined ? {} : { option: d.option }), ...(d.note === undefined ? {} : { note: d.note }) });
+        for (const drift of input.removeDrifts ?? []) {
+          const entry = typeof drift === "string" ? { drift } : drift;
+          resolveDriftInProposal(project, proposalId, getDrift(project, entry.drift, true).id, { remove: true, ...("difference" in entry ? { difference: getDrift(project, entry.difference, true).id } : {}) });
+        }
         if (input.images !== undefined || input.removeImages !== undefined) copies.push(...changeTaskImages(project, proposalId, input.images ?? [], input.removeImages ?? []));
         const proposal = getProposal(project, proposalId);
         if (proposal.data.status === "open") {
@@ -204,7 +208,7 @@ const edit = defineCommand({
     );
     const proposal = getProposal(project, proposalId);
     const n = numbersOf(ctx);
-    const lines = [...paths.map((p) => p.edit), ...(input.label === undefined ? [] : [`Label of Proposal ${n.name("proposal", proposalId)} is "${proposal.data.label}".`]), ...(input.delete ?? []).map((p) => `Marked ${p} for deletion.`), ...(input.drifts ?? []).map((d) => `Recorded Drift ${n.name("drift", getDrift(project, d.drift, true).id)} as ${d.decision}.`), ...(input.removeDrifts ?? []).map((d) => `Removed Drift ${d} from the list.`), ...copies.map((c) => `Image copied to ${c}`), ...(input.removeImages ?? []).map((r) => `Removed image ${r.name} from Task ${r.task}.`)];
+    const lines = [...paths.map((p) => p.edit), ...(input.label === undefined ? [] : [`Label of Proposal ${n.name("proposal", proposalId)} is "${proposal.data.label}".`]), ...(input.delete ?? []).map((p) => `Marked ${p} for deletion.`), ...(input.drifts ?? []).map((d) => `Recorded Drift ${n.name("drift", getDrift(project, d.drift, true).id)}${d.difference === undefined ? "" : `, difference ${n.name("drift", getDrift(project, d.difference, true).id)}`} as ${d.decision}.`), ...(input.removeDrifts ?? []).map((d) => `Removed Drift ${typeof d === "string" ? d : `${d.drift}, difference ${d.difference}`} from the list.`), ...copies.map((c) => `Image copied to ${c}`), ...(input.removeImages ?? []).map((r) => `Removed image ${r.name} from Task ${r.task}.`)];
     if (input.rebase === true) lines.unshift(`Rebased Proposal ${n.name("proposal", proposalId)} on the current Model; it is refining until handed over.`);
     if (lines.length === 0) lines.push(`Proposal ${n.name("proposal", proposalId)} is a Draft.`);
     return text(`${lines.join("\n")}${returnedToDraft ? `\n${RETURNED}` : ""}`, { id: proposalId, number: n.label("proposal", proposalId), status: proposal.data.status, returnedToDraft, label: proposal.data.label, paths, drifts: proposal.data.drifts, images: copies });
@@ -274,7 +278,7 @@ const move = defineCommand({
       // The command line asks no agent to publish: the new cards would stay `publishing` with nobody to publish them, so they wait for Publish again.
       stopPublishing(project, issues, "Publishing was not asked: use Publish again in the Issues tab.");
       const n = numbersOf(ctx);
-      const lines = resolved.map((d) => `- Drift ${n.name("drift", d.drift)}: ${d.skipped ? "skipped, already resolved" : d.decision === "fix-code" ? `code to be fixed, Task ${d.task ? n.name("task", d.task) : ""} created` : d.decision === "proposal" ? "Model updated to match the code" : "dismissed"}`);
+      const lines = resolved.map((d) => `- Drift ${n.name("drift", d.drift)}${d.difference === null ? "" : `, difference ${n.name("drift", d.difference)}`}: ${d.skipped ? "skipped, already resolved" : d.decision === "fix-code" ? `code to be fixed, Task ${d.task ? n.name("task", d.task) : ""} created` : d.decision === "proposal" ? "Model updated to match the code" : "dismissed"}`);
       const created = issues.length === 0 ? [] : [`${issues.length} issue${issues.length === 1 ? "" : "s"} created in .trama/issues/, waiting to be published (Publish again in the Issues tab): ${issues.map((issue) => `\`${issue}\``).join(", ")}`];
       return text([`Approved Proposal ${n.name("proposal", approved)}`, ...lines, ...created].join("\n"), { id: approved, number: n.label("proposal", approved), status: "approved", resolved, issues });
     }

@@ -1,3 +1,5 @@
+import type { PrCheckVariant, ReportRow } from "../../src/core/pr-check";
+import type { PullRequest } from "../../src/core/github";
 import type { GhProblemKind, LinkedProject, ProjectChoice, ProjectFields } from "../../src/core/github";
 import type { IssueActions, IssueOnGitHub, IssueSignals } from "../../src/core/timeline";
 import type { OpenLoad } from "../../src/core/sprints";
@@ -77,7 +79,24 @@ export type AgentAction =
   /** One agent resolves only `drift`, the one Drift of the card the developer pressed Resolve on. The host refuses it while a Run or a resolution is going on, when the Drift is not open or is already in a resolution, or while one resolution Proposal is still to be decided. */
   | { kind: "resolve-drifts"; drift: string }
   /** One agent unites every open Drift that sits in no resolution into one Drift. The host rechecks the conditions at the click, gathers the Drifts only when the instruction is really sent, and refuses with the reasons of `unify.blockers` of the Snapshot message. */
-  | { kind: "unify-drifts" };
+  | { kind: "unify-drifts" }
+  /** The PR Check of pull request `number`: the scan of the whole System in a worktree of the pull request. Only the host sends it, after it prepared the worktree (`extension/src/host/team/pr-check.ts`). */
+  | { kind: "prCheck"; number: number };
+
+/** What the last PR Check of a pull request found, as the Pull Requests tab gets it (`tech#pr-check`): `head` is the commit it was made on, `outdated` whether GitHub's head is another now. */
+export interface PullRequestReportView {
+  checkedAt: string;
+  variant: PrCheckVariant;
+  head: string;
+  mergeBase: string;
+  outdated: boolean;
+  rows: ReportRow[];
+}
+
+/** An open pull request that is ready for review, with the report of its last PR Check in this working copy, or null. */
+export interface PullRequestView extends PullRequest {
+  report: PullRequestReportView | null;
+}
 
 /** How the setup wizard starts in a folder. */
 export type SetupChoice = "import" | "scratch";
@@ -111,7 +130,11 @@ export interface FolderEntry {
 export type ToHost =
   | { type: "ready" }
   /** Every launch the panel sends but the host-only ones: the scans (Scan System of the side menu, the scan after a merge) and the reconciling of a merge. */
-  | { type: "launch"; action: Exclude<AgentAction, { kind: "scan" | "mergeScan" | "reconcileMerge" }> }
+  | { type: "launch"; action: Exclude<AgentAction, { kind: "scan" | "mergeScan" | "reconcileMerge" | "prCheck" }> }
+  /** `Check` of the Pull Requests tab (`developer.CHECK_PULL_REQUEST`): the host rechecks that the pull request is on its list, that no other PR Check of the window runs, that no Run launched from this window is in progress and that the last read worked, prepares the worktree and launches the scan; a failure is told with a `notice`. */
+  | { type: "checkPullRequest"; number: number }
+  /** `Stop` of the Pull Requests tab (`developer.STOP_PULL_REQUEST_CHECK`): the host stops the PR Check of that pull request if it is the one running, removes its worktree and writes no report. */
+  | { type: "stopPullRequestCheck"; number: number }
   /** + Add Work Item: the host opens the Markdown document of a written design request. */
   | { type: "writeDesignRequest" }
   /** `New handoff` of the Team view: the host opens the Markdown document of a handoff request, only while Team is available; otherwise a warning says why. */
@@ -248,10 +271,14 @@ export interface NavigateOptions {
   proposal?: string;
   /** Open Drift: the Diagram goes to where it is drawn and selects it. */
   drift?: string;
+  /** With `drift`, a unified Drift with differences: the Diagram opens the block of that difference (the `drift` of the difference) in the details and puts the focus on its header. */
+  difference?: string;
   /** Focus to open in the tab arrived at from a View button or a chip; it replaces the focus and the drawn Proposal that tab had. */
   focus?: FocusRequest;
   /** Identity of an announcement: the Board opens the details of its ghost, replacing any other details window, and closing it puts the focus on the Backlog column. */
   ghost?: string;
+  /** Identity of a Task: the Board opens its details, replacing any other details window. */
+  task?: string;
 }
 
 /** Host -> webview. */
@@ -305,6 +332,8 @@ export type ToWebview =
   | { type: "team"; members: PersonView[]; others: PersonView[]; unreadable: number; error: string | null }
   /** What the Team view shows of GitHub (`ui#github-project`): the state (`loading` before the first read ends; `ready`; or the state of `gh` that stopped the last read), whether a read runs, the repository (`<owner>/<repo>`), the linked Project, when the data on show was read (ISO time, null before the first read that worked), the linked Project's fields, iterations and address, where each issue Trama published is at the last read (`issues`: its state and the sprint, estimate and assignee GitHub has now, from `src/core/timeline.ts`), what every open item of the Project adds to its assignee's load in its sprint (`loads`, the Timeline's load; the items themselves never leave the host), the signals of the open issues by number (`signals`, from `src/core/timeline.ts`, recomputed at every picture) and why Comment update and Scan are not available for each published issue (`actions`), the Projects of the owner the picker offers, and the reason of the last failure. Sent at `ready`, when the Team view becomes visible and whenever a read starts or ends or the link changes, only while Team is available. */
   | { type: "teamGitHub"; state: "loading" | "ready" | GhProblemKind; reading: boolean; repository: string | null; linked: LinkedProject | null; readAt: string | null; project: ProjectFields | null; issues: IssueOnGitHub[]; loads: OpenLoad[]; signals: IssueSignals; actions: Record<number, IssueActions>; projects: ProjectChoice[]; error: string | null }
+  /** The pull requests the Pull Requests tab lists (`tech#pr-check`): when they were read (ISO time, null before a read that worked), why the last read failed (null when it worked), the open pull requests that are not drafts, the highest number first, each with the report of its last PR Check, the number of the pull request whose PR Check runs in this window (null when none) and why `Check` is unavailable on every pull request: `running` while a PR Check of this window runs, `run` while a Run launched from this window is in progress. Sent at `ready`, whenever the Team view becomes visible, after every read and at every start and end of a PR Check, while the project's origin is on GitHub. */
+  | { type: "pullRequests"; readAt: string | null; error: string | null; items: PullRequestView[]; running: number | null; blocked: "running" | "run" | null }
   /** A `savePerson` was refused without writing: the message of each invalid field, under the field of the person's dialog, which stays open. */
   | { type: "personRejected"; errors: PersonErrors }
   /** A `setIssueField` was refused without writing: the message of `rules#developer.CHANGE_ISSUE_FIELD` for the field of that issue, which the preview shows under the input. */

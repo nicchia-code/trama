@@ -117,6 +117,8 @@ export const focusViews = (snapshot: Snapshot, focus: FocusRequest): FocusViews 
 
 export interface ResolvedRow {
   drift: string;
+  /** The `drift` of the difference of a unified Drift this row decides; null for any other Drift. Then `title` is the difference's. */
+  difference: string | null;
   name: CardName;
   title: string;
   /** The Drift this one follows, as its identity and title, when it is recurring. */
@@ -133,6 +135,14 @@ export interface ResolvedRow {
 /** How a followed Drift was decided, in words, for the list of a recurring Drift's details. */
 export const decisionLabel = (decision: DriftView["previous"][number]["decision"]): string =>
   decision === "fix-code" ? "Code fixed" : decision === "proposal" ? "Model updated to match the code" : decision === "dismissed" ? "Closed, nothing changes" : decision === "unified" ? "Unified" : "Not decided";
+
+/** The secondary text of the red card of a unified Drift with differences: how many are still open, also its accessible description. Null for a Drift without differences (an older unified Drift counts as no difference). */
+export const differencesOpenLabel = (drift: Pick<DriftView, "differences">): string | null =>
+  drift.differences.length === 0 ? null : `${drift.differences.filter((d) => d.open).length} of ${drift.differences.length} open`;
+
+/** The state of a difference in its block header: `Open`, or how it was decided. */
+export const differenceStateLabel = (difference: Pick<DriftView["differences"][number], "decision">): string =>
+  difference.decision === null ? "Open" : difference.decision === "fix-code" ? "Fix code" : difference.decision === "proposal" ? "Adapt model" : "Dismissed";
 
 /** The text of a unified Drift's badge, its tooltip and accessible name: how many Drifts it unifies. */
 export const unifiedLabel = (count: number): string => `Unifies ${count} Drifts`;
@@ -461,7 +471,7 @@ export function proposalBadges(p: Pick<ProposalView, "stale" | "unbased" | "erro
 
 /** The rows of a resolution's `Resolves Drifts` block, in the order the snapshot carries them; none for any other Proposal. */
 export const resolvedRows = (p: Pick<ProposalView, "resolves">, numbers: CardNumbers = noNumbers, blocked: Map<string, TaskCard[]> = new Map()): ResolvedRow[] =>
-  p.resolves.map((r) => ({ drift: r.drift, name: cardNameOf(numbers, "drift", r.drift), title: r.title, previous: r.previous, unifies: r.unifies, merge: r.merge, decision: r.note === null ? r.decision : `${r.decision} · ${r.note}`, blocked: blocked.get(r.drift) ?? [] }));
+  p.resolves.map((r) => ({ drift: r.drift, difference: r.difference, name: cardNameOf(numbers, "drift", r.drift), title: r.title, previous: r.previous, unifies: r.unifies, merge: r.merge, decision: r.note === null ? r.decision : `${r.decision} · ${r.note}`, blocked: blocked.get(r.drift) ?? [] }));
 
 /** `Creates 1 Task` / `Creates N Tasks`, counting removals too; null for zero. */
 export function createsText(n: number): string | null {
@@ -848,7 +858,7 @@ export function runningFor(announced: string, now: Date = new Date()): string {
 
 const WAITING_EXPLANATION = "The agent is waiting for your answers to its questions.";
 
-/** What the details explain about a ghost, by its kind and phase; `asking` is whether a question round is open (it does not change a check). */
+/** What the details explain about a ghost, by its kind and phase; `asking` is whether a question round is open (it does not change a check, an import, a comparison or Unify Drifts). */
 export function ghostExplanation(a: AnnouncementView, asking: boolean): string {
   if (a.kind === "check" || a.kind === "scan")
     return a.phase === "history"
@@ -858,7 +868,7 @@ export function ghostExplanation(a: AnnouncementView, asking: boolean): string {
         : "The agent is running the final checks of the run: tests, lint and build.";
   if (a.kind === "comparison") return "A comparison of one Machine with the code; its Tasks and Drifts arrive together.";
   if (a.kind === "work") return "The agent is describing the existing code as Proposals.";
-  if (asking) return WAITING_EXPLANATION;
+  if (asking && a.kind !== "unify") return WAITING_EXPLANATION;
   switch (a.kind) {
     case "proposal":
       return a.phase === "writing" ? "The agent is writing this Proposal's Draft; it lands in Backlog when handed over." : "The agent is exploring the Model and the code for this design; nothing is written yet.";
@@ -876,7 +886,8 @@ export function ghostExplanation(a: AnnouncementView, asking: boolean): string {
 export function announcedCard(a: AnnouncementView, asking: boolean): AnnouncedCard {
   const kindLabel = ANNOUNCED_KIND_LABELS[a.kind];
   // The Draft Unify Drifts' agent attaches is just «Writing» on its ghost.
-  const phase = announcedPhase(a.kind === "unify" && a.phase === "writing-proposal" ? "writing" : a.phase, asking);
+  // Unify Drifts asks the developer nothing, not even when the Async Drift Resolver writes the prepared round of the unified Drift: its ghost keeps its own phases.
+  const phase = announcedPhase(a.kind === "unify" && a.phase === "writing-proposal" ? "writing" : a.phase, asking && a.kind !== "unify");
   const title = a.title;
   const isCheck = a.kind === "check" || a.kind === "scan";
   const label = isCheck

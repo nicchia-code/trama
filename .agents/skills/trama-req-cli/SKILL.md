@@ -60,4 +60,4 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Issue commands** (`handoff.md`): Use when adding, changing or using the `trama issue` commands or the handoff fields of `trama proposal`. Sections: `issue`.
 - **Comandi di trama** (`main.md`): Usa per i comandi di trama: forma, input JSON, help ed elenco. Sections: `General`.
 - **Team commands** (`team.md`): Use when adding, changing or using the `trama team` command or the Manager mode fields of `trama project`. Sections: `team`.
-- **Unify Drifts nella riga di comando** (`unify-drifts.md`): Usa quando cambi `trama drift new` con `unifies` o ciò che `drift show`, `drift list` e `project show` dicono dei Drift unificati e uniti. Sections: `agent.UNIFY_DRIFTS`.
+- **Unify Drifts nella riga di comando** (`unify-drifts.md`): Usa quando cambi `trama drift new` con `unifies` e `differences`, ciò che `drift show`, `drift list`, `drift edit`, `drift move` e `project show` dicono e fanno dei Drift unificati, delle loro differenze e dei Drift uniti, o le decisioni per differenza di `proposal edit`. Sections: `agent.UNIFY_DRIFTS`.

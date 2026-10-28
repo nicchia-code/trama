@@ -56,6 +56,7 @@ function env(over: Partial<BoardEnv> = {}): { env: BoardEnv; calls: Calls } {
       models: [],
       openTask: (id) => calls.details.push(`task:${id}`),
       openDrift: (id) => calls.details.push(`drift:${id}`),
+      showTask: (id) => calls.details.push(`fix-task:${id}`),
       showCard: (key) => calls.shown.push(key),
       chooseModel: (id) => calls.chosen.push(id),
       openProposal: (id) => calls.opened.push(id),
@@ -93,13 +94,18 @@ const task: TaskCard = {
   blockedBy: [], body: "", images: [], file: "task.md", column: "todo", finishing: null, heldByDrift: false, views: { diagram: false, requirements: false }, finished: null, unchanged: null, keptBy: [],
 };
 const resolved = (over: Partial<ProposalCard["resolves"][number]> = {}): ProposalCard["resolves"][number] => ({
-  drift: "liveDrift", name: { text: "D4", isNumber: true }, title: "Code refunds late", previous: [], unifies: [], merge: false, decision: "Closed, nothing changes", blocked: [], ...over,
+  drift: "liveDrift", difference: null, name: { text: "D4", isNumber: true }, title: "Code refunds late", previous: [], unifies: [], merge: false, decision: "Closed, nothing changes", blocked: [], ...over,
+});
+/** A difference of a unified Drift, open unless `over` decides it. */
+const difference = (over: Partial<DriftView["differences"][number]> = {}): DriftView["differences"][number] => ({
+  drift: "diffA", title: "Wrong refund", refs: ["order/Paid"], sides: { happens: "Refunds late.", should: "Refunds at once.", where: "`src/refund.ts`" }, where: "`src/refund.ts`",
+  options: [{ title: "Refuse", text: "Refuse the refund." }, { title: "Allow", text: "Allow it." }], proposal: null, linked: [], decision: null, option: null, note: null, task: null, open: true, ...over,
 });
 
 /** An open Drift card of the Board, with the decisions of its card set to work. */
 const driftCardOf = (over: Partial<DriftCard> = {}): DriftCard => ({
   kind: "drift", key: "drift:d", id: "d", name: { text: "D1", isNumber: true }, heading: "Drift D1", title: "T", refs: [], proposal: null,
-  drift: { id: "d", created: null, job: null, prepared: null, title: "T", body: "", previous: [], origin: [], task: null, unifies: [], unifiedInto: null, refs: [], proposal: null, sides: { happens: "It refunds late.", should: "It refunds at once.", where: "" }, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, merge: false },
+  drift: { id: "d", created: null, job: null, prepared: null, title: "T", body: "", previous: [], origin: [], task: null, unifies: [], unifiedInto: null, differences: [], refs: [], proposal: null, sides: { happens: "It refunds late.", should: "It refunds at once.", where: "" }, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, merge: false },
   dismissBlocker: null, reworkBlocker: null, resolving: false, unifying: false, resolveBlocker: null, blocked: [], ...over,
 });
 
@@ -256,7 +262,7 @@ describe("Board card rendering", () => {
     fireEvent.click(rework);
     expect(calls.posted).toEqual([{ type: "reworkProposal", proposal: "live" }]);
     cleanup();
-    const drift = { id: "d", sides: null, body: "b", requirementsOnly: false, previous: [], unifies: [] } as unknown as DriftView;
+    const drift = { id: "d", sides: null, body: "b", requirementsOnly: false, previous: [], unifies: [], differences: [] } as unknown as DriftView;
     const more = draw(<CardView card={{ kind: "drift", key: "drift:d", id: "d", name: { text: "D1", isNumber: true }, heading: "Drift D1", title: "T", refs: [], proposal: null, drift, dismissBlocker: null, reworkBlocker: null, resolving: false, unifying: false, resolveBlocker: null, blocked: [] }} />);
     const driftArrow = screen.getByRole("button", { name: "More ways to handle D1" });
     driftArrow.focus();
@@ -316,7 +322,7 @@ describe("Board card rendering", () => {
   });
 
   test("a Drift's Dismiss that cannot be used is disabled with its reason as accessible description", () => {
-    const drift = { id: "d", sides: null, body: "b", requirementsOnly: false, previous: [], unifies: [] } as unknown as DriftView;
+    const drift = { id: "d", sides: null, body: "b", requirementsOnly: false, previous: [], unifies: [], differences: [] } as unknown as DriftView;
     draw(<CardView card={{ kind: "drift", key: "drift:d", id: "d", name: { text: "D1", isNumber: true }, heading: "Drift D1", title: "T", refs: [], proposal: null, drift, dismissBlocker: "An agent is resolving Drifts", reworkBlocker: "An agent is resolving Drifts. Drifts are being resolved", resolving: false, unifying: false, resolveBlocker: "Drifts are being resolved", blocked: [] }} />);
     const dismiss = screen.getByRole("button", { name: "Dismiss Drift" }) as HTMLButtonElement;
     expect([dismiss.disabled, dismiss.getAttribute("aria-description")]).toEqual([true, "An agent is resolving Drifts"]);
@@ -354,7 +360,7 @@ describe("Board card rendering", () => {
   });
 
   test("a Drift without references has no chip row", () => {
-    const drift = { id: "d", sides: null, body: "b", requirementsOnly: false, previous: [], unifies: [] } as unknown as DriftView;
+    const drift = { id: "d", sides: null, body: "b", requirementsOnly: false, previous: [], unifies: [], differences: [] } as unknown as DriftView;
     draw(<CardView card={{ kind: "drift", key: "drift:d", id: "d", name: { text: "D1", isNumber: true }, heading: "Drift D1", title: "T", refs: [], proposal: null, drift, dismissBlocker: null, reworkBlocker: null, resolving: false, unifying: false, resolveBlocker: null, blocked: [] }} />);
     expect(screen.queryByRole("button", { name: "order/Paid" })).toBeNull();
   });
@@ -604,7 +610,7 @@ const proposalView = (over: Partial<ProposalView> = {}): ProposalView => ({
   tasks: [{ id: "t1", title: "Do it", refs: [], technical: true, body: "", images: [] }], removals: [], changes: [], machines: [], actors: [], areas: [], specs: EMPTY_SPECS, specsChange: { entries: [], notesBefore: null }, scope: [], ...over,
 });
 const taskView = (over: Partial<TaskView> = {}): TaskView => ({ id: "liveTask", created: "2026-10-01T10:00:00.000Z", title: "A task", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTag: null, agent: false, progress: null, finished: null, unchanged: null, blockedBy: [], heldByDrift: false, file: "tasks/liveTask.md", images: [], ...over });
-const driftView = (over: Partial<DriftView> = {}): DriftView => ({ id: "liveDrift", created: "2026-10-01T10:00:00.000Z", job: null, prepared: null, title: "Code refunds late", body: "", previous: [], origin: [], task: null, unifies: [], unifiedInto: null, refs: [], proposal: null, sides: { happens: "A", should: "B", where: "" }, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, merge: false, ...over });
+const driftView = (over: Partial<DriftView> = {}): DriftView => ({ id: "liveDrift", created: "2026-10-01T10:00:00.000Z", job: null, prepared: null, title: "Code refunds late", body: "", previous: [], origin: [], task: null, unifies: [], unifiedInto: null, differences: [], refs: [], proposal: null, sides: { happens: "A", should: "B", where: "" }, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, merge: false, ...over });
 const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], resolutionDrifts: [], drifts: [], unifiedDrifts: [], finishingDrifts: [], finishingProposals: [], finishingTasks: [], tasks: [], tasksSinceScan: 0, announcements: [], handoffs: [], issues: [], numbers, specs: EMPTY_SPECS, specsPresent: false, history: [], historyFaults: [], ...over });
 
 function page(snap: Snapshot | null, over: Partial<BoardPageProps> = {}) {
@@ -993,6 +999,60 @@ describe("The Board page", () => {
     const row = within(screen.getByRole("dialog")).getByRole("button", { name: /Old A/ });
     fireEvent.click(row);
     expect(calls).toEqual([["diagram", { drift: "oldA" }]]);
+  });
+
+  test("the red card of a unified Drift with differences says how many are open after the unified badge, and one without differences says nothing more", () => {
+    const differences = [difference({ drift: "diffA" }), difference({ drift: "diffB", title: "Late refund", decision: "dismissed", open: false }), difference({ drift: "diffC", title: "Wrong total" })];
+    page(snapshot({ drifts: [driftView({ unifies: [{ id: "oldA", title: "Old A" }], differences })] }));
+    const badge = screen.getByLabelText("Unifies 1 Drifts");
+    const text = badge.nextElementSibling as HTMLElement;
+    expect(text.textContent).toBe("2 of 3 open");
+    expect(text.getAttribute("aria-description")).toBe("2 of 3 open");
+    cleanup();
+    page(snapshot({ drifts: [driftView({ unifies: [{ id: "oldA", title: "Old A" }] })] }));
+    expect(screen.getByLabelText("Unifies 1 Drifts").nextElementSibling).toBeNull();
+    expect(screen.queryByText(/ of \d+ open/)).toBeNull();
+  });
+
+  test("the details of a unified Drift with differences have one collapsible block per difference: the open ones expanded, the decided ones collapsed, linked ones reached from the line under the header", () => {
+    const differences = [
+      difference({ drift: "diffA", title: "Wrong refund", linked: ["diffB"] }),
+      difference({ drift: "diffB", title: "Late refund", linked: ["diffA"], decision: "fix-code", option: 1, note: "Take care of the totals.", task: "fixTask", open: false }),
+    ];
+    const calls = draw(<DriftDetailsDialog card={driftCardOf({ drift: { ...driftCardOf().drift, unifies: [{ id: "oldA", title: "Old A" }], differences } })} onClose={() => {}} />);
+    const dialog = within(screen.getByRole("dialog"));
+    const first = dialog.getByRole("button", { name: /^Wrong refund .*Open$/ });
+    const second = dialog.getByRole("button", { name: /^Late refund .*Fix code$/ });
+    expect([first.getAttribute("aria-expanded"), second.getAttribute("aria-expanded")]).toEqual(["true", "false"]);
+    expect(dialog.getByText("Refunds late.")).not.toBeNull();
+    expect(dialog.getByText("Where in the code")).not.toBeNull();
+    // The fix options belong to the Diagram only.
+    expect(dialog.queryByText("Fix options")).toBeNull();
+    expect(dialog.queryByText("What happens", { selector: "h4" })?.textContent).toBe("What happens");
+    expect(dialog.queryByText("Chosen option")).toBeNull();
+    // The line of linked differences leads to the block, which opens.
+    expect(dialog.getAllByText(/^Linked to/).map((line) => line.textContent)).toEqual(["Linked to Late refund", "Linked to Wrong refund"]);
+    fireEvent.click(dialog.getByRole("button", { name: "Late refund" }));
+    expect(second.getAttribute("aria-expanded")).toBe("true");
+    expect(document.activeElement).toBe(second);
+    expect(dialog.getByText("Take care of the totals.")).not.toBeNull();
+    expect(dialog.getByText("Chosen option").parentElement?.textContent).toBe("Chosen option 1. Refuse");
+    fireEvent.click(dialog.getByRole("button", { name: /Fix Task/ }));
+    expect(calls.details).toEqual(["fix-task:fixTask"]);
+    // A header opens and closes its block.
+    fireEvent.click(first);
+    expect(first.getAttribute("aria-expanded")).toBe("false");
+    expect(dialog.queryByText("Refunds late.")).toBeNull();
+    fireEvent.click(first);
+    expect(first.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  test("a resolution row of a difference shows the short number of the unified Drift, the title of the difference and its decision, and leads to its block", () => {
+    const calls = draw(<CardView card={{ ...proposal, resolution: true, heading: "Resolution Proposal P2", resolves: [resolved({ difference: "diffA", title: "Wrong refund", decision: "Fix code" }), resolved({ difference: "diffB", title: "Late refund", decision: "Dismissed" })] }} />);
+    const rows = screen.getAllByRole("listitem");
+    expect(rows.map((row) => row.textContent)).toEqual(["D4Wrong refundFix code", "D4Late refundDismissed"]);
+    fireEvent.click(screen.getByRole("button", { name: /Late refund/ }));
+    expect(calls.navigated).toEqual([["diagram", { drift: "liveDrift", difference: "diffB" }]]);
   });
 
   test("a Drift from a merge has the Merge badge on its card and in its details; the badge opens nothing and keeps the focus", () => {

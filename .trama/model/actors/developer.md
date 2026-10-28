@@ -88,9 +88,6 @@ The developer asks to set up Trama in a workspace folder. Dall'editor lo chiede 
 ### UPDATE_SKILLS
 The developer asks to refresh the agent skills of the project with the ones shipped with this version of Trama.
 
-### REWRITE_IDENTITIES
-Il developer riscrive, dalla riga di comando, l'identità di ogni Proposal, Task e Drift ancora numerati. Non è un'approvazione, non sposta nessuna scheda e il pannello non offre un modo per farlo.
-
 ### OPEN_PANEL
 The developer opens the Trama panel, or brings it to the front.
 
@@ -126,7 +123,7 @@ Il developer passa alla vista Specs del pannello, dal menu laterale o con il com
 Il developer passa alla vista History del pannello, dal menu laterale o con il comando Show History, che aprono il pannello se è chiuso.
 
 ### SHOW_TEAM
-The developer goes to the Team view of the panel, from the side menu or with the command Show Team, which open the panel if it is closed. Only with Manager mode on.
+The developer goes to the Team view of the panel, from the side menu or with the command Show Team, which open the panel if it is closed. Only with origin on GitHub; without Manager mode the view shows only the pull requests (see the PR Check).
 
 ### SHOW_SETTINGS
 Il developer passa alla scheda Settings del pannello, dal menu laterale, con il comando Show Settings o con Open Settings nell'avviso che omp non è installato, che aprono il pannello se è chiuso, anche in una finestra senza cartelle.
@@ -228,16 +225,22 @@ The Manager chooses, in the Team view, the GitHub Project where Team publishes a
 The Manager unlinks the GitHub Project from the Team view.
 
 ### LOG_IN_GITHUB
-The Manager asks, from the Team view, to log in the GitHub command line or to give it access to Projects.
+The developer asks, from the Team view, to log in the GitHub command line or, with Manager mode on, to give it access to Projects.
 
 ### REFRESH_TEAM
-The Manager presses Refresh in the Team view, to read GitHub again.
+The developer presses Refresh in the Team view, to read GitHub again: the Manager's Project and issues with Manager mode on, and the open pull requests in every case.
 
 ### ASK_ISSUE_UPDATE
 The Manager presses Comment update on a published issue the Model changed under, in the Issues tab.
 
 ### SCAN_ISSUE
 The Manager presses Scan on a closed issue in the Issues tab, to have its references compared with the code.
+
+### CHECK_PULL_REQUEST
+The developer presses Check on a pull request in the Pull Requests tab of the Team view, to have it compared with the Model in a worktree of its own.
+
+### STOP_PULL_REQUEST_CHECK
+The developer presses Stop on the pull request whose PR Check is running.
 
 ### START_MERGE
 The developer presses Merge in the side menu, with Solo mode on.

@@ -1,5 +1,5 @@
 import { deliverComparison, getAnnouncement, readUnownedComparison } from "./announcements";
-import { concernSameThing, extent } from "./blocking";
+import { concernSameThing, extent, openExtent } from "./blocking";
 import { recordComparison } from "./compared";
 import { TramaError } from "./errors";
 import { listIssues } from "./issues";
@@ -9,9 +9,11 @@ import { loadProject, type ProjectModel, resolveProjectRef } from "./requirement
 import type { Machine } from "./types";
 import type { Project } from "./store";
 import {
+  closedOutcome,
   type Drift,
   type DriftOption,
   getDrift,
+  indexDrifts,
   listDrifts,
   listTasks,
   type PlannedDrift,
@@ -40,7 +42,8 @@ export interface Briefing {
   scope: string[];
   openTasks: Task[];
   openDrifts: Drift[];
-  closedDrifts: Drift[];
+  /** The Drifts already resolved on the same things, with how they were: a Drift `unified` counts once its difference is decided, with that decision on the references of the difference. */
+  closedDrifts: { drift: Drift; decision: string; note: string | null }[];
   /** The published issues, not `Not planned`, whose references fall in the comparison. */
   issues: BriefedIssue[];
 }
@@ -69,14 +72,20 @@ export function briefing(p: Project, machineId: string, refs: string[], states: 
   const scope = refs.length > 0 ? refs : wholeMachine(machine);
   const concerns = (card: { data: { refs: string[] } }) => concernSameThing(project, card.data.refs, scope);
   const tasks = listTasks(p).filter((t) => t.data.column !== "done" && concerns(t));
-  const drifts = listDrifts(p).filter(concerns);
+  const all = listDrifts(p);
+  const index = indexDrifts(all);
   return {
     project,
     machine,
     scope,
     openTasks: tasks,
-    openDrifts: drifts.filter((d) => d.data.status === "open"),
-    closedDrifts: drifts.filter((d) => d.data.status === "resolved" && d.data.resolution !== "unified"),
+    // A unified Drift with differences concerns only with its open differences.
+    openDrifts: all.filter((d) => d.data.status === "open" && concerns({ data: { refs: openExtent(d, index).refs } })),
+    closedDrifts: all.flatMap((d) => {
+      if (d.data.status !== "resolved") return [];
+      const closed = closedOutcome(d, index) ?? (d.data.resolution === null ? { decision: "resolved", refs: d.data.refs, note: d.data.note } : null);
+      return closed !== null && concerns({ data: { refs: closed.refs } }) ? [{ drift: d, decision: closed.decision, note: closed.note }] : [];
+    }),
     issues: listIssues(p).flatMap((issue): BriefedIssue[] => {
       if (issue.data.state !== "published" || issue.data.number === null || !concerns(issue)) return [];
       const status = states.find((s) => s.number === issue.data.number)?.status ?? "Open";

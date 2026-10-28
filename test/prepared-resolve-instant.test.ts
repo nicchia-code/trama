@@ -2,12 +2,12 @@ import { afterAll, afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { editDrift, type PreparedQuestion, preparedOutcome, preparedStatus } from "../src/core/prepared";
+import { editDrift, type PreparedQuestion, preparedOutcome, preparedStatus, readyRound } from "../src/core/prepared";
 import { getProposal, listProposals, newProposal } from "../src/core/proposals";
 import { resolveDriftBlocker, resolveDriftInProposal, resolveDriftsBlocker } from "../src/core/resolution";
 import type { QuestionRequest, QuestionResult } from "../src/core/questions";
 import { type Project, projectAt } from "../src/core/store";
-import { getDrift, newDrift } from "../src/core/work";
+import { type Drift, getDrift, newDrift, newUnifiedDrift } from "../src/core/work";
 import { FIX_OPTIONS } from "./fix-options";
 import { copyShop } from "./shop-project";
 
@@ -233,5 +233,119 @@ test("the agent started from an answer is not refused for a resolution awaiting 
   expect(await reasonOf(d.id, { selected: ["Keep"], text: "but log it" })).not.toContain("awaits a decision");
   expect(await reasonOf(held.id, { selected: ["Keep"], text: "but log it" })).toContain("is part of resolution");
   expect(await reasonOf(held.id)).toContain("is part of resolution");
+  controller.dispose();
+});
+
+/** A unified Drift with differences A, B and C (the first two linked), each with a prepared question of three options; `prepare` lists the ones prepared. */
+function preparedRound(prepare: ("A" | "B" | "C")[] = ["A", "B", "C"]) {
+  const filed = (title: string) => newDrift(p, { where: "src/refund.ts", title, refs: ["order"], happens: "Code does it.", should: "Model says so.", options: FIX_OPTIONS });
+  const [a, b, c] = [filed("A"), filed("B"), filed("C")] as const;
+  const difference = (d: Drift, linked: string[] = []) => ({ drift: d.id, title: d.title, refs: d.data.refs, happens: `${d.title} happens.`, should: `${d.title} should happen.`, where: "src/refund.ts", options: FIX_OPTIONS, linked });
+  const unified = newUnifiedDrift(p, { title: "Together", unifies: [a.id, b.id, c.id], differences: [difference(a, [b.id]), difference(b), difference(c)] }).drift;
+  const by = { A: a, B: b, C: c };
+  const question = (id: string) => ({ id, question: "What should change?", options: [{ label: "Fix it", description: "a" }, { label: "Remove it", description: "b" }, { label: "Keep", description: "c" }], recommended: 0, multi: false });
+  const decisions = [{ decision: "fix-code", option: 1 }, { decision: "fix-code", option: 2 }, { decision: "dismissed" }];
+  editDrift(p, unified.id, { prepared: { questions: prepare.map((name) => ({ difference: by[name].id, question: question(by[name].id), decisions })) } });
+  return { unified, a, b, c };
+}
+const answers = (entries: Record<string, { status: "answered"; selected: string[]; text?: string } | { status: "skipped" }>): QuestionResult => ({ status: "answered", answers: entries });
+/** Runs Resolve on `drift` with a controller that answers its round with `answer`, and collects the launches that follow. */
+async function resolveRound(drift: string, answer: (request: QuestionRequest) => Promise<QuestionResult>) {
+  const seen: { request?: QuestionRequest; resolving?: boolean } = {};
+  const { controller, internals } = controllerAnswering(answer, seen);
+  const calls: unknown[][] = [];
+  const original = internals.launchAction;
+  internals.launchAction = async (...args) => {
+    calls.push(args);
+    if (calls.length === 1) return original.call(controller, ...args);
+  };
+  await internals.launchAction(p, { kind: "resolve-drifts", drift });
+  controller.dispose();
+  return { seen, calls };
+}
+
+test("Resolve on a unified Drift whose every open difference has a valid question opens them all in one round, in the order of the differences, no agent", async () => {
+  const { unified, a, b, c } = preparedRound();
+  const awaiting = newProposal(p, "Manual", "", { kind: "resolution" });
+  const { seen, calls } = await resolveRound(unified.id, async (request) => answers({ [request.questions[0]!.id]: { status: "answered", selected: ["Remove it"], text: "soon" }, [request.questions[1]!.id]: { status: "answered", selected: ["Fix it"] }, [request.questions[2]!.id]: { status: "skipped" } }));
+  expect(seen.request?.questions.map((q) => q.id)).toEqual([a.id, b.id, c.id]);
+  expect(seen.request?.questions.every((q) => !q.multi && q.recommended === 0)).toBe(true);
+  expect(seen.resolving).toBe(true);
+  expect(driftWork(dir).resolving).toBe(false);
+  expect(calls).toHaveLength(1);
+  const written = listProposals(p).filter((r) => r.data.prepared);
+  expect(written).toHaveLength(1);
+  expect(written[0]?.title).toBe("Resolve: Together");
+  expect(written[0]?.data).toMatchObject({ status: "open", kind: "resolution", drifts: [{ drift: unified.id, difference: a.id, decision: "fix-code", option: 2, note: "soon" }, { drift: unified.id, difference: b.id, decision: "fix-code", option: 1 }] });
+  // The skipped difference stays open with its question prepared, and no manual resolution was disturbed.
+  expect(getDrift(p, unified.id).data.differences.map((d) => d.decision)).toEqual([null, null, null]);
+  expect(getProposal(p, awaiting.id).data.status).toBe("draft");
+  expect(readyRound(p, getDrift(p, unified.id)).complete).toBe(true);
+});
+
+test("every question of the round skipped, or a lost editor, writes nothing and leaves the round prepared", async () => {
+  const { unified, a, b, c } = preparedRound();
+  for (const answer of [async () => answers({ [a.id]: { status: "skipped" }, [b.id]: { status: "skipped" }, [c.id]: { status: "skipped" } }), async (): Promise<QuestionResult> => { throw new Error("editor lost"); }]) {
+    const { calls } = await resolveRound(unified.id, answer);
+    expect(calls).toHaveLength(1);
+    expect(listProposals(p)).toHaveLength(0);
+    expect(driftWork(dir).resolving).toBe(false);
+    expect(readyRound(p, getDrift(p, unified.id)).complete).toBe(true);
+  }
+});
+
+test("linked differences decided differently launch the agent with all the answers by difference and the linked flag, and nothing is written", async () => {
+  const { unified, a, b, c } = preparedRound();
+  const { calls } = await resolveRound(unified.id, async () => answers({ [a.id]: { status: "answered", selected: ["Fix it"] }, [b.id]: { status: "answered", selected: ["Keep"], }, [c.id]: { status: "answered", selected: ["Keep"] } }));
+  expect(calls).toHaveLength(2);
+  expect(calls[1]?.[1]).toEqual({ kind: "resolve-drifts", drift: unified.id });
+  expect(calls[1]?.[2]).toEqual({ answers: { [a.id]: { selected: ["Fix it"] }, [b.id]: { selected: ["Keep"] }, [c.id]: { selected: ["Keep"] } }, linked: true });
+  expect(listProposals(p)).toHaveLength(0);
+});
+
+test("free text with a choice that is not a Fix option launches the agent with the answers of the round, without the linked flag", async () => {
+  const { unified, a, b } = preparedRound();
+  const { calls } = await resolveRound(unified.id, async () => answers({ [a.id]: { status: "answered", selected: ["Keep"], text: "but log it" }, [b.id]: { status: "answered", selected: ["Remove it"] }, [preparedRoundC(unified)]: { status: "skipped" } }));
+  expect(calls[1]?.[2]).toEqual({ answers: { [a.id]: { selected: ["Keep"], text: "but log it" }, [b.id]: { selected: ["Remove it"] } }, linked: false });
+  expect(listProposals(p)).toHaveLength(0);
+});
+
+const preparedRoundC = (unified: Drift): string => getDrift(p, unified.id).data.differences[2]!.drift;
+
+test("a refused hand-over of the resolution Trama wrote launches the agent with all the answers, and the Draft is discarded", async () => {
+  const { unified, a, b } = preparedRound();
+  // The difference B was decided elsewhere while the round was open: its entry is refused.
+  const { calls } = await resolveRound(unified.id, async () => {
+    const holding = newProposal(p, "Holding", "", { kind: "resolution" });
+    resolveDriftInProposal(p, holding.id, unified.id, { decision: "dismissed", difference: b.id });
+    return answers({ [a.id]: { status: "answered", selected: ["Fix it"] }, [b.id]: { status: "answered", selected: ["Fix it"] } });
+  });
+  expect(calls).toHaveLength(2);
+  expect(calls[1]?.[2]).toEqual({ answers: { [a.id]: { selected: ["Fix it"] }, [b.id]: { selected: ["Fix it"] } }, linked: false });
+  expect(listProposals(p).filter((r) => r.data.prepared).map((r) => r.data.status)).toEqual(["discarded"]);
+});
+
+test("with only some differences prepared Resolve opens no round, keeps the valid questions for the agent, and a manual resolution awaiting a decision still stops it", async () => {
+  const { unified, a, b } = preparedRound(["A", "C"]);
+  const { controller, internals } = controllerAnswering(async () => { throw new Error("no round expected"); });
+  const inner = controller as unknown as { preparedOf(project: Project, drift: string): unknown; partlyPrepared(project: Project, drift: string): boolean };
+  expect(inner.preparedOf(p, unified.id)).toBeNull();
+  expect(inner.partlyPrepared(p, unified.id)).toBe(true);
+  newProposal(p, "Manual", "", { kind: "resolution" });
+  await expect(internals.launchAction(p, { kind: "resolve-drifts", drift: unified.id })).rejects.toThrow("awaits a decision");
+  editDrift(p, unified.id, { prepared: { questions: [{ difference: b.id, question: { id: b.id, question: "What?", options: [{ label: "Fix it", description: "a" }, { label: "Remove it", description: "b" }, { label: "Keep", description: "c" }], recommended: 0, multi: false }, decisions: [{ decision: "fix-code", option: 1 }, { decision: "fix-code", option: 2 }, { decision: "dismissed" }] }] } });
+  expect(inner.preparedOf(p, unified.id)).not.toBeNull();
+  expect(inner.partlyPrepared(p, unified.id)).toBe(false);
+  expect(a.id).toBeTruthy();
+  controller.dispose();
+});
+
+test("with the setting off a unified Drift opens no round and gets no partly-prepared sentence", () => {
+  const { unified } = preparedRound();
+  asyncResolver = false;
+  const { controller } = controllerAnswering(async () => { throw new Error("no round expected"); });
+  const inner = controller as unknown as { preparedOf(project: Project, drift: string): unknown; partlyPrepared(project: Project, drift: string): boolean };
+  expect(inner.preparedOf(p, unified.id)).toBeNull();
+  expect(inner.partlyPrepared(p, unified.id)).toBe(false);
   controller.dispose();
 });

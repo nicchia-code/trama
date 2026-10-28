@@ -45,7 +45,7 @@ const OMP_OK = { type: "agentCheck", ompPath: "", state: "done", ok: true, missi
 
 function panel(hasProject: boolean) {
   const posted: ToHost[] = [];
-  const store = createShellStore({ view: hasProject ? "board" : "getstarted", hasProject, error: null, diagnostics: [], views: {} as never, questions: null, githubRepo: null, teamAvailable: false });
+  const store = createShellStore({ view: hasProject ? "board" : "getstarted", hasProject, error: null, diagnostics: [], views: {} as never, questions: null, githubRepo: null, team: false });
   const slotOf = (view: ViewName) => (node: ReactNode) => store.set({ views: { ...store.get().views, [view]: node } });
   const navigate = (view: ViewName) => store.set({ view });
   const context: ViewContext = { post: (message) => posted.push(message), navigate, openLink: () => {} };

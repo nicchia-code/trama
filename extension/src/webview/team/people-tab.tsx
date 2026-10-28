@@ -1,4 +1,4 @@
-import { Calendar, Pencil, UserMinus, UserPlus, Users, X } from "lucide-react";
+import { Calendar, Pencil, Trash2, UserMinus, UserPlus, Users, X } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { LEVEL_LABELS, type PersonView } from "../../../../src/core/people";
 import type { ToHost, ToWebview } from "../../protocol";
@@ -56,8 +56,11 @@ function IconAction({ label, onClick, children }: { label: string; onClick: (but
   );
 }
 
-/** `Add from other projects`: a popover with a search of the people outside this team; choosing one adds them at once. Without anyone to add it is disabled, and says why. */
-function AddFromOthers({ others, onAdd }: { others: readonly PersonView[]; onAdd: (person: PersonView) => void }) {
+/**
+ * `Add from other projects`: a popover with a search of the people outside this team; choosing one adds them at once. Each row also has `Delete <name>`
+ * (`developer.DELETE_PERSON` of `person/Outside this team`): the popover closes and the host asks for confirmation. Without anyone outside the team it is disabled, and says why.
+ */
+function AddFromOthers({ others, onAdd, onDelete }: { others: readonly PersonView[]; onAdd: (person: PersonView) => void; onDelete: (person: PersonView) => void }) {
   const [open, setOpen] = useState(false);
   if (others.length === 0) {
     return (
@@ -107,6 +110,27 @@ function AddFromOthers({ others, onAdd }: { others: readonly PersonView[]; onAdd
                     <span className="truncate font-mono text-xs text-muted-foreground">@{person.handle}</span>
                   </span>
                   <Badge variant="outline">{LEVEL_LABELS[person.level]}</Badge>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-7"
+                        aria-label={`Delete ${person.name}`}
+                        // The row's own click adds the person and Enter in the search selects the active row: neither may take this button's activation.
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setOpen(false);
+                          onDelete(person);
+                        }}
+                        onKeyDown={(event) => event.stopPropagation()}
+                      >
+                        <Trash2 aria-hidden="true" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{`Delete ${person.name}`}</TooltipContent>
+                  </Tooltip>
                 </CommandItem>
               ))}
             </CommandGroup>
@@ -312,6 +336,10 @@ export function PeopleTab({ team, rejection, post }: PeopleTabProps) {
     setLeft(null);
     post({ type: "addToTeam", id: person.id });
   };
+  const deleteFrom = (person: PersonView) => {
+    setLeft(null);
+    post({ type: "deletePerson", id: person.id });
+  };
   const add = (
     <Button type="button" ref={addButton} onClick={(event) => addNew(event.currentTarget)}>
       <UserPlus aria-hidden="true" />
@@ -356,7 +384,7 @@ export function PeopleTab({ team, rejection, post }: PeopleTabProps) {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm text-muted-foreground">{peopleCount(members.length)}</p>
           <div className="flex items-center gap-2">
-            <AddFromOthers others={others} onAdd={addFrom} />
+            <AddFromOthers others={others} onAdd={addFrom} onDelete={deleteFrom} />
             {add}
           </div>
         </div>
@@ -374,7 +402,7 @@ export function PeopleTab({ team, rejection, post }: PeopleTabProps) {
               <UserPlus aria-hidden="true" />
               Add the first person
             </Button>
-            <AddFromOthers others={others} onAdd={addFrom} />
+            <AddFromOthers others={others} onAdd={addFrom} onDelete={deleteFrom} />
           </div>
         </div>
       ) : (

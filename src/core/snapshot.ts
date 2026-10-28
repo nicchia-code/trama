@@ -15,8 +15,8 @@ import { tasksHeldByDrifts } from "./delete-task";
 import { syncShortNumbers } from "./short-numbers";
 import { readTaskImages, type TaskImage } from "./task-images";
 import { clearedSince, readLastScan } from "./last-scan";
-import { attachedDrift, closedUnchanged, type Column, type Drift, type DriftOption, type DriftSides, driftBody, driftOptions, driftSides, type FollowedDrift, followedDrifts, indexDrifts, listDrifts, listTasks, type Task, taskProgress, unifiedDrifts, unifiedInto } from "./work";
-import { preparedFlag, preparedStatus } from "./prepared";
+import { attachedDrift, closedUnchanged, type Column, type DifferenceView, differenceViews, type Drift, type DriftOption, type DriftSides, driftBody, driftOptions, driftSides, type FollowedDrift, followedDrifts, indexDrifts, listDrifts, listTasks, type Task, taskProgress, unifiedDrifts, unifiedInto } from "./work";
+import { preparedFlagOf } from "./prepared";
 import { type Specs, type SpecsChange, specsChange } from "./specs";
 import { type HistoryFault, readHistory } from "./history";
 import { type HandoffView, type IssueRowView, teamViews } from "./team-views";
@@ -162,6 +162,8 @@ export interface DriftView {
   unifies: { id: string; title: string }[];
   /** The unified Drift this one was merged into, as identity and title; null unless its resolution is unified. */
   unifiedInto: { id: string; title: string } | null;
+  /** The differences of a unified Drift written with them, in order, each with its own text, options, decision and Task; empty for any other Drift. */
+  differences: DifferenceView[];
   /** True for a Drift from a merge: the scan after a Merge in Solo mode found it in code the merge brought, so the code may be right. */
   merge: boolean;
   /** The fix Task that dismissed this Drift by closing without changes, with its note while Done; null otherwise. */
@@ -506,11 +508,12 @@ function pictureOf(p: Project, finishingDrifts: readonly string[], finishingProp
     task: d.data.task,
     unifies: unifiedDrifts(p, d, driftById),
     unifiedInto: unifiedInto(p, d, driftById),
+    differences: differenceViews(d),
     merge: d.data.merge,
     closedUnchanged: closedUnchanged(p, d, tasks),
     body: driftBody(d),
     job: d.data.job,
-    prepared: preparedFlag(preparedStatus(p, d, project)),
+    prepared: preparedFlagOf(p, d, project),
     sides: driftSides(d),
     options: driftOptions(d),
     option: d.data.option,

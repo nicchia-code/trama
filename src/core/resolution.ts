@@ -1,20 +1,22 @@
 import { TramaError } from "./errors";
 import { joinReasons, RUN_IN_PROGRESS } from "./design";
-import { copyProposalFiles, type DriftDecision, type DriftDecisionKind, discardProposal, getProposal, listProposals, newProposal, type Proposal, requireEditable, resolutionHolding, save, submitProposal, touch, withProposalLock } from "./proposals";
+import { copyProposalFiles, type DriftDecision, type DriftDecisionKind, discardProposal, getProposal, listProposals, newProposal, type Proposal, requireEditable, resolutionHolding, save, submitProposal, touch, touchedFiles, withProposalLock } from "./proposals";
 import { cardName } from "./short-numbers";
 import type { Project } from "./store";
-import { chosenOption, driftOptions, fixCodeRefusal, followedDrifts, getDrift, indexDrifts, listDrifts, unifiedDrifts, type Drift } from "./work";
+import { chosenOption, differenceOf, differenceTitle, driftOptions, fixCodeRefusal, followedDrifts, getDrift, hasDifferences, indexDrifts, listDrifts, unifiedDrifts, type Drift } from "./work";
 
 /**
  * Records, replaces or (`remove`) removes the decision on `driftId` in a resolution Proposal, a Draft or an open one;
- * an open one goes back to Draft. Refused, changing nothing, when the rules of the decision are not met.
+ * an open one goes back to Draft. Entries are indexed by Drift and difference: a unified Drift with differences is decided only by
+ * entries that name `difference` (the `drift` of one of its open differences), one per difference; any other Drift only by an entry
+ * without it. `remove` without `difference` takes out every entry of the Drift. Refused, changing nothing, when the rules of the decision are not met.
  * `returnedToDraft` tells whether the Proposal was open.
  */
 export function resolveDriftInProposal(
   p: Project,
   id: string,
   driftId: string,
-  input: { decision?: DriftDecisionKind; option?: number; note?: string; remove?: boolean },
+  input: { decision?: DriftDecisionKind; option?: number; note?: string; remove?: boolean; difference?: string },
 ): { proposal: Proposal; returnedToDraft: boolean } {
   return withProposalLock(p, id, () => recordDecision(p, id, driftId, input));
 }
@@ -24,7 +26,7 @@ function recordDecision(
   p: Project,
   id: string,
   driftId: string,
-  input: { decision?: DriftDecisionKind; option?: number; note?: string; remove?: boolean },
+  input: { decision?: DriftDecisionKind; option?: number; note?: string; remove?: boolean; difference?: string },
 ): { proposal: Proposal; returnedToDraft: boolean } {
   const proposal = getProposal(p, id);
   const name = cardName(p, "proposal", proposal.id);
@@ -32,26 +34,35 @@ function recordDecision(
   requireEditable(p, proposal);
   const drift = getDrift(p, driftId);
   const driftName = cardName(p, "drift", drift.id);
-  const list = proposal.data.drifts.filter((d) => d.drift !== drift.id);
+  const { difference } = input;
+  const on = difference === undefined ? `Drift ${driftName}` : `Drift ${driftName}, difference ${cardName(p, "drift", difference)}`;
+  // The entry names a difference exactly when its Drift has them: the entry is refused otherwise, naming it.
+  if (difference !== undefined && differenceOf(drift, difference) === null)
+    throw new TramaError(hasDifferences(drift) ? `The entry for ${on} names a difference the Drift does not have` : `The entry for ${on} names a difference, but Drift ${driftName} is not a unified Drift with differences: "difference" goes only with one`);
+  const same = (d: DriftDecision) => d.drift === drift.id && (difference === undefined ? input.remove === true || d.difference === undefined : d.difference === difference);
+  const list = proposal.data.drifts.filter((d) => !same(d));
   if (input.remove) {
-    if (list.length === proposal.data.drifts.length) throw new TramaError(`Drift ${driftName} is not in Proposal ${name}`);
+    if (list.length === proposal.data.drifts.length) throw new TramaError(`${on} is not in Proposal ${name}`);
     return commit(p, proposal, list);
   }
+  if (hasDifferences(drift) && difference === undefined)
+    throw new TramaError(`The entry for Drift ${driftName} has no "difference": it is a unified Drift with differences, so each difference is decided by its own entry, giving its "difference"`);
   if (drift.data.status !== "open") throw new TramaError(`Drift ${driftName} is already resolved`);
+  if (difference !== undefined && differenceOf(drift, difference)?.decision !== null) throw new TramaError(`The difference ${cardName(p, "drift", difference)} of Drift ${driftName} is already decided`);
   const other = resolutionHolding(p, drift.id, proposal.id);
   if (other) throw new TramaError(`Drift ${driftName} is already in resolution ${cardName(p, "proposal", other.id)}, which is still to be decided`);
   const { decision } = input;
   if (decision === undefined) throw new TramaError("A decision is required: proposal, dismissed or fix-code");
   const note = input.note?.trim() || undefined;
   if (decision !== "fix-code" && (input.option !== undefined || input.note !== undefined))
-    throw new TramaError(`Drift ${driftName}: ${input.option !== undefined ? "an option" : "a note"} only goes with fix-code, not with ${decision}`);
+    throw new TramaError(`${on}: ${input.option !== undefined ? "an option" : "a note"} only goes with fix-code, not with ${decision}`);
   if (decision === "fix-code") {
-    chosenOption(p, drift, input.option);
-    const refusal = fixCodeRefusal(p, drift);
+    chosenOption(p, drift, input.option, difference);
+    const refusal = fixCodeRefusal(p, drift, undefined, difference);
     if (refusal) throw new TramaError(refusal);
   }
-  const entry: DriftDecision = { drift: drift.id, decision, ...(input.option === undefined ? {} : { option: input.option }), ...(note === undefined ? {} : { note }) };
-  const at = proposal.data.drifts.findIndex((d) => d.drift === drift.id);
+  const entry: DriftDecision = { drift: drift.id, ...(difference === undefined ? {} : { difference }), decision, ...(input.option === undefined ? {} : { option: input.option }), ...(note === undefined ? {} : { note }) };
+  const at = proposal.data.drifts.findIndex(same);
   return commit(p, proposal, at < 0 ? [...list, entry] : proposal.data.drifts.map((d, i) => (i === at ? entry : d)));
 }
 
@@ -124,7 +135,7 @@ export function resolveDriftBlocker(p: Project, work: WindowWork, agentOnIt: boo
  */
 export function unifiableDrifts(p: Project, finishing: readonly string[] = [], facts?: ResolutionFacts): string[] {
   const { drifts, held } = factsOf(p, facts);
-  return drifts.filter((d) => d.data.status === "open" && !finishing.includes(d.id) && !held.has(d.id)).map((d) => d.id);
+  return drifts.filter((d) => d.data.status === "open" && !finishing.includes(d.id) && !held.has(d.id) && d.data.differences.every((x) => x.decision === null)).map((d) => d.id);
 }
 
 /**
@@ -175,6 +186,45 @@ export interface PreparedAnswer {
 /** The outcome of `writePreparedResolution`: the open resolution, or why it was refused (the Draft is then Discarded). */
 export type PreparedResolution = { proposal: Proposal; refusal: null } | { proposal: null; refusal: string };
 
+/** The answer to the prepared question of one difference of a unified Drift with differences: the decision it comes to. */
+export interface DifferenceAnswer {
+  /** The `drift` of the difference. */
+  difference: string;
+  answer: PreparedAnswer;
+}
+
+/**
+ * Creates the Draft resolution marked `prepared` that holds `entries` (one decision each, `difference` only for a unified Drift with
+ * differences), copies the files of the Proposal attached to the Drift or difference of each `proposal` decision, and hands it over with
+ * the same checks as the agent's hand-over. When any step is refused, the Draft is Discarded with no feedback, so it never shows on
+ * the Board, and the refusal is returned.
+ */
+function writePrepared(p: Project, drift: Drift, body: string, entries: { difference?: string; answer: PreparedAnswer }[], skillsDirs: string[]): PreparedResolution {
+  const proposal = newProposal(p, `Resolve: ${drift.title}`, body, { kind: "resolution", prepared: true });
+  try {
+    for (const { difference, answer } of entries) resolveDriftInProposal(p, proposal.id, drift.id, { ...answer, ...(difference === undefined ? {} : { difference }) });
+    const touched = new Map<string, string>();
+    for (const { difference, answer } of entries) {
+      if (answer.decision !== "proposal") continue;
+      const attached = difference === undefined ? drift.data.proposal : (differenceOf(drift, difference)?.proposal ?? null);
+      const on = difference === undefined ? `Drift ${cardName(p, "drift", drift.id)}` : `Drift ${cardName(p, "drift", drift.id)}, difference ${cardName(p, "drift", difference)}`;
+      if (attached === null) throw new TramaError(`${on} has no attached Proposal to copy`);
+      // Two Proposals that change the same file cannot be merged by copying: the agent adapts them.
+      for (const path of touchedFiles(getProposal(p, attached))) {
+        const other = touched.get(path);
+        if (other !== undefined) throw new TramaError(`Proposals ${cardName(p, "proposal", other)} and ${cardName(p, "proposal", attached)} both change ${path}`);
+        touched.set(path, attached);
+      }
+      copyProposalFiles(p, proposal.id, attached);
+    }
+    return { proposal: submitProposal(p, proposal.id, skillsDirs), refusal: null };
+  } catch (err) {
+    if (!(err instanceof TramaError)) throw err;
+    discardProposal(p, proposal.id);
+    return { proposal: null, refusal: err.message };
+  }
+}
+
 /**
  * Trama's own path from the answer to a Drift's prepared question to an open resolution, with no agent: creates a Draft
  * resolution marked `prepared`, titled `Resolve: <Drift title>`, records the one decision of the answer (for `proposal`, the
@@ -186,19 +236,22 @@ export function writePreparedResolution(p: Project, driftId: string, answer: Pre
   const drift = getDrift(p, driftId);
   const optionTitle = answer.option === undefined ? undefined : driftOptions(drift)[answer.option - 1]?.title;
   const body = `Resolves Drift ${drift.id} (${drift.title}): ${decisionText(answer.decision, optionTitle).toLowerCase()}.`;
-  const proposal = newProposal(p, `Resolve: ${drift.title}`, body, { kind: "resolution", prepared: true });
-  try {
-    resolveDriftInProposal(p, proposal.id, drift.id, answer);
-    if (answer.decision === "proposal") {
-      if (drift.data.proposal === null) throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} has no attached Proposal to copy`);
-      copyProposalFiles(p, proposal.id, drift.data.proposal);
-    }
-    return { proposal: submitProposal(p, proposal.id, skillsDirs), refusal: null };
-  } catch (err) {
-    if (!(err instanceof TramaError)) throw err;
-    discardProposal(p, proposal.id);
-    return { proposal: null, refusal: err.message };
-  }
+  return writePrepared(p, drift, body, [{ answer }], skillsDirs);
+}
+
+/**
+ * `writePreparedResolution` for the answers to the round of a unified Drift with differences: one entry of `drifts` for each difference
+ * answered, with its `difference`, and one line of the body for each. The differences without an answer stay open.
+ */
+export function writePreparedRoundResolution(p: Project, driftId: string, answers: DifferenceAnswer[], skillsDirs: string[] = []): PreparedResolution {
+  const drift = getDrift(p, driftId);
+  const body = answers
+    .map(({ difference, answer }) => {
+      const optionTitle = answer.option === undefined ? undefined : driftOptions(drift, difference)[answer.option - 1]?.title;
+      return `Resolves Drift ${drift.id} (${drift.title}), difference ${difference} (${differenceTitle(drift, difference)}): ${decisionText(answer.decision, optionTitle).toLowerCase()}.`;
+    })
+    .join("\n");
+  return writePrepared(p, drift, body, answers, skillsDirs);
 }
 
 /** What holds in this window: Drift resolution and a run may both be going. */
@@ -219,9 +272,11 @@ export function decisionText(decision: DriftDecisionKind, optionTitle?: string):
   return `Code fixed${optionTitle === undefined ? "" : ` with option ${optionTitle}`}`;
 }
 
-/** One Drift of a resolution as a card shows it: what approving does to it, or that it was resolved in another way. */
+/** One Drift of a resolution as a card shows it, or one difference of a unified Drift with differences: what approving does to it, or that it was resolved in another way. */
 export interface ResolvedDrift {
   drift: string;
+  /** The `drift` of the difference this line is about, for a unified Drift with differences; null for any other Drift. Then `title`, `previous` and `merge` are those of the difference. */
+  difference: string | null;
   title: string;
   /** The Drift this one follows, when it is recurring. */
   previous: { id: string; title: string }[];
@@ -233,14 +288,24 @@ export interface ResolvedDrift {
   note: string | null;
 }
 
-/** The Drifts a resolution lists, in creation order, read from the files at each call. Empty for any other Proposal. `drifts` are the Drifts already read: without them they are listed. */
+/** The Drifts a resolution lists, in creation order, read from the files at each call: one line for a Drift, and one for each difference a unified Drift with differences has decided in it. Empty for any other Proposal. `drifts` are the Drifts already read: without them they are listed. */
 export function resolvedDrifts(p: Project, proposal: Proposal, drifts: readonly Drift[] = listDrifts(p)): ResolvedDrift[] {
   const index = indexDrifts(drifts);
-  return drifts.flatMap((drift) => {
+  return drifts.flatMap((drift): ResolvedDrift[] => {
+    if (hasDifferences(drift)) {
+      return drift.data.differences.flatMap((difference): ResolvedDrift[] => {
+        const d = proposal.data.drifts.find((x) => x.drift === drift.id && x.difference === difference.drift);
+        if (!d) return [];
+        const already = difference.decision !== null && difference.resolvedBy !== proposal.id;
+        const option = d.option === undefined ? undefined : driftOptions(drift, difference.drift)[d.option - 1]?.title;
+        const source = index.get(difference.drift);
+        return [{ drift: drift.id, difference: difference.drift, title: differenceTitle(drift, difference.drift), previous: source === undefined ? [] : followedDrifts(p, source, index), unifies: [], merge: source?.data.merge ?? false, decision: already ? "(already resolved)" : decisionText(d.decision, option), note: already ? null : (d.note ?? null) }];
+      });
+    }
     const d = proposal.data.drifts.find((x) => x.drift === drift.id);
     if (!d) return [];
     const already = drift.data.status === "resolved" && drift.data.resolvedBy !== proposal.id;
     const option = d.option === undefined ? undefined : driftOptions(drift)[d.option - 1]?.title;
-    return [{ drift: drift.id, title: drift.title, previous: followedDrifts(p, drift, index), unifies: unifiedDrifts(p, drift, index), merge: drift.data.merge, decision: already ? "(already resolved)" : decisionText(d.decision, option), note: already ? null : (d.note ?? null) }];
+    return [{ drift: drift.id, difference: null, title: drift.title, previous: followedDrifts(p, drift, index), unifies: unifiedDrifts(p, drift, index), merge: drift.data.merge, decision: already ? "(already resolved)" : decisionText(d.decision, option), note: already ? null : (d.note ?? null) }];
   });
 }

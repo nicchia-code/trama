@@ -27,8 +27,8 @@ const entry = (name: string) => ({ name, version: null, note: null, chosenByAgen
 const spec = (snapshot: Snapshot, request: FocusRequest) => focusSpec(snapshot, request) as FocusSpec;
 
 describe("steps", () => {
-  test("the Diagram has a step for each level that shows elements of the focus, in the order of the Model; Areas, General sections and Specs are neither steps nor missing", () => {
-    const refs = ["checkout", "order/Paid", "payment/Nope", "requirements/ui#General", "requirements/ui", "specs#ci", "requirements/ui#order/Paid", "user.CANCEL"];
+  test("the Diagram has a step for each level that shows elements of the focus, in the order of the Model; Areas, General sections, sections not titled to a Model element and Specs are neither steps nor missing", () => {
+    const refs = ["checkout", "order/Paid", "payment/Nope", "requirements/ui#General", "requirements/ui", "specs#ci", "requirements/ui#order/Paid", "requirements/ui#solo-merge", "user.CANCEL"];
     const { steps, missing } = diagramSteps(buildScene(shop, null), refs);
     expect(steps.map((s) => s.key)).toEqual(["actor:user", "feature:checkout", "machine:order"]);
     expect(steps.map((s) => s.name)).toEqual(["System › user", "checkout", "order"]);

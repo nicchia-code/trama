@@ -53,7 +53,9 @@ export interface MenuState {
   panelView: ViewName | null;
   /** Merge of Solo mode: absent with Solo mode off. */
   merge?: MergeMenuState;
-  /** Team is available (`rules#manager-mode`): the menu shows the `Team` entry. Absent otherwise. */
+  /** Origin is on GitHub in a Trama project (`rules#manager-mode`): the menu shows the `Team` entry, with Manager mode on or off. Absent otherwise. */
+  team?: true;
+  /** Team is available (Manager mode recorded and origin on GitHub): the `Team` entry may carry the number of handoffs. Absent otherwise, and never without `team`. */
   manager?: true;
   /** The open handoffs that wait for a decision (the number of the `Team` entry): present only with Team available and more than none. They never count in `decisions`. */
   handoffs?: number;

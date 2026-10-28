@@ -23,7 +23,7 @@ const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
 
 const bad = (reason: string): Parsed => ({ ok: false, reason });
 
-function parseAction(value: unknown): Exclude<AgentAction, { kind: "scan" | "mergeScan" | "reconcileMerge" }> | string {
+function parseAction(value: unknown): Exclude<AgentAction, { kind: "scan" | "mergeScan" | "reconcileMerge" | "prCheck" }> | string {
   if (typeof value !== "object" || value === null) return "launch needs an action";
   const raw = value as Raw;
   switch (raw["kind"]) {
@@ -335,6 +335,11 @@ export function parseToHost(value: unknown, settings: readonly SettingSchema[] =
       const { owner, number } = raw as { owner?: unknown; number?: unknown };
       if (typeof owner !== "string" || owner === "" || typeof number !== "number" || !Number.isInteger(number) || number < 1) return bad("linkGitHubProject needs the owner of a Project and its number, a positive integer");
       return { ok: true, message: { type, owner, number } };
+    }
+    case "checkPullRequest":
+    case "stopPullRequestCheck": {
+      const number = raw["number"];
+      return typeof number === "number" && Number.isSafeInteger(number) && number >= 1 ? { ok: true, message: { type, number } } : bad(`${type} needs a pull request number, a positive integer`);
     }
     case "unlinkGitHubProject":
     case "refreshTeam":

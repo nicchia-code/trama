@@ -224,6 +224,21 @@ test("Delete person asks in the modal dialog of the editor: cancelling changes n
   controller.dispose();
 });
 
+test("Delete person also deletes a person outside this team, after the same confirmation", async () => {
+  const { people: team, store } = people();
+  const controller = await open(team);
+  await send({ type: "savePerson", person: ADA });
+  await send({ type: "removeFromTeam", id: "aaaaaaa1" });
+  expect(teams().at(-1)).toMatchObject({ members: [], others: [{ id: "aaaaaaa1" }] });
+  warnings.length = 0;
+  warningAnswer = "Delete";
+  await send({ type: "deletePerson", id: "aaaaaaa1" });
+  expect(warnings).toEqual([{ message: "Delete Ada Lovelace?", detail: "They leave every project's team. Issues already assigned to them on GitHub stay assigned." }]);
+  expect(teams().at(-1)).toMatchObject({ members: [], others: [] });
+  expect(stored(store).people).toEqual([]);
+  controller.dispose();
+});
+
 test("a write that fails reaches the tab as the sentence of the notice, with the people as they are stored", async () => {
   const store = memoryPeopleStore();
   store.update = () => Promise.reject(new Error("disk full"));
@@ -247,38 +262,96 @@ test("the writes of the People tab do nothing while Team is not available", asyn
   controller.dispose();
 });
 
-test("when Team stops being available while the panel shows it, the host navigates to the Board", async () => {
+/** Runs `body` with the origin of the project set to `address` (`null` for no origin), then puts the GitHub one of the file back. */
+async function withOrigin(address: string | null, body: () => Promise<void>): Promise<void> {
+  const git = (...args: string[]) => spawnSync("git", args, { cwd: dir, stdio: "ignore", timeout: 30_000, killSignal: "SIGKILL" });
+  if (address === null) git("remote", "remove", "origin");
+  else git("remote", "set-url", "origin", address);
+  try {
+    await body();
+  } finally {
+    if (address === null) git("remote", "add", "origin", "git@github.com:Acme/Shop.git");
+    else git("remote", "set-url", "origin", "git@github.com:Acme/Shop.git");
+  }
+}
+
+test("when origin stops being on GitHub while the panel shows Team, the host navigates to the Board", async () => {
+  const { people: team } = people();
+  for (const manager of [true, false]) {
+    setManagerMode(projectAt(dir), manager);
+    const controller = await open(team);
+    await send({ type: "viewChanged", view: "team" });
+    await withOrigin("https://gitlab.com/acme/shop", async () => {
+      posted.length = 0;
+      await send({ type: "ready" });
+      expect(posted).toContainEqual({ type: "managerMode", available: false, recorded: manager, repository: null, reason: "Origin is not on GitHub" } as never);
+      expect(posted).toContainEqual({ type: "navigate", view: "board" });
+    });
+    controller.dispose();
+  }
+});
+
+test("when Manager mode goes off while the panel shows Team, the panel stays on Team: it hears that Team is no longer available but is not sent to the Board", async () => {
   const { people: team } = people();
   const controller = await open(team);
   await send({ type: "viewChanged", view: "team" });
   posted.length = 0;
-  setManagerMode(projectAt(dir), false);
-  await send({ type: "ready" });
+  await send({ type: "setManagerMode", on: false });
   expect(posted).toContainEqual({ type: "managerMode", available: false, recorded: false, repository: "acme/shop", reason: null } as never);
-  expect(posted).toContainEqual({ type: "navigate", view: "board" });
+  // The view keeps showing, with the people not sent any more and no navigation at all.
+  expect(posted.some((message) => message.type === "navigate")).toBe(false);
+  // A new picture does not move it either.
+  posted.length = 0;
+  await send({ type: "ready" });
+  expect(posted.some((message) => message.type === "navigate")).toBe(false);
   controller.dispose();
 });
 
-test("the Show Team command without Team does the ordinary opening, and with it opens the panel on Team", async () => {
+test("the Show Team command without origin on GitHub does the ordinary opening, and with it, with Manager mode on or off, opens the panel on Team", async () => {
   const { people: team } = people();
-  setManagerMode(projectAt(dir), false);
-  const without = new Controller({ fsPath: dir } as never, undefined, undefined, undefined, undefined, team);
-  const before = panels.length;
-  await without.show("team");
-  expect(panels.length).toBe(before + 1);
-  panels.at(-1)?.receive?.({ type: "ready" });
-  await Bun.sleep(0);
-  expect(posted.some((message) => message.type === "navigate")).toBe(false);
-  without.dispose();
+  for (const manager of [true, false]) {
+    // Manager mode is recorded while origin is still on GitHub; it stays recorded when origin goes away.
+    setManagerMode(projectAt(dir), manager);
+    await withOrigin("https://gitlab.com/acme/shop", async () => {
+      posted.length = 0;
+      const without = new Controller({ fsPath: dir } as never, undefined, undefined, undefined, undefined, team);
+      const before = panels.length;
+      await without.show("team");
+      expect(panels.length).toBe(before + 1);
+      panels.at(-1)?.receive?.({ type: "ready" });
+      await Bun.sleep(0);
+      expect(posted.some((message) => message.type === "navigate")).toBe(false);
+      without.dispose();
+    });
+  }
 
-  setManagerMode(projectAt(dir), true);
-  posted.length = 0;
-  const with_ = new Controller({ fsPath: dir } as never, undefined, undefined, undefined, undefined, team);
-  await with_.show("team");
-  panels.at(-1)?.receive?.({ type: "ready" });
-  await Bun.sleep(0);
-  expect(posted).toContainEqual({ type: "navigate", view: "team" });
-  with_.dispose();
+  for (const manager of [true, false]) {
+    setManagerMode(projectAt(dir), manager);
+    posted.length = 0;
+    const with_ = new Controller({ fsPath: dir } as never, undefined, undefined, undefined, undefined, team);
+    await with_.show("team");
+    panels.at(-1)?.receive?.({ type: "ready" });
+    await Bun.sleep(0);
+    expect(posted).toContainEqual({ type: "navigate", view: "team" });
+    with_.dispose();
+  }
+});
+
+test("with the panel open, Show Team moves it to Team with origin on GitHub, Manager mode on or off, and leaves the view as it is without", async () => {
+  const { people: team } = people();
+  const controller = await open(team);
+  await withOrigin("https://gitlab.com/acme/shop", async () => {
+    posted.length = 0;
+    await controller.show("team");
+    expect(posted.some((message) => message.type === "navigate")).toBe(false);
+  });
+  for (const manager of [true, false]) {
+    setManagerMode(projectAt(dir), manager);
+    posted.length = 0;
+    await controller.show("team");
+    expect(posted).toContainEqual({ type: "navigate", view: "team" });
+  }
+  controller.dispose();
 });
 
 // ---- The GitHub Project (`rules#github-project`): a fake `gh` first in the PATH, so the reads run the real code against canned answers ----
@@ -349,6 +422,7 @@ function installGh(loggedIn: boolean): void {
   writeFileSync(join(ghDir, "items.json"), ITEMS_ANSWER);
   const script = [
     "#!/bin/sh",
+    `echo "$*" >> "${join(ghDir, "calls.log")}"`,
     'case "$1" in',
     '  --version) echo "gh version 2.60.0";;',
     loggedIn ? '  auth) echo "Logged in";;' : '  auth) echo "You are not logged into any GitHub hosts" >&2; exit 1;;',
@@ -453,16 +527,53 @@ github("a gh that is not logged in is the state not-logged-in, and Show details 
   controller.dispose();
 });
 
-github("the GitHub messages do nothing while Team is not available", async () => {
+github("without Manager mode Refresh reads only the state of gh and the people and the Project never leave: no Projects are asked, and a missing access to them is never a state", async () => {
   installGh(true);
+  writeFileSync(join(ghDir, "calls.log"), "");
   const { people: team } = people();
   const controller = await openWithGitHub(team);
   setManagerMode(projectAt(dir), false);
   posted.length = 0;
   await send({ type: "refreshTeam" });
+  await settled(() => githubs().at(-1)?.state === "ready" && githubs().at(-1)?.reading === false);
+  expect(githubs().at(-1)).toMatchObject({ state: "ready", linked: null, project: null, projects: [], issues: [], error: null });
+  // The state of gh and the open pull requests are read; no Project is asked.
+  const calls = readFileSync(join(ghDir, "calls.log"), "utf8").split("\n").filter((line) => line !== "");
+  expect(calls.filter((line) => line.startsWith("api graphql"))).toEqual([]);
+  expect(new Set(calls.filter((line) => !line.startsWith("pr list")))).toEqual(new Set(["--version", "auth status --hostname github.com"]));
+  expect(calls.filter((line) => line.startsWith("pr list"))).toHaveLength(1);
+  // A not logged in gh is still told, and Log in to GitHub stays available to anyone.
+  installGh(false);
+  posted.length = 0;
+  await send({ type: "refreshTeam" });
+  await settled(() => githubs().at(-1)?.state === "not-logged-in" && githubs().at(-1)?.reading === false);
+  expect(githubs().at(-1)).toMatchObject({ state: "not-logged-in", linked: null });
+  expect(teams()).toEqual([]);
+  // The messages that belong to Manager mode do nothing.
   await send({ type: "linkGitHubProject", owner: "Acme", number: 1 });
-  expect(githubs()).toEqual([]);
   expect(existsSync(githubProjectFile(projectAt(dir)))).toBe(false);
+  controller.dispose();
+});
+
+github("with Manager mode on Refresh reads the state of gh and the Projects, and turning it on while the view shows Team reads again with the Projects", async () => {
+  installGh(true);
+  writeFileSync(join(ghDir, "calls.log"), "");
+  const { people: team } = people();
+  setManagerMode(projectAt(dir), false);
+  const controller = await openWithGitHub(team);
+  await send({ type: "viewChanged", view: "team" });
+  await settled(() => githubs().at(-1)?.state === "ready" && githubs().at(-1)?.reading === false);
+  expect(githubs().at(-1)?.projects).toEqual([]);
+  posted.length = 0;
+  await send({ type: "setManagerMode", on: true });
+  await settled(() => (githubs().at(-1)?.projects.length ?? 0) > 0 && githubs().at(-1)?.reading === false);
+  expect(githubs().at(-1)?.projects).toMatchObject([{ number: 1 }, { number: 2 }]);
+  expect(teams().length).toBeGreaterThan(0);
+  // Turning it off again takes the Projects away from the view.
+  posted.length = 0;
+  await send({ type: "setManagerMode", on: false });
+  await settled(() => githubs().at(-1)?.reading === false && githubs().at(-1)?.projects.length === 0);
+  expect(githubs().at(-1)).toMatchObject({ linked: null, project: null, projects: [] });
   controller.dispose();
 });
 

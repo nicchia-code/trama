@@ -1,10 +1,10 @@
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type AgentOrigin, announcementsDir, deliverCard } from "./announcements";
-import { type Blocker, blockedByDrift, computeBlocked, concernSameThing, refusalFor } from "./blocking";
+import { type Blocker, blockedByDrift, computeBlocked, concernSameThing, openExtent, refusalFor } from "./blocking";
 import { TramaError } from "./errors";
 import { clearProgress, readProgress, writeProgress } from "./progress";
-import { approveProposal, discardAttachedProposal, type DriftDecisionKind, getProposal, type Proposal, pruneImages, rejectProposal, resolutionHolding } from "./proposals";
+import { approveProposal, discardAttachedProposal, type DriftDecision, type DriftDecisionKind, getProposal, type Proposal, pruneImages, rejectProposal, resolutionHolding } from "./proposals";
 import type { RemovedElement } from "./scan-scope";
 import { loadProject, parseRequirementRef, type ProjectModel, resolveProjectRef } from "./requirements";
 import { boolField, compareByCreation, createdField, enumField, enumOrNull, idField, instantField, positiveIntOrNull, type Raw, stringList, textOrNull } from "./schema";
@@ -58,7 +58,32 @@ interface TaskData {
   unchanged: string | null;
 }
 
-export type DriftResolution = "fix-code" | "proposal" | "dismissed" | "unified";
+export type DriftResolution = "fix-code" | "proposal" | "dismissed" | "unified" | "differences";
+
+/** How a difference of a unified Drift was decided: the code fixed, the Model adapted with the attached Proposal, or closed without changes. */
+export type DifferenceDecision = "fix-code" | "proposal" | "dismissed";
+
+/**
+ * One difference of a unified Drift: what one of the Drifts it unifies said. `drift` is the permanent identity of that Drift and
+ * identifies the difference everywhere; its text lives in the body (`## Difference <drift>: <title>`). Origins and precedents
+ * are those of that Drift's own file. An open difference has no `decision`.
+ */
+export interface Difference {
+  drift: string;
+  refs: string[];
+  /** The Proposal attached to this difference, or null. */
+  proposal: string | null;
+  /** The `drift` of the other differences of the same Drift this one is linked to: symmetric. */
+  linked: string[];
+  decision: DifferenceDecision | null;
+  /** Only with `fix-code`: the number of the chosen fix option, from 1; null when the difference has none. */
+  option: number | null;
+  note: string | null;
+  /** The fix Task of a `fix-code` decision, shared by the linked differences fixed together. */
+  task: string | null;
+  /** The resolution Proposal that decided it; null when closed by Dismiss Drift (or still open). */
+  resolvedBy: string | null;
+}
 
 interface DriftData {
   status: "open" | "resolved";
@@ -72,6 +97,8 @@ interface DriftData {
   previous: string[];
   /** The Drifts a unified Drift merged, in creation order; empty for any other Drift. */
   unifies: string[];
+  /** The differences of a unified Drift written with them, one per Drift it unified (or per difference of a unified Drift with differences it gathered), in order; empty for any other Drift, and for a unified Drift written before they existed, which is read as one single difference. */
+  differences: Difference[];
   /** The unified Drift this one was merged into, when its resolution is `unified`; null otherwise. */
   unifiedInto: string | null;
   /** True for a Drift filed by the scan after a Merge in Solo mode, whose Where in the code lies in files the merge brought: the code may be right. Set at creation and never changed. */
@@ -90,7 +117,8 @@ export type Drift = Item<DriftData>;
 const tasksDir = (p: Project) => join(p.dir, "tasks");
 const driftsDir = (p: Project) => join(p.dir, "drifts");
 
-const RESOLUTIONS: readonly DriftResolution[] = ["fix-code", "proposal", "dismissed", "unified"];
+const RESOLUTIONS: readonly DriftResolution[] = ["fix-code", "proposal", "dismissed", "unified", "differences"];
+const DIFFERENCE_DECISIONS: readonly DifferenceDecision[] = ["fix-code", "proposal", "dismissed"];
 const DRIFT_STATUSES: readonly DriftData["status"][] = ["open", "resolved"];
 
 function parseTask(raw: Raw, where: string): TaskData {
@@ -132,6 +160,37 @@ function idListField(raw: Raw, key: string, where: string): string[] {
   return v.map((item) => idField({ [key]: item }, key, where) ?? "").filter((id) => id !== "");
 }
 
+/** The `differences` of a unified Drift: absent or null is none. Each entry is read with the same field rules as a Drift; a `linked` name must be another difference of the same Drift. */
+function parseDifferences(raw: Raw, where: string): Difference[] {
+  const v = raw["differences"];
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v) || v.some((e) => typeof e !== "object" || e === null || Array.isArray(e))) throw new TramaError(`${where}: "differences" must be a list of differences { drift, refs, ... }`);
+  const list = v.map((entry, i): Difference => {
+    const at = `${where}: differences[${i}]`;
+    const e = entry as Raw;
+    const drift = idField(e, "drift", at);
+    if (drift === null) throw new TramaError(`${at}: "drift" is required, the Drift the difference comes from`);
+    return {
+      drift,
+      refs: stringList(e, "refs", at),
+      proposal: idField(e, "proposal", at),
+      linked: idListField(e, "linked", at),
+      decision: enumOrNull(e, "decision", DIFFERENCE_DECISIONS, at),
+      option: positiveIntOrNull(e, "option", at),
+      note: textOrNull(e, "note", at),
+      task: idField(e, "task", at),
+      resolvedBy: idField(e, "resolvedBy", at),
+    };
+  });
+  const names = new Set(list.map((d) => d.drift));
+  if (names.size !== list.length) throw new TramaError(`${where}: "differences" names a Drift more than once`);
+  for (const d of list) {
+    const bad = d.linked.find((name) => name === d.drift || !names.has(name));
+    if (bad !== undefined) throw new TramaError(`${where}: the difference of ${d.drift} is linked to ${bad}, which is not another difference of this Drift`);
+  }
+  return list;
+}
+
 function parseDrift(raw: Raw, where: string): DriftData {
   const data: DriftData = {
     status: enumField(raw, "status", DRIFT_STATUSES, "open", where),
@@ -142,6 +201,7 @@ function parseDrift(raw: Raw, where: string): DriftData {
     origin: idListField(raw, "origin", where),
     previous: idListField(raw, "previous", where),
     unifies: idListField(raw, "unifies", where),
+    differences: parseDifferences(raw, where),
     merge: raw["merge"] === true,
     unifiedInto: idField(raw, "unifiedInto", where),
     option: positiveIntOrNull(raw, "option", where),
@@ -152,6 +212,8 @@ function parseDrift(raw: Raw, where: string): DriftData {
   };
   if (data.resolution === "unified" && data.unifiedInto === null) throw new TramaError(`${where}: resolution "unified" needs "unifiedInto", the Drift it was merged into`);
   if (data.unifiedInto !== null && data.resolution !== "unified") throw new TramaError(`${where}: "unifiedInto" goes only with resolution "unified", found ${JSON.stringify(data.resolution)}`);
+  if (data.resolution === "differences" && (data.differences.length === 0 || data.differences.some((d) => d.decision === null)))
+    throw new TramaError(`${where}: resolution "differences" needs "differences" with every difference decided`);
   return data;
 }
 
@@ -175,6 +237,21 @@ function saveItem(path: string, data: object, body: string) {
     if (copy[key] === undefined) delete copy[key];
   }
   if (Array.isArray(copy["unifies"]) && copy["unifies"].length === 0) delete copy["unifies"];
+  if (Array.isArray(copy["differences"])) {
+    if (copy["differences"].length === 0) delete copy["differences"];
+    else
+      copy["differences"] = (copy["differences"] as Difference[]).map((d) => ({
+        drift: d.drift,
+        refs: d.refs,
+        ...(d.proposal === null ? {} : { proposal: d.proposal }),
+        ...(d.linked.length === 0 ? {} : { linked: d.linked }),
+        ...(d.decision === null ? {} : { decision: d.decision }),
+        ...(d.option === null ? {} : { option: d.option }),
+        ...(d.note === null ? {} : { note: d.note }),
+        ...(d.task === null ? {} : { task: d.task }),
+        ...(d.resolvedBy === null ? {} : { resolvedBy: d.resolvedBy }),
+      }));
+  }
   if (copy["merge"] !== true) delete copy["merge"];
   if (copy["unifiedInto"] === null) delete copy["unifiedInto"];
   if (copy["job"] === null) delete copy["job"];
@@ -357,8 +434,10 @@ export type Mover = "agent" | "developer";
  * The agent cannot start a blocked Task, from any column, nor keep one In progress; nothing changes then.
  *
  * `unchanged` closes a fix Task into Done without changes, with the note of what was checked: only from a Drift still
- * in Code to be fixed (or already dismissed by this Task), and the Drift becomes Dismissed in the same step. Refused,
- * nothing changes, when the Task is not a fix Task of such a Drift, is already Done, or the note is empty.
+ * in Code to be fixed (or already dismissed by this Task), and the Drift becomes Dismissed in the same step. For the fix
+ * Task of differences of a unified Drift, the differences it fixes (`task` is this Task) must be still fixed in the code
+ * or already closed by this Task; they become dismissed, keeping their choice, and the Drift keeps its state. Refused,
+ * nothing changes, when the Task is not such a fix Task, is already Done, or the note is empty.
  */
 export function moveTask(p: Project, id: string, column: string, by: Mover, origin: AgentOrigin = {}, unchanged?: string): Task {
   if (!COLUMNS.includes(column as Column))
@@ -381,7 +460,7 @@ export function moveTask(p: Project, id: string, column: string, by: Mover, orig
     const blockers = computeBlocked(loadProject(p), tasks, listDrifts(p)).get(task.id);
     if (blockers) throw new TramaError(refusalFor(task, blockers, syncShortNumbers(p)));
   }
-  const drift = unchanged === undefined ? null : unchangedDrift(p, task, column, unchanged);
+  const closing = unchanged === undefined ? null : unchangedDrift(p, task, column, unchanged);
   // Arriving in Done from another column records the instant; Done to Done keeps it; leaving Done forgets it.
   if (column !== "done") task.data.finished = null;
   else if (task.data.column !== "done") task.data.finished = createdNow();
@@ -397,10 +476,13 @@ export function moveTask(p: Project, id: string, column: string, by: Mover, orig
   saveItem(task.path, task.data, task.body);
   if (!task.data.agent) clearProgress(p, task.id);
   pruneImages(p);
-  if (drift) {
-    drift.data.status = "resolved";
-    drift.data.resolution = "dismissed";
-    saveItem(drift.path, drift.data, drift.body);
+  if (closing?.differences) {
+    for (const difference of closing.differences) difference.decision = "dismissed";
+    saveItem(closing.drift.path, closing.drift.data, closing.drift.body);
+  } else if (closing) {
+    closing.drift.data.status = "resolved";
+    closing.drift.data.resolution = "dismissed";
+    saveItem(closing.drift.path, closing.drift.data, closing.drift.body);
   }
   return task;
 }
@@ -429,11 +511,12 @@ export function declareProgress(p: Project, id: string, value: number, by: Mover
 export const taskProgress = (p: Project, task: Task): number | null => (task.data.column === "doing" && task.data.agent ? readProgress(p, task.id) : null);
 
 /**
- * The Drift a fix Task closed without changes dismisses, or a refusal saying why nothing may change: the Task must be
- * moving to Done from another column, be the fix Task registered in a Drift in Code to be fixed (or already dismissed
- * by it), and come with a note.
+ * What closing a fix Task without changes changes, or a refusal saying why nothing may change: the Task must be moving to
+ * Done from another column and come with a note. The Drift it fixes is in Code to be fixed (or already dismissed by it) and
+ * becomes Dismissed; for a unified Drift with differences, `differences` are those the Task fixes, each still fixed in the
+ * code by it or already closed by it, and the Drift keeps its state.
  */
-function unchangedDrift(p: Project, task: Task, column: string, note: string): Drift {
+function unchangedDrift(p: Project, task: Task, column: string, note: string): { drift: Drift; differences: Difference[] | null } {
   const name = cardName(p, "task", task.id);
   if (column !== "done") throw new TramaError(`Only a move to done can close Task ${name} without changes: nothing changed`);
   if (task.data.column === "done") throw new TramaError(`Task ${name} is already Done: nothing changed`);
@@ -441,13 +524,20 @@ function unchangedDrift(p: Project, task: Task, column: string, note: string): D
   if (note.trim() === "") throw new TramaError(`Closing Task ${name} without changes needs a note saying what was checked`);
   const drift = getDrift(p, task.data.drift);
   const dname = cardName(p, "drift", drift.id);
+  if (hasDifferences(drift)) {
+    const fixed = drift.data.differences.filter((d) => d.task === task.id);
+    if (fixed.length === 0) throw new TramaError(`Task ${name} fixes no difference of Drift ${dname}: only the fix Task of a difference can be closed without changes`);
+    const other = fixed.find((d) => d.decision !== "fix-code" && d.decision !== "dismissed");
+    if (other) throw new TramaError(`${driftLabel(p, drift, other.drift)} is not fixed in the code nor closed by Task ${name}: Task ${name} cannot be closed without changes`);
+    return { drift, differences: fixed };
+  }
   if (drift.data.status === "resolved" && drift.data.task !== null && drift.data.task !== task.id)
     throw new TramaError(`Drift ${dname} is fixed by Task ${cardName(p, "task", drift.data.task)}: only that Task can close it without changes, so Task ${name} cannot`);
   const inCodeToBeFixed = drift.data.status === "resolved" && drift.data.resolution === "fix-code";
   const dismissedHere = drift.data.status === "resolved" && drift.data.resolution === "dismissed" && drift.data.task === task.id;
   if (!inCodeToBeFixed && !dismissedHere)
     throw new TramaError(`Drift ${dname} is not in Code to be fixed nor dismissed by Task ${name}: Task ${name} cannot be closed without changes`);
-  return drift;
+  return { drift, differences: null };
 }
 
 /** Most Tasks a parallel run implements together without a configured limit. */
@@ -587,9 +677,13 @@ export function indexDrifts(drifts: readonly Drift[]): DriftIndex {
   return index;
 }
 
-/** The open Drift that holds Proposal `proposalId`, or null: a resolved Drift no longer holds it. The one decision of "attached to an open Drift". `drifts` are the Drifts already read. */
-export function attachedDrift(p: Project, proposalId: string, drifts: readonly Drift[] = listDrifts(p)): Drift | null {
-  return drifts.find((d) => d.data.status === "open" && d.data.proposal === proposalId) ?? null;
+/**
+ * The open Drift that holds Proposal `proposalId` (as its own, or as the attached Proposal of one of its open differences), or
+ * null: a resolved Drift no longer holds it. The one decision of "attached to an open Drift". `drifts` are the Drifts already
+ * read; `except` is a Drift that does not count.
+ */
+export function attachedDrift(p: Project, proposalId: string, drifts: readonly Drift[] = listDrifts(p), except?: string): Drift | null {
+  return drifts.find((d) => d.id !== except && d.data.status === "open" && (d.data.proposal === proposalId || d.data.differences.some((x) => x.decision === null && x.proposal === proposalId))) ?? null;
 }
 
 /** Refuses a direct approval or rejection of a Proposal attached to an open Drift; the developer decides it through the Drift. */
@@ -617,6 +711,11 @@ export function originDesign(p: Project, origins: string[]): string | null {
   return designs.size === 1 && only !== undefined ? only : null;
 }
 
+/** The origin Tasks that count for an open Drift now: its own, or, for a unified Drift with differences, those of its open differences (read from the Drifts they come from). Blocking, and the model a Resolve run takes, use them. */
+export function liveOrigins(p: Project, drift: Drift): string[] {
+  return hasDifferences(drift) ? openExtent(drift, indexDrifts(listDrifts(p))).origin : drift.data.origin;
+}
+
 /** A Drift a recurring Drift follows: its identity, its title and how it was decided (null when it is not resolved or its file is gone). */
 export interface FollowedDrift {
   id: string;
@@ -630,7 +729,7 @@ export function followedDrifts(p: Project, drift: Drift, all?: DriftIndex): Foll
   const index = all ?? indexDrifts(listDrifts(p));
   return drift.data.previous.map((id) => {
     const found = index.get(id);
-    return { id, title: found?.title ?? id, decision: found?.data.resolution ?? null };
+    return { id, title: found?.title ?? id, decision: found === undefined ? null : (closedOutcome(found, index)?.decision ?? found.data.resolution) };
   });
 }
 
@@ -679,33 +778,98 @@ export interface DriftOption {
 
 const PREPARED_HEADING = "Prepared question";
 const SECTION_HEADINGS: readonly string[] = [HAPPENS_HEADING, SHOULD_HEADING, OPTIONS_HEADING, WHERE_HEADING, PREPARED_HEADING];
+/** The `###` sections of a difference block. */
+const BLOCK_HEADINGS: readonly string[] = [HAPPENS_HEADING, SHOULD_HEADING, OPTIONS_HEADING, WHERE_HEADING];
+/** The heading of a difference block: `## Difference <drift>: <title>`. */
+const DIFFERENCE_HEADING = /^## Difference (\S+): (.*?)\s*$/;
 
-/** The body split at the known `## ` headings; any other line, `## ` ones included, belongs to the section it is in. */
-function driftSections(drift: Drift): Map<string, string[]> {
-  const sections = new Map<string, string[]>();
+interface Block {
+  title: string;
+  sections: Map<string, string[]>;
+}
+
+/** A body cut at its structural headings: the Drift's own sections and, for a unified Drift with differences, the block of each difference. */
+interface ParsedBody {
+  /** The four sections of a Drift; for a unified Drift with differences only its Prepared question. */
+  own: Map<string, string[]>;
+  blocks: Map<string, Block>;
+}
+
+/**
+ * The body split at the known headings: a Drift's `## ` sections, or, when it has differences, the `## Difference <drift>: <title>`
+ * blocks (of the differences it lists) with their `### ` sections, then `## Prepared question`. Any other line, headings included,
+ * belongs to the section it is in, so the text of one block never reaches another section or difference.
+ */
+function parseBody(drift: Drift): ParsedBody {
+  const known = new Set(drift.data.differences.map((d) => d.drift));
+  const own = new Map<string, string[]>();
+  const blocks = new Map<string, Block>();
   let current: string[] | null = null;
+  let block: Block | null = null;
   for (const line of drift.body.split("\n")) {
-    const heading = /^## (.+?)\s*$/.exec(line)?.[1];
-    if (heading !== undefined && SECTION_HEADINGS.includes(heading)) {
+    if (known.size === 0) {
+      const heading = /^## (.+?)\s*$/.exec(line)?.[1];
+      if (heading !== undefined && SECTION_HEADINGS.includes(heading)) {
+        current = [];
+        own.set(heading, current);
+      } else current?.push(line);
+      continue;
+    }
+    const opened = DIFFERENCE_HEADING.exec(line);
+    if (opened && known.has(opened[1] as string)) {
+      block = { title: (opened[2] as string).trim(), sections: new Map() };
+      blocks.set(opened[1] as string, block);
+      current = null;
+      continue;
+    }
+    if (/^## Prepared question\s*$/.test(line)) {
+      block = null;
       current = [];
-      sections.set(heading, current);
+      own.set(PREPARED_HEADING, current);
+      continue;
+    }
+    const section = block === null ? undefined : /^### (.+?)\s*$/.exec(line)?.[1];
+    if (block !== null && section !== undefined && BLOCK_HEADINGS.includes(section)) {
+      current = [];
+      block.sections.set(section, current);
     } else current?.push(line);
   }
-  return sections;
+  return { own, blocks };
 }
+
+/** The sections of a Drift, or of its difference `difference` when it has differences: none for a Drift with differences asked without one. */
+function driftSections(drift: Drift, difference?: string): Map<string, string[]> {
+  const parsed = parseBody(drift);
+  if (drift.data.differences.length === 0) return parsed.own;
+  return difference === undefined ? new Map() : (parsed.blocks.get(difference)?.sections ?? new Map());
+}
+
+/** True for a unified Drift written with differences: it has no sides, options or where of its own, only its differences do. */
+export const hasDifferences = (drift: Drift): boolean => drift.data.differences.length > 0;
+
+/** The title of the difference of `drift` named `difference`, from its block heading; the identity when the block is missing. */
+export function differenceTitle(drift: Drift, difference: string): string {
+  return parseBody(drift).blocks.get(difference)?.title || difference;
+}
+
+/** The difference of `drift` named `difference` (the `drift` it comes from), or null. */
+export const differenceOf = (drift: Drift, difference: string): Difference | null => drift.data.differences.find((d) => d.drift === difference) ?? null;
+
+/** The differences of a unified Drift still open, in order; empty for any other Drift. */
+export const openDifferences = (drift: Drift): Difference[] => drift.data.differences.filter((d) => d.decision === null);
 
 /** The text of the Prepared question section of a Drift, heading excluded; null when it has none. */
 export function preparedSectionText(drift: Drift): string | null {
-  return driftSections(drift).get(PREPARED_HEADING)?.join("\n") ?? null;
+  return parseBody(drift).own.get(PREPARED_HEADING)?.join("\n") ?? null;
 }
 
-/** The body without its Prepared question section, that section being everything up to the next known heading. */
+/** The body without its Prepared question section, that section being everything up to the next heading that starts a section or a difference. */
 export function withoutPrepared(body: string): string {
   const kept: string[] = [];
   let inPrepared = false;
   for (const line of body.split("\n")) {
     const heading = /^## (.+?)\s*$/.exec(line)?.[1];
-    if (heading !== undefined && SECTION_HEADINGS.includes(heading)) inPrepared = heading === PREPARED_HEADING;
+    if (heading !== undefined && (SECTION_HEADINGS.includes(heading) || DIFFERENCE_HEADING.test(line))) inPrepared = heading === PREPARED_HEADING;
     if (!inPrepared) kept.push(line);
   }
   return kept.join("\n");
@@ -721,31 +885,74 @@ export function driftBody(drift: Drift): string {
   return withoutPrepared(drift.body).replace(/^#\s+.+\n+/, "").trim();
 }
 
-/** The sides of a Drift: what the code does and what the Model or Requirement says, and where in the code it was seen. Null for a Drift written before the two sections existed. */
-export function driftSides(drift: Drift): DriftSides | null {
-  const sections = driftSections(drift);
+/** The sides of a Drift, or of its difference `difference`: what the code does and what the Model or Requirement says, and where in the code it was seen. Null for a Drift written before the two sections existed, and for a Drift with differences asked without one. */
+export function driftSides(drift: Drift, difference?: string): DriftSides | null {
+  const sections = driftSections(drift, difference);
   const text = (heading: string) => sections.get(heading)?.join("\n").trim() ?? "";
   const happens = text(HAPPENS_HEADING);
   const should = text(SHOULD_HEADING);
   return happens && should ? { happens, should, where: text(WHERE_HEADING) || null } : null;
 }
 
-/** The fix options of a Drift in the order they are written, the first being the agent's recommendation. Empty for a Drift written before options existed. */
-export function driftOptions(drift: Drift): DriftOption[] {
+/** The fix options of a Drift, or of its difference `difference`, in the order they are written, the first being the agent's recommendation. Empty for a Drift written before options existed, and for a Drift with differences asked without one. */
+export function driftOptions(drift: Drift, difference?: string): DriftOption[] {
+  const heading = hasDifferences(drift) ? /^#### (.+?)\s*$/ : /^### (.+?)\s*$/;
   const options: { title: string; lines: string[] }[] = [];
-  for (const line of driftSections(drift).get(OPTIONS_HEADING) ?? []) {
-    const title = /^### (.+?)\s*$/.exec(line)?.[1];
+  for (const line of driftSections(drift, difference).get(OPTIONS_HEADING) ?? []) {
+    const title = heading.exec(line)?.[1];
     if (title !== undefined) options.push({ title, lines: [] });
     else options.at(-1)?.lines.push(line);
   }
   return options.map((o) => ({ title: o.title, text: o.lines.join("\n").trim() }));
 }
 
+/** A difference of a unified Drift as the Snapshot and `drift show --json` carry it: its text read from its block, and `open` while it has no decision. `linked` are the `drift` of the differences it is linked to. */
+export interface DifferenceView {
+  drift: string;
+  title: string;
+  refs: string[];
+  sides: DriftSides | null;
+  where: string | null;
+  options: DriftOption[];
+  proposal: string | null;
+  linked: string[];
+  decision: DifferenceDecision | null;
+  option: number | null;
+  note: string | null;
+  task: string | null;
+  open: boolean;
+}
+
+/** The differences of a unified Drift as views, in order; empty for any other Drift and for a unified Drift written without them. */
+export function differenceViews(drift: Drift): DifferenceView[] {
+  return drift.data.differences.map((d) => {
+    const sides = driftSides(drift, d.drift);
+    return {
+      drift: d.drift,
+      title: differenceTitle(drift, d.drift),
+      refs: d.refs,
+      sides,
+      where: sides?.where ?? null,
+      options: driftOptions(drift, d.drift),
+      proposal: d.proposal,
+      linked: d.linked,
+      decision: d.decision,
+      option: d.option,
+      note: d.note,
+      task: d.task,
+      open: d.decision === null,
+    };
+  });
+}
+
 const MIN_OPTIONS = 2;
 const MAX_OPTIONS = 5;
 
-/** The fix options a new Drift offers, checked and trimmed: two to five, each with title and text, titles that differ. */
-function checkOptions(options: DriftOption[]): DriftOption[] {
+/**
+ * The fix options a new Drift offers, checked and trimmed: two to five, each with title and text, titles that differ.
+ * `nested` is true for those of a difference, whose body headings are one level deeper.
+ */
+function checkOptions(options: DriftOption[], nested = false): DriftOption[] {
   if (options.length < MIN_OPTIONS || options.length > MAX_OPTIONS)
     throw new TramaError(`A Drift needs from ${MIN_OPTIONS} to ${MAX_OPTIONS} fix options, the first being the one you recommend; found ${options.length}`);
   const checked = options.map((o, i) => {
@@ -754,7 +961,7 @@ function checkOptions(options: DriftOption[]): DriftOption[] {
     if (!title) throw new TramaError(`Fix option ${i + 1} needs its title: a few words naming that way to fix the code`);
     if (/\n/.test(title)) throw new TramaError(`The title of fix option ${i + 1} must be a single line`);
     if (!text) throw new TramaError(`Fix option ${i + 1} ("${title}") needs its text: what changes and what it costs, in terms of behaviour`);
-    if (/^###? /m.test(text)) throw new TramaError(`The text of fix option ${i + 1} ("${title}") cannot contain headings`);
+    if ((nested ? /^#{2,4} /m : /^###? /m).test(text)) throw new TramaError(`The text of fix option ${i + 1} ("${title}") cannot contain headings`);
     return { title, text };
   });
   const seen = new Set<string>();
@@ -770,27 +977,80 @@ function requireAttachable(p: Project, proposal: Proposal, driftId?: string) {
   const name = cardName(p, "proposal", proposal.id);
   const { status } = proposal.data;
   if (status !== "draft" && status !== "open") throw new TramaError(`Proposal ${name} was ${status}: only a Draft or open Proposal can be attached to a Drift`);
-  const holder = listDrifts(p).find((d) => d.id !== driftId && d.data.status === "open" && d.data.proposal === proposal.id);
+  const holder = attachedDrift(p, proposal.id, listDrifts(p), driftId);
   if (holder) throw new TramaError(`Proposal ${name} is already attached to Drift ${cardName(p, "drift", holder.id)}`);
 }
 
 /**
- * The Drift a new one follows, when it is recurring: the Drift that the origin Task fixes, or else the one named with
- * `previous`. That Drift must be resolved by fixing the code or with a Proposal; otherwise, or when a named one differs
- * from the origin's, the creation is refused, saying why.
+ * The unified Drift that now holds the difference of Drift `drift` (resolution `unified`), following the chain when that Drift was
+ * unified again, with the difference itself; null for any other Drift and when the Drift it went into was written without differences.
  */
-function previousOf(p: Project, named: string | undefined, origin: string | null): string | null {
-  const fixed = origin ? getTask(p, origin).data.drift : null;
+export function unifiedDifference(drift: Drift, all: DriftIndex): { holder: Drift; difference: Difference } | null {
+  if (drift.data.resolution !== "unified") return null;
+  const seen = new Set<string>();
+  let holder = all.get(drift.data.unifiedInto as string);
+  while (holder && holder.data.resolution === "unified" && !seen.has(holder.id)) {
+    seen.add(holder.id);
+    holder = all.get(holder.data.unifiedInto as string);
+  }
+  const difference = holder?.data.differences.find((d) => d.drift === drift.id);
+  return holder && difference ? { holder, difference } : null;
+}
+
+/** How a resolved Drift counts among the already resolved ones: its decision, and the references it was decided on. */
+export interface ClosedOutcome {
+  decision: DifferenceDecision;
+  refs: string[];
+  note: string | null;
+}
+
+/**
+ * How a Drift counts among the already resolved ones when a difference is to be filed or a Drift names a `previous`: a Drift
+ * resolved by fixing the code, with a Proposal or without changes counts with that decision on its references; a Drift `unified`
+ * counts only once its difference is decided, with that decision on the references of the difference. Null otherwise (an open Drift,
+ * a Drift `unified` whose difference is open or unknown, a unified Drift whose differences are decided: its Drifts count instead).
+ */
+export function closedOutcome(drift: Drift, all: DriftIndex): ClosedOutcome | null {
+  if (drift.data.status !== "resolved") return null;
+  if (drift.data.resolution === "unified") {
+    const found = unifiedDifference(drift, all);
+    return found?.difference.decision == null ? null : { decision: found.difference.decision, refs: found.difference.refs, note: found.difference.note };
+  }
+  const { resolution } = drift.data;
+  return resolution === "fix-code" || resolution === "proposal" || resolution === "dismissed" ? { decision: resolution, refs: drift.data.refs, note: drift.data.note } : null;
+}
+
+/** The Drifts a Task fixed the code of, by identity: its `drift`, or, for a unified Drift with differences, the Drift of each difference it fixes. */
+function fixedDrifts(p: Project, taskId: string, all: DriftIndex): string[] {
+  const id = getTask(p, taskId).data.drift;
+  if (id === null) return [];
+  const drift = all.get(id) ?? getDrift(p, id);
+  return hasDifferences(drift) ? drift.data.differences.filter((d) => d.task === taskId).map((d) => d.drift) : [drift.id];
+}
+
+/**
+ * The Drifts a new one follows, when it is recurring: the Drifts that the origin Task fixes, or else the one named with
+ * `previous`. Each must be resolved by fixing the code or with a Proposal (a Drift `unified` by the decision of its difference);
+ * otherwise, or when a named one differs from those of the origin, the creation is refused, saying why.
+ */
+function previousOf(p: Project, named: string | undefined, origin: string | null): string[] {
+  const all = indexDrifts(listDrifts(p));
+  const fixed = origin ? fixedDrifts(p, origin, all) : [];
   const chosen = named === undefined ? null : getDrift(p, named).id;
-  if (fixed !== null && chosen !== null && chosen !== fixed)
-    throw new TramaError(`The origin Task fixes Drift ${cardName(p, "drift", fixed)}, so that is the previous Drift: drop "previous" or name that one`);
-  const id = fixed ?? chosen;
-  if (id === null) return null;
-  const previous = getDrift(p, id);
-  if (previous.data.status !== "resolved") throw new TramaError(`Drift ${cardName(p, "drift", id)} is still open: a recurring Drift follows a Drift already resolved`);
-  if (previous.data.resolution !== "fix-code" && previous.data.resolution !== "proposal")
-    throw new TramaError(`Drift ${cardName(p, "drift", id)} was ${previous.data.resolution ?? "resolved without a decision"}: a recurring Drift follows one resolved by fixing the code or by a Proposal`);
-  return previous.id;
+  if (fixed.length > 0 && chosen !== null && !fixed.includes(chosen))
+    throw new TramaError(`The origin Task fixes Drift ${fixed.map((id) => cardName(p, "drift", id)).join(", ")}, so ${fixed.length === 1 ? "that is the previous Drift" : "those are the previous Drifts"}: drop "previous" or name ${fixed.length === 1 ? "that one" : "one of them"}`);
+  const ids = chosen !== null ? [chosen] : fixed;
+  return ids.map((id) => {
+    const previous = all.get(id) ?? getDrift(p, id);
+    const name = cardName(p, "drift", id);
+    if (previous.data.status !== "resolved") throw new TramaError(`Drift ${name} is still open: a recurring Drift follows a Drift already resolved`);
+    const outcome = closedOutcome(previous, all);
+    if (outcome === null && previous.data.resolution === "unified") throw new TramaError(`Drift ${name} was unified and its difference is not decided: a recurring Drift follows a Drift already resolved`);
+    const decision = outcome?.decision ?? previous.data.resolution;
+    if (decision !== "fix-code" && decision !== "proposal")
+      throw new TramaError(`Drift ${name} was ${decision ?? "resolved without a decision"}: a recurring Drift follows one resolved by fixing the code or by a Proposal`);
+    return previous.id;
+  });
 }
 
 /** The live Tasks a new Drift with these references and this origin would block: what `trama drift new` with `dryRun` lists. Refuses references that do not resolve; an origin Task that no longer exists (deleted with Clear) blocks nothing. */
@@ -812,7 +1072,7 @@ export function planDrift(
 ): PlannedDrift {
   const origin = input.origin ? getTask(p, input.origin).id : null;
   const previous = previousOf(p, input.previous, origin);
-  return planDriftWith(p, input, origin === null ? [] : [origin], previous === null ? [] : [previous], []);
+  return planDriftWith(p, input, origin === null ? [] : [origin], previous);
 }
 
 function planDriftWith(
@@ -820,7 +1080,6 @@ function planDriftWith(
   input: { title: string; refs: string[]; proposal?: string; happens: string; should: string; options: DriftOption[]; where: string; job?: string; merge?: boolean },
   origin: string[],
   previous: string[],
-  unifies: string[],
 ): PlannedDrift {
   if (input.refs.length === 0) throw new TramaError("A Drift must reference the Model element closest to it with `refs`");
   const happens = input.happens.trim();
@@ -835,7 +1094,7 @@ function planDriftWith(
   if (attached) requireAttachable(p, attached);
   if (options.length === 0 && attached === null) throw new TramaError("A Drift without Fix options needs an attached Proposal that fixes the Model or the Requirements: give `proposal` with its Draft, or two to five fix options");
   const proposal = attached?.id ?? null;
-  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin, previous, unifies, unifiedInto: null, merge: input.merge === true, option: null, note: null, resolvedBy: null, created: createdNow(), job: input.job?.trim() || null };
+  const data: DriftData = { status: "open", resolution: null, refs: input.refs, proposal, task: null, origin, previous, unifies: [], differences: [], unifiedInto: null, merge: input.merge === true, option: null, note: null, resolvedBy: null, created: createdNow(), job: input.job?.trim() || null };
   const sections = [
     `## ${HAPPENS_HEADING}\n\n${happens}`,
     `## ${SHOULD_HEADING}\n\n${should}`,
@@ -860,10 +1119,10 @@ export function newDrift(
 
 /**
  * The Drifts a unified Drift would merge, named by identity, short number or unique prefix, in creation order. Refuses,
- * naming every problem and writing nothing, when they are fewer than two, repeated, missing, not open or in a resolution
- * being written or open, or when `proposal` is attached to one of them.
+ * naming every problem and writing nothing, when they are fewer than two, repeated, missing, not open, in a resolution
+ * being written or open, or a unified Drift with a decided difference.
  */
-export function unifiedBy(p: Project, named: string[], proposal?: string): Drift[] {
+export function unifiedBy(p: Project, named: string[]): Drift[] {
   const problems: string[] = [];
   const found = new Map<string, Drift>();
   const repeated = new Set<string>();
@@ -885,18 +1144,24 @@ export function unifiedBy(p: Project, named: string[], proposal?: string): Drift
     else {
       const holding = resolutionHolding(p, drift.id);
       if (holding) problems.push(`Drift ${name} is part of resolution ${cardName(p, "proposal", holding.id)}, which is being written or open: it cannot be unified`);
+      if (drift.data.differences.some((d) => d.decision !== null)) problems.push(`Drift ${name} is a unified Drift with a decided difference: it can be unified again only while none of its differences is decided`);
     }
   }
   for (const id of repeated) problems.push(`Drift ${cardName(p, "drift", id)} is named more than once in unifies`);
   if (named.length < 2) problems.push("Unifying needs at least two Drifts in unifies");
-  if (proposal !== undefined) {
-    const attached = getProposal(p, proposal, true);
-    for (const drift of found.values())
-      if (drift.data.proposal === attached.id) problems.push(`Proposal ${cardName(p, "proposal", attached.id)} is attached to Drift ${cardName(p, "drift", drift.id)}, which is being unified: give a Proposal of its own`);
-  }
   if (problems.length > 0) throw new TramaError(problems.join("\n"));
   return listDrifts(p).filter((d) => found.has(d.id));
 }
+
+/** What a gathered Drift gives to the unified Drift: one difference named by its Drift, with the Proposal attached to it. A unified Drift with differences gives each of its own. */
+export interface ExpectedDifference {
+  drift: string;
+  proposal: string | null;
+}
+
+/** The differences the gathered Drifts give, in order: one per Drift, or one per difference of a unified Drift with differences. */
+export const expectedDifferences = (unified: readonly Drift[]): ExpectedDifference[] =>
+  unified.flatMap((d) => (hasDifferences(d) ? d.data.differences.map((x) => ({ drift: x.drift, proposal: x.proposal })) : [{ drift: d.id, proposal: d.data.proposal }]));
 
 /** The origins of a unified Drift: those of the Drifts it merges, without repeats, in the order of `unified`. */
 const unifiedOrigins = (unified: Drift[]): string[] => [...new Set(unified.flatMap((d) => d.data.origin))];
@@ -906,12 +1171,15 @@ const unifiedOrigins = (unified: Drift[]): string[] => [...new Set(unified.flatM
  * fixes (only one resolved by fixing the code or with a Proposal), without repeats.
  */
 function unifiedPrevious(p: Project, unified: Drift[], origin: string[]): string[] {
+  const all = indexDrifts(listDrifts(p));
   const fixed = origin.flatMap((id) => {
-    const drift = getTaskOrNull(p, id)?.data.drift ?? null;
-    if (drift === null) return [];
+    if (getTaskOrNull(p, id) === null) return [];
     try {
-      const resolution = getDrift(p, drift).data.resolution;
-      return resolution === "fix-code" || resolution === "proposal" ? [drift] : [];
+      return fixedDrifts(p, id, all).filter((drift) => {
+        const found = all.get(drift);
+        const decision = found === undefined ? null : (closedOutcome(found, all)?.decision ?? found.data.resolution);
+        return decision === "fix-code" || decision === "proposal";
+      });
     } catch {
       return [];
     }
@@ -919,24 +1187,163 @@ function unifiedPrevious(p: Project, unified: Drift[], origin: string[]): string
   return [...new Set([...unified.flatMap((d) => d.data.previous), ...fixed])];
 }
 
-/** The live Tasks a unified Drift with these `refs` would block: the origins of its merged Drifts and every Task concerning the same thing. Writes nothing. */
-export function unifiedCandidates(p: Project, named: string[], refs: string[]): Task[] {
-  return driftCandidates(p, refs, unifiedOrigins(unifiedBy(p, named)));
+/** The live Tasks a unified Drift with these `refs` (by default those of the gathered Drifts) would block: the origins of its merged Drifts and every Task concerning the same thing. Writes nothing. */
+export function unifiedCandidates(p: Project, named: string[], refs?: string[]): Task[] {
+  const unified = unifiedBy(p, named);
+  const all = refs ?? [...new Set(unified.flatMap((d) => d.data.refs))];
+  if (refs !== undefined) checkRefs(p, refs);
+  return blockedByDrift(loadProject(p), listTasks(p), all, unifiedOrigins(unified));
+}
+
+/** One difference of a unified Drift as `trama drift new` takes it: `drift` and `linked` are permanent identities or short numbers. */
+export interface DifferenceInput {
+  drift: string;
+  title: string;
+  refs: string[];
+  happens: string;
+  should: string;
+  where: string;
+  options?: DriftOption[];
+  proposal?: string;
+  linked?: string[];
+}
+
+/** Headings a text of a difference cannot hold, because they would start another section, difference or the prepared question. */
+const STRUCTURAL_HEADING = /^(## Difference \S+: |## Prepared question\s*$|### (What happens|What should happen|Where in the code|Fix options)\s*$)/m;
+
+/**
+ * The unified Drift checked and built, not written. Every problem is named, one line each, in a single refusal: a difference
+ * missing, repeated, out of order or unknown, a difference that breaks the rules of a new Drift's sections and options or has neither
+ * fix options nor `proposal`, a `linked` name that is not another difference, a `proposal` that is neither the one attached to its Drift (or difference)
+ * nor a Draft or open one attached to no open Drift.
+ */
+function planUnifiedDrift(
+  p: Project,
+  input: { title: string; differences: DifferenceInput[]; job?: string; merge?: boolean },
+  unified: Drift[],
+  origin: string[],
+  previous: string[],
+): PlannedDrift {
+  const problems: string[] = [];
+  const nm = (id: string) => cardName(p, "drift", id);
+  const expected = expectedDifferences(unified);
+  const known = new Map(expected.map((e) => [e.drift, e]));
+  const identity = (arg: string, what: string): string | null => {
+    try {
+      return getDrift(p, arg, true).id;
+    } catch (error) {
+      problems.push(`${what}: ${error instanceof TramaError ? error.message : `Drift ${arg} cannot be read`}`);
+      return null;
+    }
+  };
+  const given = input.differences.map((d, i) => identity(d.drift, `differences[${i}].drift`));
+  const seen = new Set<string>();
+  for (const id of given) {
+    if (id === null) continue;
+    if (!known.has(id)) problems.push(`Difference ${nm(id)} is not one of the differences the gathered Drifts give`);
+    else if (seen.has(id)) problems.push(`Difference ${nm(id)} is given more than once`);
+    seen.add(id);
+  }
+  for (const e of expected) if (!seen.has(e.drift)) problems.push(`differences has no entry for ${nm(e.drift)}: one entry for each difference the gathered Drifts give`);
+  if (problems.length === 0 && given.some((id, i) => id !== expected[i]?.drift))
+    problems.push(`differences must follow the creation order of the Drifts they come from: ${expected.map((e) => nm(e.drift)).join(", ")}`);
+
+  const named = new Set<string>();
+  const links = new Map<string, Set<string>>(expected.map((e) => [e.drift, new Set()]));
+  const differences: Difference[] = [];
+  const blocks: string[] = [];
+  input.differences.forEach((d, i) => {
+    const id = given[i] ?? null;
+    const on = `Difference ${id === null ? `differences[${i}]` : nm(id)}`;
+    const refuse = (message: string) => problems.push(`${on}: ${message}`);
+    const title = d.title.trim();
+    const happens = d.happens.trim();
+    const should = d.should.trim();
+    const where = d.where.trim();
+    if (!title || /\n/.test(title)) refuse("needs a title in one line");
+    if (d.refs.length === 0) refuse("must reference the Model element closest to it with `refs`");
+    for (const ref of d.refs) {
+      try {
+        resolveProjectRef(loadProject(p), ref);
+      } catch (error) {
+        refuse(error instanceof TramaError ? error.message : `reference ${ref} does not resolve`);
+      }
+    }
+    for (const [heading, text, what] of [[HAPPENS_HEADING, happens, "what the code does, in terms of behaviour"], [SHOULD_HEADING, should, "what the Model or the Requirement says"], [WHERE_HEADING, where, "the files and code elements where the difference was seen in the code"]] as const) {
+      if (!text) refuse(`needs its "${heading}" text: ${what}`);
+      else if (STRUCTURAL_HEADING.test(text)) refuse(`the "${heading}" text cannot contain the headings of the sections of a difference`);
+    }
+    let options: DriftOption[] = [];
+    if ((d.options ?? []).length > 0) {
+      try {
+        options = checkOptions(d.options as DriftOption[], true);
+      } catch (error) {
+        refuse(error instanceof TramaError ? error.message : "its fix options are not valid");
+      }
+    }
+    let proposal: string | null = null;
+    const held = id === null ? null : (known.get(id)?.proposal ?? null);
+    if (d.proposal !== undefined) {
+      try {
+        const attached = getProposal(p, d.proposal, true);
+        if (attached.id !== held) requireAttachable(p, attached);
+        if (named.has(attached.id)) refuse(`Proposal ${cardName(p, "proposal", attached.id)} is the proposal of another difference too`);
+        named.add(attached.id);
+        proposal = attached.id;
+      } catch (error) {
+        refuse(error instanceof TramaError ? error.message : `proposal ${d.proposal} cannot be read`);
+      }
+    } else if (held !== null) {
+      // Without a new Proposal in its place, the one attached to the gathered Drift stays, held by the difference.
+      if (named.has(held)) refuse(`Proposal ${cardName(p, "proposal", held)} is the proposal of another difference too`);
+      named.add(held);
+      proposal = held;
+    }
+    if ((d.options ?? []).length === 0 && proposal === null && d.proposal === undefined) refuse("has no fix options and no attached Proposal: give two to five fix options, or `proposal` with the Draft that fixes the Model or the Requirements");
+    for (const [j, arg] of (d.linked ?? []).entries()) {
+      const other = identity(arg, `${on}: linked[${j}]`);
+      if (other === null) continue;
+      if (other === id || !known.has(other)) refuse(`is linked to ${nm(other)}, which is not another difference of this Drift`);
+      else if (id !== null) {
+        links.get(id)?.add(other);
+        links.get(other)?.add(id);
+      }
+    }
+    if (id === null) return;
+    differences.push({ drift: id, refs: d.refs, proposal, linked: [], decision: null, option: null, note: null, task: null, resolvedBy: null });
+    blocks.push(
+      [
+        `## Difference ${id}: ${title}`,
+        `### ${HAPPENS_HEADING}\n\n${happens}`,
+        `### ${SHOULD_HEADING}\n\n${should}`,
+        `### ${WHERE_HEADING}\n\n${where}`,
+        ...(options.length === 0 ? [] : [`### ${OPTIONS_HEADING}\n\n${options.map((o) => `#### ${o.title}\n\n${o.text}`).join("\n\n")}`]),
+      ].join("\n\n"),
+    );
+  });
+  if (problems.length > 0) throw new TramaError(problems.join("\n"));
+  for (const difference of differences) difference.linked = differences.map((d) => d.drift).filter((id) => links.get(difference.drift)?.has(id));
+  const refs = [...new Set(differences.flatMap((d) => d.refs))];
+  const data: DriftData = { status: "open", resolution: null, refs, proposal: null, task: null, origin, previous, unifies: unified.map((d) => d.id), differences, unifiedInto: null, merge: input.merge === true, option: null, note: null, resolvedBy: null, created: createdNow(), job: input.job?.trim() || null };
+  return { title: input.title, data, body: blocks.join("\n\n") };
 }
 
 /**
- * Files one Drift that merges the open Drifts named in `unifies`, and closes them in the same step: each becomes resolved
- * as `unified` into the new Drift, loses its prepared question's validity, and its attached Proposal, in writing or open,
- * is discarded without feedback. Everything is checked first; if a write fails the files already written are restored.
+ * Files one Drift that merges the open Drifts named in `unifies`, with one difference for each, and closes them in the same step:
+ * each becomes resolved as `unified` into the new Drift, keeping its fields, and loses its prepared question's validity. A Proposal
+ * attached to a merged Drift stays attached, held by its difference, unless the agent attaches a new Proposal to that difference in
+ * its place: the replaced one is then discarded without feedback. Everything is checked first; if a write fails the files already
+ * written are restored.
  */
 export function newUnifiedDrift(
   p: Project,
-  input: { unifies: string[]; title: string; refs: string[]; proposal?: string; happens: string; should: string; options: DriftOption[]; where: string; announcement?: string; job?: string; merge?: boolean },
+  input: { unifies: string[]; title: string; differences: DifferenceInput[]; announcement?: string; job?: string; merge?: boolean },
 ): { drift: Drift; unified: Drift[] } {
-  const unified = unifiedBy(p, input.unifies, input.proposal);
+  const unified = unifiedBy(p, input.unifies);
   const origin = unifiedOrigins(unified);
-  const plan = planDriftWith(p, { ...input, merge: input.merge === true || unified.some((d) => d.data.merge) }, origin, unifiedPrevious(p, unified, origin), unified.map((d) => d.id));
-  const attached = [...new Set(unified.flatMap((d) => (d.data.proposal === null ? [] : [d.data.proposal])))];
+  const plan = planUnifiedDrift(p, { ...input, merge: input.merge === true || unified.some((d) => d.data.merge) }, unified, origin, unifiedPrevious(p, unified, origin));
+  const kept = new Set(plan.data.differences.flatMap((d) => (d.proposal === null ? [] : [d.proposal])));
+  const attached = [...new Set(expectedDifferences(unified).flatMap((e) => (e.proposal === null || kept.has(e.proposal) ? [] : [e.proposal])))];
   const saved = [
     ...unified.map((d) => ({ path: d.path, text: readFileSync(d.path, "utf8") })),
     ...attached.map((id) => {
@@ -953,7 +1360,6 @@ export function newUnifiedDrift(
       d.data.status = "resolved";
       d.data.resolution = "unified";
       d.data.unifiedInto = drift.id;
-      d.data.proposal = null;
       saveItem(d.path, d.data, d.body);
     }
     for (const id of attached) discardAttachedProposal(p, id);
@@ -987,6 +1393,21 @@ export function checkAttachment(p: Project, drift: Drift, proposalId: string): P
   return proposal;
 }
 
+/**
+ * The Proposal a developer-side command may attach to one open difference of an open unified Drift, when that difference has none: a Draft or open one
+ * that no open Drift or difference holds. Refuses otherwise, saying why; writes nothing.
+ */
+export function checkDifferenceAttachment(p: Project, drift: Drift, difference: string, proposalId: string): Proposal {
+  const found = differenceOf(drift, difference);
+  if (drift.data.status !== "open") throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} is already resolved: a Proposal is attached only to an open Drift`);
+  if (found === null) throw new TramaError(`${cardName(p, "drift", difference)} is not a difference of Drift ${cardName(p, "drift", drift.id)}`);
+  if (found.decision !== null) throw new TramaError(`The difference of ${driftLabel(p, drift, difference)} is already decided: a Proposal is attached only to an open difference`);
+  if (found.proposal !== null) throw new TramaError(`${driftLabel(p, drift, difference)} already has the attached Proposal ${cardName(p, "proposal", found.proposal)}`);
+  const proposal = getProposal(p, proposalId, true);
+  requireAttachable(p, proposal);
+  return proposal;
+}
+
 /** Writes a Drift as it now stands: its data and its body. */
 export function saveDrift(drift: Drift): void {
   saveItem(drift.path, drift.data, drift.body);
@@ -998,37 +1419,72 @@ export interface FixChoice {
   note?: string;
 }
 
-/** The body of the Task that fixes the code: both sides, then the chosen option and the note, then where in the code. A Drift written before the sections existed keeps its free text. */
-function fixTaskBody(drift: Drift, option: DriftOption | null, note: string | null): string {
-  const sides = driftSides(drift);
-  const chosen = option ? [`## Chosen option\n\n**${option.title}**\n\n${option.text}`] : [];
-  const noted = note ? [`## Note\n\n${note}`] : [];
-  if (!sides) return [driftBody(drift), ...chosen, ...noted].join("\n\n");
-  const where = sides.where ? [`## ${WHERE_HEADING}\n\n${sides.where}`] : [];
-  return [`## ${HAPPENS_HEADING}\n\n${sides.happens}`, `## ${SHOULD_HEADING}\n\n${sides.should}`, ...chosen, ...noted, ...where].join("\n\n");
+/** A Drift for a message, or its difference `difference`: `Drift D3`, or `Drift D3 (difference "Title")`. */
+function driftLabel(p: Project, drift: Drift, difference?: string): string {
+  const name = `Drift ${cardName(p, "drift", drift.id)}`;
+  return difference === undefined ? name : `${name} (difference "${differenceTitle(drift, difference)}")`;
 }
 
-/** The option the developer chose for a Drift that has options, or none for one that has none. Refuses a missing or unknown number, and an option for a Drift without options. */
-export function chosenOption(p: Project, drift: Drift, option: number | undefined): DriftOption | null {
-  const options = driftOptions(drift);
+/** The sections of a fix Task for a Drift, or for its difference `difference`: both sides, then the chosen option and the note, then where in the code. A Drift written before the sections existed keeps its free text. */
+function fixSections(drift: Drift, option: DriftOption | null, note: string | null, heading: string, difference?: string): string[] {
+  const sides = driftSides(drift, difference);
+  const chosen = option ? [`${heading} Chosen option\n\n**${option.title}**\n\n${option.text}`] : [];
+  const noted = note ? [`${heading} Note\n\n${note}`] : [];
+  if (!sides) return [driftBody(drift), ...chosen, ...noted];
+  const where = sides.where ? [`${heading} ${WHERE_HEADING}\n\n${sides.where}`] : [];
+  return [`${heading} ${HAPPENS_HEADING}\n\n${sides.happens}`, `${heading} ${SHOULD_HEADING}\n\n${sides.should}`, ...chosen, ...noted, ...where];
+}
+
+/** The body of the Task that fixes the code: both sides, then the chosen option and the note, then where in the code. */
+const fixTaskBody = (drift: Drift, option: DriftOption | null, note: string | null): string => fixSections(drift, option, note, "##").join("\n\n");
+
+/** The body of the Task that fixes the code of one difference of a unified Drift, or, for linked differences fixed together, difference by difference: a block titled with the difference holds its two sides, the chosen option, the note and where in the code. */
+function fixDifferencesBody(drift: Drift, parts: { difference: string; option: DriftOption | null; note: string | null }[]): string {
+  const [only] = parts;
+  if (parts.length === 1 && only) return fixSections(drift, only.option, only.note, "##", only.difference).join("\n\n");
+  return parts.map((part) => [`## ${differenceTitle(drift, part.difference)}`, ...fixSections(drift, part.option, part.note, "###", part.difference)].join("\n\n")).join("\n\n");
+}
+
+/** The option the developer chose for a Drift (or a difference of it) that has options, or none for one that has none. Refuses a missing or unknown number, and an option for one without options. */
+export function chosenOption(p: Project, drift: Drift, option: number | undefined, difference?: string): DriftOption | null {
+  const options = driftOptions(drift, difference);
+  const label = driftLabel(p, drift, difference);
   if (options.length === 0) {
-    if (option !== undefined) throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} has no fix options: fix its code without choosing one`);
+    if (option !== undefined) throw new TramaError(`${label} has no fix options: fix its code without choosing one`);
     return null;
   }
   const chosen = option === undefined || !Number.isInteger(option) ? undefined : options[option - 1];
-  if (!chosen) throw new TramaError(`An option must be chosen to fix the code of Drift ${cardName(p, "drift", drift.id)}: give its number, from 1 to ${options.length}`);
+  if (!chosen) throw new TramaError(`An option must be chosen to fix the code of ${label}: give its number, from 1 to ${options.length}`);
   return chosen;
+}
+
+/** Closes every open difference of `drift` without changes, remembering that the code was kept; the Drift is then Differences decided. Nothing is saved. */
+function dismissOpenDifferences(drift: Drift): void {
+  for (const difference of openDifferences(drift)) {
+    difference.decision = "dismissed";
+    difference.proposal = null;
+  }
+  drift.data.resolution = "differences";
+  drift.data.status = "resolved";
 }
 
 /**
  * The developer closes an open Drift from the panel with no change: the code is right and nothing changes. An attached Proposal,
- * a Draft or already handed over, is discarded with it, with no feedback. Like `resolveDrift` with `dismiss`, but the attached Proposal is not refused.
+ * a Draft or already handed over, is discarded with it, with no feedback; for a unified Drift with differences every open difference
+ * is closed that way, with the Proposals attached to them, and the decided ones keep their outcome.
+ * Like `resolveDrift` with `dismiss`, but the attached Proposal is not refused.
  */
 export function dismissDrift(p: Project, id: string): Drift {
   const drift = getDrift(p, id);
   requireOpen(p, drift);
   const holding = resolutionHolding(p, drift.id);
   if (holding) throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} is part of resolution ${cardName(p, "proposal", holding.id)}: decide it there`);
+  if (hasDifferences(drift)) {
+    for (const difference of openDifferences(drift)) if (difference.proposal !== null) discardAttachedProposal(p, difference.proposal);
+    dismissOpenDifferences(drift);
+    saveItem(drift.path, drift.data, drift.body);
+    return drift;
+  }
   if (drift.data.proposal) discardAttachedProposal(p, drift.data.proposal);
   drift.data.resolution = "dismissed";
   drift.data.proposal = null;
@@ -1040,6 +1496,8 @@ export function dismissDrift(p: Project, id: string): Drift {
 /**
  * The developer's decision on an open Drift. Fixing the code needs the number of a fix option when the Drift has
  * options, and takes an optional note; keeping what happens (accepting the Proposal, dismissing) takes neither.
+ * A unified Drift with differences is decided only by dismissing it, which closes every open difference without changes
+ * and is refused when one of them has an attached Proposal; fixing the code or accepting a Proposal says to decide with Resolve.
  * Anything refused leaves the Drift open and changes nothing.
  */
 export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-proposal" | "dismiss", skillsDirs: string[] = [], choice: FixChoice = {}): Drift {
@@ -1049,6 +1507,14 @@ export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-p
   const note = choice.note?.trim() || null;
   if (how !== "fix-code" && (choice.option !== undefined || choice.note !== undefined))
     throw new TramaError(`Drift ${cardName(p, "drift", drift.id)}: ${choice.option !== undefined ? "an option" : "a note"} only goes with fixing the code, not with ${how === "dismiss" ? "dismissing" : "accepting the Proposal"}`);
+  if (hasDifferences(drift)) {
+    if (how !== "dismiss") throw new TramaError(`Drift ${cardName(p, "drift", drift.id)} has differences: decide them with Resolve`);
+    const attached = openDifferences(drift).find((d) => d.proposal !== null);
+    if (attached) throw new TramaError(`${driftLabel(p, drift, attached.drift)} has an attached Proposal (${cardName(p, "proposal", attached.proposal as string)}): decide the differences with Resolve, or close the Drift from the panel`);
+    dismissOpenDifferences(drift);
+    saveItem(drift.path, drift.data, drift.body);
+    return drift;
+  }
   if (how === "fix-code") {
     fixCode(p, drift, choice.option, note);
     // The attached Proposal is set aside with the Drift: an open one is rejected, a Draft discarded, a decided one stays.
@@ -1070,14 +1536,33 @@ export function resolveDrift(p: Project, id: string, how: "fix-code" | "accept-p
 }
 
 /**
- * Why the code of a Drift cannot be fixed, or null: it points to the Model but none of its Model elements is left, not even a container, so the fix
- * Task would have nothing to point at. The Drift can then only be dismissed or accepted.
+ * Why the code of a Drift, or of its difference `difference`, cannot be fixed, or null: it points to the Model but none of its Model elements is left,
+ * not even a container, so the fix Task would have nothing to point at. The Drift can then only be dismissed or accepted.
  */
-export function fixCodeRefusal(p: Project, drift: Drift, project: ProjectModel = loadProject(p)): string | null {
+export function fixCodeRefusal(p: Project, drift: Drift, project: ProjectModel = loadProject(p), difference?: string): string | null {
   const isModel = (r: string) => parseRequirementRef(r) === null;
-  if (!drift.data.refs.some(isModel) || liveRefs(p, drift.data.refs, project).some(isModel)) return null;
+  const found = difference === undefined ? null : differenceOf(drift, difference);
+  const refs = found?.refs ?? drift.data.refs;
+  if (!refs.some(isModel) || liveRefs(p, refs, project).some(isModel)) return null;
+  const label = driftLabel(p, drift, difference);
+  if (difference !== undefined)
+    return `The Model elements of ${label} no longer exist: its code cannot be fixed, the difference can only be closed by ${found?.proposal == null ? "closing it without changes" : "adopting its attached Proposal"}`;
   const close = drift.data.proposal === null ? "dismissing it (`drift move <id> dismissed`)" : "accepting its attached Proposal (`drift move <id> proposal-accepted`)";
-  return `The Model elements of Drift ${cardName(p, "drift", drift.id)} no longer exist: its code cannot be fixed, the Drift can only be closed by ${close}`;
+  return `The Model elements of ${label} no longer exist: its code cannot be fixed, the Drift can only be closed by ${close}`;
+}
+
+/** Each Task in `origins` that is not Done goes back to To do and, until the fix Task is Done, is blocked (see computeBlocked). */
+function sendOriginsBack(p: Project, origins: readonly string[]): void {
+  for (const id of origins) {
+    const origin = getTaskOrNull(p, id);
+    if (origin === null) continue;
+    if (origin.data.column === "done") continue;
+    origin.data.column = "todo";
+    origin.data.agent = false;
+    origin.data.holder = null;
+    saveItem(origin.path, origin.data, origin.body);
+    clearProgress(p, origin.id);
+  }
 }
 
 /** Creates the fix Task of a Drift and moves its origin back to To do; records option, note and the resolution on the Drift (not saved). */
@@ -1103,53 +1588,152 @@ function fixCode(p: Project, drift: Drift, optionNumber: number | undefined, not
   drift.data.resolution = "fix-code";
   drift.data.option = option ? (optionNumber as number) : null;
   drift.data.note = note;
-  // Each Task the Drift came from goes back to To do and, until the fix Task is Done, is blocked (see computeBlocked).
-  for (const id of drift.data.origin) {
-    const origin = getTaskOrNull(p, id);
-    if (origin === null) continue;
-    if (origin.data.column === "done") continue;
-    origin.data.column = "todo";
-    origin.data.agent = false;
-    origin.data.holder = null;
-    saveItem(origin.path, origin.data, origin.body);
-    clearProgress(p, origin.id);
-  }
+  sendOriginsBack(p, drift.data.origin);
 }
 
-/** Refuses a Drift that is not open: a unified one says where it went, because it was never decided. */
+/** Refuses a Drift that is not open: a unified one says where it went, because it was never decided there. */
 function requireOpen(p: Project, drift: Drift): void {
   const name = cardName(p, "drift", drift.id);
-  if (drift.data.resolution === "unified") throw new TramaError(`Drift ${name} was unified into Drift ${cardName(p, "drift", drift.data.unifiedInto as string)}: it was not decided, decide that Drift instead`);
+  if (drift.data.resolution === "unified") {
+    const into = cardName(p, "drift", drift.data.unifiedInto as string);
+    const decided = closedOutcome(drift, indexDrifts(listDrifts(p))) !== null;
+    throw new TramaError(`Drift ${name} was unified into Drift ${into}: ${decided ? "its difference is already decided there" : "it was not decided, decide that Drift instead"}`);
+  }
   if (drift.data.status !== "open") throw new TramaError(`Drift ${name} is already resolved`);
 }
 
 /** Rejects the open Proposal attached to a Drift with `why` as feedback, discards a Draft, leaves a decided one. */
-function setAsideAttached(p: Project, drift: Drift, why: string): void {
-  const attached = drift.data.proposal ? getProposal(p, drift.data.proposal) : null;
+function setAsideAttached(p: Project, drift: Drift, why: string, proposalId: string | null = drift.data.proposal): void {
+  const attached = proposalId ? getProposal(p, proposalId) : null;
   if (attached?.data.status === "open") rejectProposal(p, attached.id, `Drift ${drift.id} ${why}`);
   else if (attached?.data.status === "draft") discardAttachedProposal(p, attached.id);
 }
 
-/** What approving a resolution did to its listed Drifts: the decision applied, the fix Task created, or `skipped` when already resolved. */
+/** What approving a resolution did to its listed Drifts: the decision applied, the fix Task created, or `skipped` when already resolved. `difference` is the one a unified Drift's entry decided, null for any other. */
 export interface DriftOutcome {
   drift: string;
+  difference: string | null;
   decision: DriftDecisionKind;
   task: string | null;
   skipped: boolean;
 }
 
-/** Resolves, in one step, every still-open Drift listed by the approved resolution `proposal` with its recorded decision. */
+/** Resolves, in one step, every still-open Drift listed by the approved resolution `proposal` with its recorded decision, and every still-open difference an entry of it decides. */
 export function resolveListedDrifts(p: Project, proposal: Proposal): DriftOutcome[] {
-  return proposal.data.drifts.map(({ drift: id, decision, option, note }) => {
+  const entries = proposal.data.drifts;
+  const outcomes: DriftOutcome[] = [];
+  const done = new Set<number>();
+  entries.forEach((entry, i) => {
+    if (done.has(i)) return;
+    const { drift: id, decision, option, note } = entry;
     const drift = getDrift(p, id);
-    if (drift.data.status !== "open") return { drift: id, decision, task: null, skipped: true };
-    if (decision === "fix-code") fixCode(p, drift, option, note?.trim() || null);
-    else drift.data.resolution = decision;
-    setAsideAttached(p, drift, `resolved by Proposal ${proposal.id}`);
-    drift.data.proposal = null;
-    drift.data.status = "resolved";
-    drift.data.resolvedBy = proposal.id;
-    saveItem(drift.path, drift.data, drift.body);
-    return { drift: id, decision, task: drift.data.task, skipped: false };
+    if (entry.difference === undefined) {
+      // A unified Drift with differences is decided only difference by difference: an entry without one decides nothing.
+      if (drift.data.status !== "open" || hasDifferences(drift)) {
+        outcomes[i] = { drift: id, difference: null, decision, task: null, skipped: true };
+        return;
+      }
+      if (decision === "fix-code") fixCode(p, drift, option, note?.trim() || null);
+      else drift.data.resolution = decision;
+      setAsideAttached(p, drift, `resolved by Proposal ${proposal.id}`);
+      drift.data.proposal = null;
+      drift.data.status = "resolved";
+      drift.data.resolvedBy = proposal.id;
+      saveItem(drift.path, drift.data, drift.body);
+      outcomes[i] = { drift: id, difference: null, decision, task: drift.data.task, skipped: false };
+      return;
+    }
+    const at = entries.flatMap((e, j) => (e.drift === id && e.difference !== undefined ? [j] : []));
+    for (const j of at) done.add(j);
+    const decided = decideDifferences(p, drift, at.map((j) => entries[j] as DriftDecision), proposal);
+    at.forEach((j, k) => {
+      outcomes[j] = decided[k] as DriftOutcome;
+    });
   });
+  return outcomes;
+}
+
+/**
+ * The groups of fix-code differences that share one fix Task: `linked` differences, directly or through other linked ones among
+ * `fixing`, so the relation is restricted to them. Each group lists its differences in the order of the Drift, the groups in the order of their first.
+ */
+function linkedGroups(drift: Drift, fixing: readonly string[]): string[][] {
+  const inOrder = drift.data.differences.map((d) => d.drift).filter((id) => fixing.includes(id));
+  const groups: string[][] = [];
+  for (const id of inOrder) {
+    const joined = groups.filter((g) => g.some((other) => differenceOf(drift, id)?.linked.includes(other) || differenceOf(drift, other)?.linked.includes(id)));
+    const merged = [id, ...joined.flat()];
+    for (const g of joined) groups.splice(groups.indexOf(g), 1);
+    groups.push(inOrder.filter((x) => merged.includes(x)));
+  }
+  return groups.sort((a, b) => inOrder.indexOf(a[0] as string) - inOrder.indexOf(b[0] as string));
+}
+
+/**
+ * Gives each listed difference of a unified Drift that is still open the decision of its entry, under the approved resolution `proposal`.
+ * `fix-code` differences get a fix Task each, except the linked ones fixed together, which share one: refs the union of theirs, a body
+ * with each difference's two sides, where in the code, option and note, Technical when every ref is a Requirement, in the design of the
+ * origins when they all share one. The origins of the differences fixed in the code go back to To do. The Proposal attached to every
+ * decided difference is set aside. The Drift becomes Differences decided in the same write that decides its last open difference.
+ */
+function decideDifferences(p: Project, drift: Drift, entries: DriftDecision[], proposal: Proposal): DriftOutcome[] {
+  const skipped = (e: DriftDecision): DriftOutcome => ({ drift: e.drift, difference: e.difference ?? null, decision: e.decision, task: null, skipped: true });
+  if (drift.data.status !== "open") return entries.map(skipped);
+  const live = entries.map((e) => {
+    const difference = differenceOf(drift, e.difference as string);
+    return difference !== null && difference.decision === null ? e : null;
+  });
+  const deciding = live.flatMap((e) => (e === null ? [] : [e]));
+  const fixing = deciding.filter((e) => e.decision === "fix-code");
+  const project = loadProject(p);
+  const all = indexDrifts(listDrifts(p));
+  // Everything is checked before the first Task is written.
+  const chosen = new Map<string, DriftOption | null>();
+  for (const e of fixing) {
+    const difference = e.difference as string;
+    chosen.set(difference, chosenOption(p, drift, e.option, difference));
+    const refusal = fixCodeRefusal(p, drift, project, difference);
+    if (refusal) throw new TramaError(refusal);
+  }
+  const entryOf = (difference: string) => fixing.find((e) => e.difference === difference) as DriftDecision;
+  const originsOf = (difference: string) => all.get(difference)?.data.origin ?? [];
+  const taskOf = new Map<string, string>();
+  for (const group of linkedGroups(drift, fixing.map((e) => e.difference as string))) {
+    const members = group.map((id) => differenceOf(drift, id) as Difference);
+    const origins = [...new Set(group.flatMap(originsOf))];
+    // A reference that no longer resolves stands for its nearest container still there.
+    const refs = [...new Set(members.flatMap((d) => liveRefs(p, d.refs, project)))];
+    // A fix of Requirements only changes no behaviour, so its Task is technical.
+    const touchesModel = members.some((d) => d.refs.some((r) => parseRequirementRef(r) === null));
+    const design = originDesign(p, origins);
+    const plan = planTask(p, {
+      title: `Fix code to match the ${touchesModel ? "Model" : "Requirements"}: ${group.map((id) => differenceTitle(drift, id)).join(" + ")}`,
+      refs,
+      technical: !touchesModel,
+      ...(design ? { proposal: design } : {}),
+      body: fixDifferencesBody(drift, group.map((id) => ({ difference: id, option: chosen.get(id) ?? null, note: entryOf(id).note?.trim() || null }))),
+    });
+    plan.data.drift = drift.id;
+    const task = writeTask(p, plan);
+    for (const id of group) taskOf.set(id, task.id);
+    sendOriginsBack(p, origins);
+  }
+  for (const e of deciding) {
+    const difference = differenceOf(drift, e.difference as string) as Difference;
+    difference.decision = e.decision;
+    difference.resolvedBy = proposal.id;
+    if (e.decision === "fix-code") {
+      difference.option = chosen.get(difference.drift) ? (e.option as number) : null;
+      difference.note = e.note?.trim() || null;
+      difference.task = taskOf.get(difference.drift) ?? null;
+    }
+    setAsideAttached(p, drift, `resolved by Proposal ${proposal.id}`, difference.proposal);
+    difference.proposal = null;
+  }
+  if (drift.data.differences.every((d) => d.decision !== null)) {
+    drift.data.resolution = "differences";
+    drift.data.status = "resolved";
+  }
+  saveItem(drift.path, drift.data, drift.body);
+  return entries.map((e, i) => (live[i] === null ? skipped(e) : { drift: e.drift, difference: e.difference ?? null, decision: e.decision, task: differenceOf(drift, e.difference as string)?.task ?? null, skipped: false }));
 }

@@ -1,6 +1,6 @@
 ---
 title: "Requirements"
-description: "What Trama needs: VS Code, a supported platform, omp, and the GitHub CLI only for Team."
+description: "What Trama needs: VS Code, a supported platform, omp, and the GitHub CLI only for the PR Check and Team."
 order: 1
 ---
 
@@ -12,12 +12,12 @@ Trama is a VS Code extension that works with a coding agent. Before installing i
 - **A supported platform.** Linux (x64), macOS (Apple silicon) or Windows (x64). Windows is in preview: `trama.exe` is not signed, so SmartScreen or an antivirus may warn the first time it runs.
 - **omp**, the only agent Trama supports. Trama runs every agent job with omp. If omp is missing, Trama offers to install it with omp's official installer; see [First run of omp](/guide/getting-started/first-run/).
 - **An account with a model provider**, logged in through omp, so the agent has a model to work with.
-- **The GitHub CLI (`gh`), only for Team.** [Manager mode and Team](/guide/workflows/manager-mode/), experimental, read your GitHub Project through `gh`, which has to be installed and logged in with access to Projects. Everything else works without it.
-- **git, only for Solo mode.** [Solo mode](/guide/workflows/solo-mode/) keeps Trama's files out of git, so the folder has to be a git repository.
+- **The GitHub CLI (`gh`), only for the PR Check and Team.** The PR Check reads the open pull requests of the repository through `gh`, which has to be installed and logged in to github.com; see the PR Check in [Manager mode and Team](/guide/workflows/manager-mode/). Manager mode, experimental, also reads your GitHub Project through it, with access to Projects. Everything else works without it.
+- **git, only for Solo mode and the PR Check.** [Solo mode](/guide/workflows/solo-mode/) keeps Trama's files out of git, so the folder has to be a git repository, and the PR Check works in a git worktree.
 
 ## What Trama does with your code
 
-Trama never calls a language model and never reads your code: the agent does, through Trama's command line. Trama sends nothing off the machine, apart from the notification you can turn on to be told, away from the computer, that the agent finished or waits for you (see [Away notifications](/guide/panel-and-settings/notifications/)), and the read-only requests to your GitHub Project that Team makes through `gh`.
+Trama never calls a language model and never reads your code: the agent does, through Trama's command line. Trama sends nothing off the machine, apart from the notification you can turn on to be told, away from the computer, that the agent finished or waits for you (see [Away notifications](/guide/panel-and-settings/notifications/)), and the read-only requests that the PR Check and Team make through `gh`.
 
 ## Check that omp is ready
 

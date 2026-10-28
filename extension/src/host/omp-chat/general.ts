@@ -91,6 +91,8 @@ export class GeneralConversation implements Disposable {
   private failure: GeneralError | undefined;
   private pendingFailure: GeneralError | undefined;
   private newSession = false;
+  /** The resume in progress is the one after a reload of the window: nothing of the conversation is above it, so a new session after it needs no line saying that the agent does not remember it. */
+  private afterReload = false;
   /** Bumped when a start, a resume or the process of General is dropped: an open that finishes late is stopped. */
   private token = 0;
   private stopping: Promise<void> = Promise.resolve();
@@ -186,9 +188,13 @@ export class GeneralConversation implements Disposable {
   }
 
   private dispatch(event: GeneralEvent): void {
+    const from = this.machine.phase;
     const step = generalStep(this.machine, event);
     this.machine = step.next;
-    for (const effect of step.effects) this.run(effect);
+    for (const effect of step.effects) {
+      if (effect === "resume") this.afterReload = from === "waiting";
+      this.run(effect);
+    }
     this.publish();
   }
 
@@ -203,9 +209,12 @@ export class GeneralConversation implements Disposable {
       case "start":
         void this.open("start");
         return;
-      case "startNew":
-        void this.open("startNew");
+      case "startNew": {
+        const fresh = !this.afterReload;
+        this.afterReload = false;
+        void this.open("startNew", fresh);
         return;
+      }
       case "resume":
         void this.open("resume");
         return;
@@ -278,7 +287,7 @@ export class GeneralConversation implements Disposable {
   }
 
   /** Opens a process of omp: a new session, or the saved session of the previous process (`resume`). Any outcome is an event of the machine. */
-  private async open(mode: "start" | "startNew" | "resume"): Promise<void> {
+  private async open(mode: "start" | "startNew" | "resume", fresh = false): Promise<void> {
     const token = ++this.token;
     const folder = this.deps.folder();
     if (folder === undefined) return;
@@ -340,7 +349,7 @@ export class GeneralConversation implements Disposable {
       void opened.session.stop();
       return;
     }
-    this.attach(opened.session, opened.launch, terminalId, saved !== undefined, mode === "startNew");
+    this.attach(opened.session, opened.launch, terminalId, saved !== undefined, fresh);
     this.dispatch({ type: saved !== undefined ? "sessionResumed" : "sessionStarted" });
   }
 

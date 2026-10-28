@@ -66,8 +66,9 @@ describe("a Drift from a merge", () => {
     const b = drift("B");
     const c = drift("C");
     const d = drift("D");
-    const some = newUnifiedDrift(p, { ...filing, title: "Some", refs: ["order/Paid"], unifies: [a.id, b.id] }).drift;
-    const none = newUnifiedDrift(p, { ...filing, title: "None", refs: ["order/Paid"], unifies: [c.id, d.id] }).drift;
+    const difference = (x: { id: string; title: string }) => ({ drift: x.id, title: x.title, refs: ["order/Paid"], happens: filing.happens, should: filing.should, where: filing.where, options: FIX_OPTIONS });
+    const some = newUnifiedDrift(p, { title: "Some", unifies: [a.id, b.id], differences: [difference(a), difference(b)] }).drift;
+    const none = newUnifiedDrift(p, { title: "None", unifies: [c.id, d.id], differences: [difference(c), difference(d)] }).drift;
     expect(readFileSync(some.path, "utf8")).toContain("merge: true\n");
     expect([getDrift(p, some.id).data.merge, getDrift(p, none.id).data.merge]).toEqual([true, false]);
     expect(readFileSync(none.path, "utf8")).not.toContain("merge");

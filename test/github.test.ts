@@ -26,6 +26,8 @@ import {
   PROJECT_ITEMS_QUERY,
   PROJECT_QUERY,
   PROJECTS_QUERY,
+  readGhState,
+  readPullRequests,
   readGitHub,
   readLinkedProject,
   sprintField,
@@ -263,6 +265,18 @@ describe("a read of GitHub", () => {
     expect(calls).toHaveLength(2);
   });
 
+  test("the state of gh alone, for the Team view without Manager mode, asks only the version and the login: no query of Projects, so no missing scope", async () => {
+    const { calls, deps } = fakeGh({ projects: refused(1, "gh: Your token has not been granted the required scopes to execute this query. The 'projectsV2' field requires one of the following scopes: ['read:project']\n") });
+    const state = await readGhState(deps);
+    expect(state).toEqual({ ok: true, readAt: "2026-10-25T10:00:00.000Z" });
+    expect(calls.map((args) => args.slice(0, 2))).toEqual([["--version"], ["auth", "status"]]);
+    const missing = await readGhState({ find: () => null });
+    expect(missing).toMatchObject({ ok: false, reason: GH_NOT_INSTALLED });
+    const out = fakeGh({ auth: refused(1, "You are not logged into any GitHub hosts.\n") });
+    expect(await readGhState(out.deps)).toMatchObject({ ok: false, reason: GH_NOT_LOGGED_IN });
+    expect(out.calls).toHaveLength(2);
+  });
+
   test("a Projects query refused for the missing scope is cannot read Projects", async () => {
     const reading = await readGitHub("acme/web", null, fakeGh({ projects: refused(1, "gh: Your token has not been granted the required scopes to execute this query. The 'projectsV2' field requires one of the following scopes: ['read:project'], but your token has only been granted the: ['repo'] scopes.\n") }).deps);
     if (reading.ok) throw new Error("read");
@@ -312,13 +326,81 @@ describe("a read of GitHub", () => {
   });
 });
 
+describe("the read of the pull requests", () => {
+  const node = (number: number, extra: Record<string, unknown> = {}) => ({ number, title: `Title ${number}`, author: { login: "ada" }, isDraft: false, baseRefName: "main", headRefName: `feature-${number}`, headRefOid: `${number}`.padStart(40, "a"), url: `https://github.com/acme/web/pull/${number}`, ...extra });
+
+  function listGh(stdout: string, outcome: Partial<GhOutcome> = {}) {
+    const calls: string[][] = [];
+    const run: GhRunner = async (_program, args) => {
+      calls.push([...args]);
+      if (args[0] === "pr") return { ...ok(stdout), ...outcome };
+      return args[0] === "--version" ? ok("gh version 2.60.0\n") : ok("Logged in\n");
+    };
+    return { calls, deps: { find: () => "/usr/bin/gh", run, now: () => new Date("2026-10-25T10:00:00Z") } };
+  }
+
+  test("asks for the open pull requests of the repository with fixed arguments and nothing else", async () => {
+    const { calls, deps } = listGh("[]");
+    await readPullRequests("acme/web", deps);
+    expect(calls.at(-1)).toEqual(["pr", "list", "--repo", "acme/web", "--state", "open", "--limit", "100", "--json", "number,title,author,isDraft,baseRefName,headRefName,headRefOid,url"]);
+    expect(calls.map((args) => args[0])).toEqual(["--version", "auth", "pr"]);
+  });
+
+  test("keeps the pull requests that are not drafts, the highest number first", async () => {
+    const { deps } = listGh(JSON.stringify([node(3), node(9, { isDraft: true }), node(12), node(5, { author: null })]));
+    const reading = await readPullRequests("acme/web", deps);
+    expect(reading).toEqual({
+      ok: true,
+      readAt: "2026-10-25T10:00:00.000Z",
+      items: [
+        { number: 12, title: "Title 12", author: "ada", baseRefName: "main", headRefName: "feature-12", headRefOid: "12".padStart(40, "a"), url: "https://github.com/acme/web/pull/12" },
+        { number: 5, title: "Title 5", author: "", baseRefName: "main", headRefName: "feature-5", headRefOid: "5".padStart(40, "a"), url: "https://github.com/acme/web/pull/5" },
+        { number: 3, title: "Title 3", author: "ada", baseRefName: "main", headRefName: "feature-3", headRefOid: "3".padStart(40, "a"), url: "https://github.com/acme/web/pull/3" },
+      ],
+    });
+  });
+
+  test("an item that lacks a field is left out", async () => {
+    const { deps } = listGh(JSON.stringify([node(1, { url: undefined }), node(2)]));
+    const reading = await readPullRequests("acme/web", deps);
+    expect(reading.ok && reading.items.map((item) => item.number)).toEqual([2]);
+  });
+
+  test("a failed call or an answer that is not a list is a failed read with the reason", async () => {
+    const failed = await readPullRequests("acme/web", listGh("", { status: 1, stderr: "HTTP 502\nmore" }).deps);
+    expect(failed).toMatchObject({ ok: false, reason: "gh exited with code 1: HTTP 502" });
+    expect(await readPullRequests("acme/web", listGh("not json").deps)).toMatchObject({ ok: false });
+    expect(await readPullRequests("acme/web", listGh("{}").deps)).toMatchObject({ ok: false });
+  });
+
+  test("gh not installed or not logged in stops before the list is asked", async () => {
+    const calls: string[][] = [];
+    const run: GhRunner = async (_program, args) => {
+      calls.push([...args]);
+      return args[0] === "auth" ? refused(1, "not logged in") : ok("gh version 2.60.0\n");
+    };
+    const reading = await readPullRequests("acme/web", { find: () => "/usr/bin/gh", run });
+    expect(reading).toMatchObject({ ok: false, reason: GH_NOT_LOGGED_IN });
+    expect(calls.some((args) => args[0] === "pr")).toBe(false);
+    expect(await readPullRequests("acme/web", { find: () => null })).toMatchObject({ ok: false, reason: GH_NOT_INSTALLED });
+  });
+
+  test("a repository that is not owner/name never reaches gh", async () => {
+    const { calls, deps } = listGh("[]");
+    expect(await readPullRequests("--hostname=x", deps)).toMatchObject({ ok: false });
+    expect(calls.some((args) => args[0] === "pr")).toBe(false);
+  });
+});
+
 describe("the only gh commands", () => {
   const source = readFileSync(join(import.meta.dir, "..", "src", "core", "github.ts"), "utf8");
 
   test("the module contains no command that writes", () => {
     expect(source).not.toMatch(/\bmutation\b/);
     expect(source).not.toMatch(/"(?:create|edit|reopen|delete|comment|merge|transfer|item-add|item-create|item-edit|item-delete|item-archive|field-create|field-delete|link|unlink|copy|set|--method|-X|--input)"/);
-    expect(source).not.toMatch(/\["(?:issue|pr|project|repo|release|gist)"/);
+    expect(source).not.toMatch(/\["(?:issue|project|repo|release|gist)"/);
+    // The only `pr` command is the read of the open pull requests.
+    expect([...source.matchAll(/\["pr",\s*"([a-z-]+)"/g)].map((found) => found[1])).toEqual(["list"]);
     expect(PROJECTS_QUERY).not.toMatch(/\bmutation\b/);
     expect(PROJECT_QUERY).not.toMatch(/\bmutation\b/);
   });

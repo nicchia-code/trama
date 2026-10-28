@@ -56,8 +56,10 @@ export function activate(context: vscode.ExtensionContext): void {
   const requests = new DesignRequests(context.workspaceState, tramaFiles, undefined, undefined, () => trama.launch({ kind: "implement-all" }));
   // One picture of the project per window, built after the pause of the watcher and at a change of the folders, and shared by the panel and the side menu.
   const picture = new WindowPicture(tramaFiles);
-  const trama = new Controller(context.extensionUri, session, picture, requests, context.workspaceState, people);
+  const trama = new Controller(context.extensionUri, session, picture, requests, context.workspaceState, people, context.storageUri?.fsPath);
   controller = trama;
+  // A worktree of the PR Check left behind by a window that closed or crashed while checking is removed now, with no report and no message.
+  void trama.removeLeftoverWorktrees();
   // The item of the ghosts with no Board column lives with the extension, so it shows with the panel closed too.
   const activities = new ActivitiesItem(() => findProject()?.root, tramaFiles, (announcement) => trama.openGhostDetails(announcement));
   // Merge of Solo mode: its flow and the follow-up of the merge Trama started, for the whole life of the window.

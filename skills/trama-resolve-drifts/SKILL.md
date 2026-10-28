@@ -98,6 +98,17 @@ Run **`trama question new --root <project> --input -`** with the JSON request on
 
 - Never use omp's `ask` tool, and never write the questions in the conversation: `trama question new` is the only way to ask the developer.
 
+## A unified Drift with differences
+
+A Drift named in the instruction may be a unified Drift with differences (`differences` in `trama drift show <id> --json`: for each, its `drift`, `title`, `refs`, `options`, `linked`, `proposal`, and `open`). The developer decides it difference by difference, so it takes the place of several Drifts in the Steps, with these changes:
+
+- **Read.** Only the open differences count; the decided ones keep their outcome and are left out of the round.
+- **Ask.** One round, one single-choice question for each open difference, in the order of the differences, with `id` the `drift` of the difference. Each question follows the rules of "Asking" for the question of a Drift, with the fix options, the attached Proposal and the merge origin of that difference. `context` names the linked differences and what each choice implies for them.
+- **Reconcile.** When the answers give different decisions to linked differences (a `fix-code` with any option counts as one decision), do not write them yet: ask again once, in one round, only the questions of those differences, with options adapted to the answers already given, and apply the answers.
+- **Skipped.** A skipped or unanswered question leaves its difference out of the resolution and open, as for a Drift.
+- **Record.** One entry of `drifts` for each answered difference: `{"drift":"<unified Drift id>","difference":"<the drift of the difference>","decision":"proposal|dismissed|fix-code","option":<n>,"note":"<text>"}`, with `option` counted on the fix options of that difference. Never write an entry without `difference` for such a Drift, nor `difference` for any other Drift; `removeDrifts` takes `{"drift":…,"difference":…}` to take out one entry. For each `proposal` decision, the resolution carries the changes of the Proposal attached to that difference, adjusted to the other decisions when they require it.
+- **Report.** One line for each difference with its decision, and the differences left open.
+
 ## Prepared question
 
 The Async Drift Resolver prepares in advance the question the developer would be asked about a Drift, so Resolve opens at once. This section has two parts: how a prepared question is written (the other skills point here), and how you work when the instruction brings the answer already given.
@@ -114,6 +125,16 @@ Each option carries its decision, in `decisions`, one entry per option in the sa
 
 Record it with `trama drift edit <id> --input -` and `{"prepared":{"question":{…},"decisions":[…]},"proposal":"<id>"}` in a heredoc (`proposal` only when you attach a Draft in this command). The command checks the Drift is open, the question and the decisions, and computes the fingerprint of the Model and Requirements it was written against; a refusal names each problem: fix it and run the command again. The question is valid only while the Model and the Requirements of the Drift's references do not change.
 
+### Writing a prepared round
+
+A unified Drift with differences (`differences` in `trama drift show <id> --json`) has a prepared round: one question for each open difference. Write each question as "Writing a prepared question" says, with these changes:
+
+- `id`: the `drift` of the difference, not the identity of the unified Drift. The options, their decisions and the recommendation follow the fix options of that difference (`options` of the difference in `--json`), the Proposal attached to that difference (`proposal`) and the origin of the difference: a difference born from a Drift from a merge (`merge: true` for the Drift it comes from) always offers and recommends the behaviour the code already has.
+- `context` names the differences linked to this one (`linked`) by title and says what each option implies for them, so the developer decides one question knowing what it means for the others.
+- Start from the prepared question the merged Drift had, when it was still valid (read it before the Drift was merged, or from the context of the difference), changing the context and the options only where the linked differences require it; write a new question only for a difference without a valid one.
+
+Record the questions with `trama drift edit <id> --input -` and `{"prepared":{"questions":[{"difference":"<drift>","question":{…},"decisions":[…]}]},"proposal":{"difference":"<drift>","proposal":"<id>"}}` in a heredoc (`proposal` only when you attach a Draft to one difference in this command). The command may replace only some questions and keeps the others; it checks each question against its own difference and computes the fingerprint of the Model and Requirements on that difference's references. A decision `proposal` needs a Proposal attached to that difference.
+
 ### The answer is already given
 
 This applies only when the instruction carries the sentence "The developer already answered this Drift's prepared question; do not ask again. Answer: <JSON>.". Then:
@@ -121,6 +142,18 @@ This applies only when the instruction carries the sentence "The developer alrea
 - Do not open a round and never run `trama question new`: the JSON after "Answer:" is the answer of the round for this Drift (`selected` labels and optional free `text`).
 - Do steps 1, 2, 4 and 5 of "Steps" for that Drift only, with that answer as the answer of the round: decide from it as step 4 says and write the resolution as step 5 says, with one difference: create the Proposal with `"prepared":true` in `trama proposal new --input -` (`kind` `resolution`).
 - Hand it over as step 7 says and report.
+
+### The round of a unified Drift is already answered
+
+This applies only when the instruction carries the sentence "The developer already answered this unified Drift's prepared round. Answers: <JSON>.". The JSON is keyed by difference (the `drift` of each difference): each answer has the `selected` labels and the optional free `text` of the question of that difference; the differences it does not list were skipped or not answered, and stay open.
+
+- Do not open a round and never run `trama question new`, unless the instruction also carries "Linked differences got different decisions: reconcile them, asking again only their questions if needed.": then reconcile as "A unified Drift with differences" says, asking once, in one round, only the questions of those differences.
+- Do steps 1, 2, 4 and 5 of "Steps" for that Drift, with the answers as the answers of the round, recording each decision with its `difference` as "A unified Drift with differences" says, and create the Proposal with `"prepared":true` in `trama proposal new --input -` (`kind` `resolution`).
+- Hand it over as step 7 says and report.
+
+### Some differences have a valid prepared question
+
+This applies only when the instruction carries the sentence "Some differences of this unified Drift have a valid prepared question: keep them, prepare the others and ask one round about every open difference.". Keep the valid questions exactly as they are (`trama drift show <id> --json` lists the question of each open difference in `prepared.questions`, with its `status`). Write, as "Writing a prepared round" says, only the questions of the open differences that have none or whose question is no longer valid, with a `trama drift edit` that lists only those questions: the others are kept. Then ask one round about every open difference, with the question of each as the prepared round now holds it, and go on with the Steps as for any unified Drift with differences.
 
 ## Sub-agents context sharing
 

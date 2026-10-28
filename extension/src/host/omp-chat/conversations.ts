@@ -277,6 +277,14 @@ export class OmpConversations {
     }
   }
 
+  /** Closes the conversation `id` without asking, when it is running or idle: Stop of a PR Check. Returns whether this window had it. */
+  close(id: string): boolean {
+    const conversation = this.conversations.get(id);
+    if (conversation === undefined || (conversation.state !== "running" && conversation.state !== "idle")) return false;
+    this.step(conversation, { type: "developer.CLOSE_CHAT_CONVERSATION" });
+    return true;
+  }
+
   /** `developer.CLOSE_CHAT_CONVERSATION`: confirmed first only when the agent is in a turn. */
   async closeRequested(id: string): Promise<void> {
     const conversation = this.conversations.get(id);

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ASK_DEVELOPER_SENTENCE, askMorePart, AUTO_EXIT_SENTENCE, buildPrompt, importPrompt, instructedMessage, languageSentence, mayFileDrifts, type ResolvedAction, terminalName, withLanguage } from "../extension/src/host/prompts";
+import { ASK_DEVELOPER_SENTENCE, askMorePart, AUTO_EXIT_SENTENCE, buildPrompt, importPrompt, instructedMessage, languageSentence, mayFileDrifts, PARTLY_PREPARED_SENTENCE, PREPARED_ROUND_ANSWER_SENTENCE, preparedRoundPrompt, type ResolvedAction, terminalName, withLanguage } from "../extension/src/host/prompts";
 
 test("each action names its skill and its scope exactly", () => {
   expect(buildPrompt({ kind: "written-design", request: "2026-10-04T19-05-12" })).toBe(
@@ -261,4 +261,26 @@ test("the Ask more part of a question holds the question in view in full and the
 
 test("instructedMessage sets the instruction apart from the developer's message, which stays as written", () => {
   expect(instructedMessage("Do the thing.", "Why?\n  two lines")).toBe("Instructions from Trama (not written by the developer):\nDo the thing.\n\nDeveloper's message:\nWhy?\n  two lines");
+});
+
+test("the instruction that hands the agent the answers of a unified Drift's round carries them by difference on one line, and the linked-decisions sentence only when asked", () => {
+  const base = buildPrompt({ kind: "resolve-drifts", drift: "ab12cd34" });
+  const answers = { aaaa1111: { selected: ["Keep"], text: "but log it\nalways" }, bbbb2222: { selected: ["Fix it"] } };
+  const plain = preparedRoundPrompt("ab12cd34", answers, false);
+  expect(plain).toBe(`${base} ${PREPARED_ROUND_ANSWER_SENTENCE} ${JSON.stringify(answers)}.`);
+  expect(plain).toContain("The developer already answered this unified Drift's prepared round. Answers: {");
+  expect(plain).not.toContain("\n");
+  expect(preparedRoundPrompt("ab12cd34", answers, true)).toBe(`${plain} Linked differences got different decisions: reconcile them, asking again only their questions if needed.`);
+  expect(PARTLY_PREPARED_SENTENCE).toBe("Some differences of this unified Drift have a valid prepared question: keep them, prepare the others and ask one round about every open difference.");
+});
+
+test("the Ask more part of a question of a unified Drift's prepared round names the unified Drift, the question in view in full and the other questions of the round without answers", () => {
+  const first = { id: "aaaa1111", question: "What about A?", options: [{ label: "Fix A", description: "fix it" }, { label: "Keep A", description: "keep it" }], recommended: 0, multi: false };
+  const second = { id: "bbbb2222", question: "What about B?", options: [{ label: "Fix B", description: "fix it" }], recommended: 0, multi: false };
+  const part = askMorePart({ kind: "question", question: second, round: [first, second], drift: { id: "cccc3333", title: "Together" } });
+  expect(part).toContain("Question: What about B?");
+  expect(part).toContain("- What about A? [Fix A: fix it] [Keep A: keep it]");
+  expect(part).toContain("- (in view) What about B?");
+  expect(part).toContain('This is the prepared question of the Drift cccc3333 ("Together"). Read it with `trama drift show cccc3333`.');
+  expect(part).not.toContain("bbbb2222");
 });

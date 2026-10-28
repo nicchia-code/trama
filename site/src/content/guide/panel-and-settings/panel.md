@@ -40,7 +40,7 @@ The panel's tab is titled with the name of the view it shows.
 - **Requirements**: each Area with its description, introduction and fragments, each with its sections. With a Proposal selected, labels show what it changes. See [Requirements and skills](/guide/concepts/requirements-and-skills/).
 - **Specs**: the fields of the Specs, with their entries. See [Specs](/guide/concepts/specs/).
 - **History**: entries grouped by day, with a period menu. See [The Board and the History](/guide/concepts/board-and-history/).
-- **Team**: **Decisions**, **Issues**, **Timeline** and **People**. See [Manager mode and Team](/guide/workflows/manager-mode/).
+- **Team**: **Decisions**, **Issues**, **Pull Requests**, **Timeline** and **People** with Manager mode on; with it off, only **Pull Requests**, the PR Check of a pull request, in any project whose origin is on GitHub. See [Manager mode and Team](/guide/workflows/manager-mode/).
 - **Settings**: see [Settings](/guide/panel-and-settings/settings/).
 - **Get Started**: the setup wizard of a folder that is not yet a project. See [Put Trama in a project](/guide/getting-started/get-started/).
 

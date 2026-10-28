@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { execute } from "../src/cli/main";
-import { askEditor, createQuestionServer, QUESTION_ENDPOINT_ENV, questionProjectId, sendCoordinatorMessage, type CoordinatorMessage, type QuestionServer } from "../src/core/question-channel";
+import { askEditor, createQuestionServer, QUESTION_ENDPOINT_ENV, QUESTION_PROJECT_ENV, questionProjectId, sendCoordinatorMessage, type CoordinatorMessage, type QuestionServer } from "../src/core/question-channel";
 import { QuestionRoundQueue, type CompletedQuestionRound } from "../src/core/question-rounds";
 import { QUESTION_TOOL_REFUSAL, QuestionInterruptedError, unavailableQuestions, type QuestionHandler, type QuestionRequest } from "../src/core/questions";
 import { projectAt } from "../src/core/store";
@@ -165,6 +165,27 @@ test("a worktree of the window's repository is another project, even on a trama 
   const editor = await server(async () => { presentations++; return answer("choice"); });
   expect(await askEditor(projectAt(worktree), round(), {}, { runtimeDir, env: { [QUESTION_ENDPOINT_ENV]: editor.endpoint } })).toMatchObject({ status: "unavailable" });
   expect(presentations).toBe(0);
+});
+
+test("the agent of a PR Check works in a worktree but reaches the editor of the open folder through TRAMA_QUESTION_PROJECT", async () => {
+  const worktree = join(root, "worktree");
+  mkdirSync(worktree);
+  let presentations = 0;
+  const editor = await server(async () => { presentations++; return answer("choice"); });
+  const env = { [QUESTION_ENDPOINT_ENV]: editor.endpoint, TRAMA_TERMINAL: TERMINAL };
+  const before = process.env[QUESTION_PROJECT_ENV];
+  process.env[QUESTION_PROJECT_ENV] = questionProjectId(projectAt(projectRoot));
+  try {
+    expect(questionProjectId(projectAt(worktree))).toBe(questionProjectId(projectAt(projectRoot)));
+    expect(await askEditor(projectAt(worktree), round(), {}, { runtimeDir, env })).toMatchObject({ status: "answered" });
+    // A value that is not a project identity names nothing: the worktree is another project again.
+    process.env[QUESTION_PROJECT_ENV] = "not an identity";
+    expect(await askEditor(projectAt(worktree), round(), {}, { runtimeDir, env })).toMatchObject({ status: "unavailable" });
+  } finally {
+    if (before === undefined) delete process.env[QUESTION_PROJECT_ENV];
+    else process.env[QUESTION_PROJECT_ENV] = before;
+  }
+  expect(presentations).toBe(1);
 });
 
 test("a round needs both the endpoint and a recognised terminal: otherwise it is unavailable at once, whatever windows are live", async () => {

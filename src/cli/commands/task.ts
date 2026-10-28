@@ -5,9 +5,10 @@ import { deleteTask } from "../../core/delete-task";
 import { getProposal } from "../../core/proposals";
 import { checkTaskInEditor, filingOrigin, sendCoordinatorMessageSoon } from "../../core/question-channel";
 import { syncShortNumbers } from "../../core/short-numbers";
+import { isKnownHolder } from "../../core/task-holders";
 import { preflightScope, taskScope } from "../../core/task-scope";
 import { recordTiming } from "../../core/timings";
-import { COLUMNS, declareProgress, getDrift, getTask, moveTask, newTask } from "../../core/work";
+import { COLUMNS, declareProgress, getDrift, getTask, hasDifferences, moveTask, newTask } from "../../core/work";
 import { preflightCompared } from "../compare";
 import type { Context } from "../context";
 import { defineCommand } from "../registry";
@@ -167,7 +168,7 @@ const move = defineCommand({
   mode: "immediate",
   summary: "Move a Task to To do, In progress or Done.",
   description:
-    "Run as the agent (in the terminal Trama started, or in an omp Chat conversation, which counts as the terminal it replaces), a move to `doing` takes the Task and a move to `todo` or `done` clears that; without a recognised `TRAMA_TERMINAL` the move to `doing` is refused with an error saying that only an agent launched by Trama can take a Task, and the Task is neither taken nor moved. A move to `doing` is also refused, changing nothing, when the Task is blocked. Run as the developer, a move of a Task the agent has taken is refused, except to `doing`, which takes it back: the mark goes and the Task stays In progress. `unchanged` (a note saying what was checked) closes a fix Task into Done without changes when the code already does what the Drift's Model or Requirement says, and dismisses its Drift; it applies only to `done`. `progress` (0 to 100, in steps of 10) does not move anything: with `doing`, it only declares how far along the agent is on a Task it has taken, in place of the previous percentage. A declaration is accepted only from the terminal or conversation that holds the Task (its sub-agents included); one from another terminal or conversation, from an agent without a recognised `TRAMA_TERMINAL`, from the developer or on a Task not taken changes nothing and prints a note, with exit 0.",
+    "Run as the agent (in the terminal Trama started, or in an omp Chat conversation, which counts as the terminal it replaces), a move to `doing` takes the Task and a move to `todo` or `done` clears that; without a recognised `TRAMA_TERMINAL` the move to `doing` is refused with an error saying that only an agent launched by Trama can take a Task, and the Task is neither taken nor moved. A move to `doing` is also refused, changing nothing, when the Task is blocked. Run as the developer, a move of a Task the agent has taken is refused, except to `doing`, which takes it back: the mark goes and the Task stays In progress. `unchanged` (a note saying what was checked) closes a fix Task into Done without changes when the code already does what the Drift's Model or Requirement says, and dismisses its Drift; for the fix Task of differences of a unified Drift, it closes those differences without changes (each keeps its chosen option and note) and the Drift keeps its state; it applies only to `done`. `progress` (0 to 100, in steps of 10) does not move anything: with `doing`, it only declares how far along the agent is on a Task it has taken, in place of the previous percentage. A declaration is accepted only from the terminal or conversation that holds the Task (its sub-agents included); one from another terminal or conversation, from an agent without a recognised `TRAMA_TERMINAL`, from the developer or on a Task not taken changes nothing and prints a note, with exit 0.",
   positionals: [
     { name: "id", description: "The Task: its ID, a unique prefix or its short number." },
     { name: "column", description: "Where the Task goes.", choices: COLUMNS },
@@ -195,7 +196,7 @@ const move = defineCommand({
     if (ctx.byAgent && t.data.column === "doing") recordTiming(project, ctx.origin, { event: "task-start", task: t.id, title: t.title }, { job: ctx.job });
     if (t.data.column === "done") recordTiming(project, ctx.origin, { event: "task-end", task: t.id, title: t.title, outcome: input.unchanged === undefined ? "done" : "unchanged" }, { job: ctx.job });
     const n = syncShortNumbers(ctx.project());
-    const dismissed = input.unchanged === undefined || t.data.drift === null ? "" : `; Drift ${n.name("drift", t.data.drift)} dismissed`;
+    const dismissed = input.unchanged === undefined || t.data.drift === null ? "" : hasDifferences(getDrift(ctx.project(), t.data.drift)) ? `; the differences it fixed of Drift ${n.name("drift", t.data.drift)} are closed without changes` : `; Drift ${n.name("drift", t.data.drift)} dismissed`;
     return text(`Task ${n.name("task", t.id)} is now ${t.data.column}${dismissed}`, { id: t.id, number: n.label("task", t.id), column: t.data.column, ...(input.unchanged === undefined ? {} : { unchanged: t.data.unchanged, drift: t.data.drift }) });
   },
 });
@@ -206,12 +207,12 @@ const check = defineCommand({
   mode: "blocking",
   summary: "Ask about the health of whoever holds a Task the agent has taken.",
   description:
-    "Reads the Task. If the agent has not taken it (a Task in To do or Done, or an In progress one the developer holds), answers `not-taken`, without contacting the editor and changing nothing. Otherwise it asks an open editor window of the project, found as `trama question new` does, to run at once the execution check of that Task and waits up to 5 seconds: the window answers `alive`, with the holder, or `released`, with the reason, after putting the Task back in To do with the notice on its Board. Without a reachable editor, or without an answer in time, it answers `unavailable`. It does not take or move the Task, writes no file, does not count as the agent's activity and anyone can run it. Exits with 0 for every outcome; a Task that does not exist is an error as in `task show`.",
+    "Reads the Task. If the agent has not taken it (a Task in To do or Done, or an In progress one the developer holds), answers `not-taken`, without contacting the editor and changing nothing. A Task the agent has taken with no known holder is answered `unknown-holder`, also without contacting the editor and changing nothing. Otherwise it asks an open editor window of the project, found as `trama question new` does, to run at once the execution check of that Task and waits up to 5 seconds: the window answers `alive`, with the holder, or `released`, with the reason, after putting the Task back in To do with the notice on its Board, or `unknown-holder` when the window does not recognise the holder. Without a reachable editor, or without an answer in time, it answers `unavailable`. It does not take or move the Task, writes no file, does not count as the agent's activity and anyone can run it. Exits with 0 for every outcome; a Task that does not exist is an error as in `task show`.",
   positionals: [{ name: "id", description: "The Task: its ID, a unique prefix or its short number." }],
   input: z.strictObject({}),
   output: z.object({
     task: z.string().describe("The permanent identity of the Task."),
-    result: z.enum(["alive", "released", "not-taken", "unavailable"]),
+    result: z.enum(["alive", "released", "not-taken", "unknown-holder", "unavailable"]),
     holder: z.string().optional().describe("Who holds the Task, with `alive`."),
     reason: z.string().optional().describe("Why the Task was put back in To do, with `released`."),
   }),
@@ -221,10 +222,13 @@ const check = defineCommand({
     const t = getTask(project, id as string, true);
     const n = syncShortNumbers(project);
     const name = n.name("task", t.id);
-    if (t.data.column !== "doing" || t.data.holder === null) return text(`Task ${name} is not taken by the agent.`, { task: t.id, result: "not-taken" });
+    const unknownHolder = () => text(`Task ${name} is taken by the agent, but its holder is not known.`, { task: t.id, result: "unknown-holder" });
+    if (t.data.column !== "doing" || !t.data.agent) return text(`Task ${name} is not taken by the agent.`, { task: t.id, result: "not-taken" });
+    if (!isKnownHolder(t.data.holder)) return unknownHolder();
     const reply = await checkTaskInEditor(project, t.id, { env: runtime.env, ...(runtime.runtimeDir === undefined ? {} : { runtimeDir: runtime.runtimeDir }) });
     if (reply.result === "alive") return text(`Task ${name} is alive, held by ${reply.holder}.`, { task: t.id, result: "alive", holder: reply.holder });
     if (reply.result === "released") return text(`Task ${name} was released and is back in To do: ${reply.reason}`, { task: t.id, result: "released", reason: reply.reason });
+    if (reply.result === "unknown-holder") return unknownHolder();
     return text(`Task ${name} cannot be verified: no editor of the project answered in time.`, { task: t.id, result: "unavailable" });
   },
 });
