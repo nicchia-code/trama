@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { parse } from "yaml";
 import { GUIDE_SECTIONS } from "../site/src/lib/guide";
 import { scenePaths } from "../site/src/lib/screenshots";
@@ -23,7 +23,7 @@ function readPages(dir: string): Page[] {
     const text = normalizeLf(readFileSync(path, "utf8"));
     const match = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(text);
     if (!match) throw new Error(`${path} has no front matter`);
-    return [{ id: relative(guideDir, path).replace(/\.md$/, ""), data: parse(match[1] ?? "") as Record<string, unknown>, body: match[2] ?? "" }];
+    return [{ id: relative(guideDir, path).split(sep).join("/").replace(/\.md$/, ""), data: parse(match[1] ?? "") as Record<string, unknown>, body: match[2] ?? "" }];
   });
 }
 
@@ -194,7 +194,7 @@ test("the sentences of the steps never speak in the first person", () => {
 
 test("the READMEs have the link to the guide right after the GIF, and no link to the demo", () => {
   for (const file of ["README.md", join("extension", "README.md")]) {
-    const lines = readFileSync(join(root, file), "utf8").split("\n");
+    const lines = normalizeLf(readFileSync(join(root, file), "utf8")).split("\n");
     const gif = lines.findIndex((l) => l.includes("demo.gif"));
     expect(gif, file).toBeGreaterThan(-1);
     expect(lines.slice(gif + 1).find((l) => l.trim() !== ""), file).toBe("**[Read the guide](https://nicchia-code.github.io/trama/)**");
