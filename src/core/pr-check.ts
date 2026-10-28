@@ -280,7 +280,7 @@ function reportNumbers(p: Project): number[] {
   } catch {
     return [];
   }
-  return names.flatMap((name) => (/^[1-9][0-9]*\.json$/.test(name) ? [Number(name.slice(0, -".json".length))] : []));
+  return names.flatMap((name) => (/^[1-9][0-9]*\.json$/.test(name) ? [Number(name.slice(0, -".json".length))] : [])).sort((a, b) => a - b);
 }
 
 /** The report of pull request `number`, or null: a file that is not valid counts as no report. */
@@ -325,7 +325,7 @@ export function writeReport(p: Project, report: PullRequestReport): void {
   writeFileAtomic(reportFile(p, report.number), `${JSON.stringify(report, null, 2)}\n`);
 }
 
-/** After a read of the pull requests that worked: deletes the report of every pull request not in `open`, and the files that are not valid reports. Returns the numbers deleted. */
+/** After a read of the pull requests that worked: deletes the report of every pull request not in `open`, and the files that are not valid reports. Returns the numbers deleted, in ascending order. */
 export function deleteReportsExcept(p: Project, open: Iterable<number>): number[] {
   const keep = new Set(open);
   const gone: number[] = [];

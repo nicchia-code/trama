@@ -1,0 +1,78 @@
+languages:
+  - name: TypeScript
+    version: "7"
+    note: strict mode, ES2022, ES modules, `noUncheckedIndexedAccess`; type-checked with `tsc --noEmit`
+frameworks:
+  - name: Bun
+    version: "1.4"
+    note: runtime, package manager, test runner and compiler of the `trama` binary
+  - name: VS Code extension API
+    version: "^1.106.0"
+    note: the extension host runs in Node, bundled as CommonJS
+  - name: React
+    version: "19"
+    note: the panel webview, with `react-dom`
+  - name: shadcn/ui
+    note: components copied into the webview source, zinc base colour with a blue primary, light and dark
+  - name: Radix UI
+    note: the primitives under the shadcn/ui components
+  - name: Tailwind CSS
+    version: "4"
+    note: compiled at build time into one stylesheet of the webview
+  - name: class-variance-authority
+    chosenByAgent: used by the shadcn/ui components for their variants
+  - name: clsx
+    chosenByAgent: used by the shadcn/ui components to join class names
+  - name: tailwind-merge
+    chosenByAgent: used by the shadcn/ui components to merge Tailwind classes
+  - name: lucide-react
+    note: the icons of the panel, as inline SVG components
+  - name: simple-icons
+    note: "the language and file-type logos of omp Chat's tool rows, CC0; only the icons used are imported, as inline SVG paths"
+  - name: cmdk
+    note: the Command list under the shadcn/ui Combobox of the model fields
+  - name: cytoscape
+    note: draws the Diagram on a canvas, hosted in a React component
+  - name: elkjs
+    note: lays out the Diagram
+  - name: mermaid
+    version: "12"
+    note: draws the `mermaid` blocks of the panel's Markdown, from its own bundle loaded on demand
+    chosenByAgent: the reference renderer of `mermaid` blocks, the one GitHub uses for issues
+  - name: yaml
+    note: front matter and settings files
+  - name: zod
+    version: "4"
+    note: input schemas of the command line
+  - name: Agent Client Protocol SDK
+    note: "`@agentclientprotocol/sdk`, the client side of ACP that omp Chat uses to talk to `omp acp`, bundled into the extension host"
+  - name: Astro
+    note: "the documentation site in `site/`, without Starlight; static output for GitHub Pages"
+  - name: Rough.js
+    note: draws the hand-drawn arrows, circles and underlines of the guide's annotated screenshots as SVG at build time, with a fixed seed
+  - name: Playwright
+    note: "only in the script that takes the guide's screenshots: drives the real VS Code through its Electron process; not part of the tests"
+    chosenByAgent: drives an Electron application and its webviews and takes window screenshots
+  - name: "@vscode/test-electron"
+    note: downloads the pinned version of VS Code that the screenshot script launches, independent of the developer's own VS Code, and opens VS Code with the packaged extension for the start check of the Windows release
+    chosenByAgent: the official way to download and launch a given VS Code build with an extension under development
+testing:
+  - name: bun test
+    note: the whole suite, also with `--isolate`
+  - name: happy-dom
+    note: the DOM of the webview component tests
+  - name: Testing Library
+    note: "`@testing-library/react`, interactions as the user does them"
+ci:
+  - name: GitHub Actions
+    note: tagged releases on Bun 1.4.0, one `.vsix` per platform; on Windows the release also installs the `.vsix` in VS Code, scans `trama.exe` with Windows Defender and checks that the extension starts; a second workflow builds and publishes the site to GitHub Pages on every push to `main` that touches the site or the settings of the extension; it never takes screenshots
+deployment:
+  - name: VS Code Marketplace package
+    note: one `.vsix` per platform (`linux-x64`, `darwin-arm64`, `win32-x64`), with the `trama` binary inside
+  - name: GitHub Pages
+    note: "the documentation site at `https://nicchia-code.github.io/trama/`, published by the GitHub Actions workflow with `actions/deploy-pages`"
+infrastructure:
+  - name: omp
+    note: "the only coding agent Trama runs and the only source of model names; required, installed with its official installer (`https://omp.sh/install`, `install.ps1` on Windows) when missing and updated with `omp update` before Trama launches it"
+  - name: GitHub CLI
+    note: "`gh`, needed only with Manager mode: Trama runs it only to read the GitHub Project, the agent runs it to publish issues; installed and logged in by the Manager, never by Trama"

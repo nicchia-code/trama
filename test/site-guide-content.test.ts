@@ -4,6 +4,7 @@ import { join, relative } from "node:path";
 import { parse } from "yaml";
 import { GUIDE_SECTIONS } from "../site/src/lib/guide";
 import { scenePaths } from "../site/src/lib/screenshots";
+import { normalizeLf } from "../src/core/line-endings";
 
 const root = join(import.meta.dir, "..");
 const guideDir = join(root, "site", "src", "content", "guide");
@@ -19,7 +20,7 @@ function readPages(dir: string): Page[] {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) return readPages(path);
     if (!entry.name.endsWith(".md")) return [];
-    const text = readFileSync(path, "utf8");
+    const text = normalizeLf(readFileSync(path, "utf8"));
     const match = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(text);
     if (!match) throw new Error(`${path} has no front matter`);
     return [{ id: relative(guideDir, path).replace(/\.md$/, ""), data: parse(match[1] ?? "") as Record<string, unknown>, body: match[2] ?? "" }];

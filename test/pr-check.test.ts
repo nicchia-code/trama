@@ -35,6 +35,7 @@ import {
   trackedFilesAtCommit,
   writeReport,
 } from "../src/core/pr-check";
+import { normalizeLf } from "../src/core/line-endings";
 import { setSoloMode } from "../src/core/solo-mode";
 import { projectAt } from "../src/core/store";
 import { recordTiming } from "../src/core/timings";
@@ -365,7 +366,7 @@ describe("reading the Model from git objects", () => {
       const head = git(open, "rev-parse", "HEAD").trim();
       const before = snapshotOf(open);
       const files = await trackedFilesAtCommit(await placeOf(open), head);
-      expect(files.get(ORDER)).toBe(readFileSync(join(open, ".trama/model", ORDER), "utf8"));
+      expect(files.get(ORDER)).toBe(normalizeLf(readFileSync(join(open, ".trama/model", ORDER), "utf8")));
       expect(files.get("requirements/ui/main.md")).toBeDefined();
       expect([...files.keys()].some((path) => path.startsWith("tasks/") || path.startsWith(".trama"))).toBe(false);
       expect(snapshotOf(open)).toBe(before);

@@ -27,7 +27,8 @@ describe("agent process registry", () => {
     removeAgentProcess("p1", "t1", dir);
     removeAgentProcess("p1", "t2", dir);
     expect(readdirSync(dir)).toEqual([".locks"]);
-  });
+    // On Windows each write reads the process start time through its own `powershell`, about a second each on CI.
+  }, 15_000);
 
   test("the registrations of several writers at once are all kept", async () => {
     await Promise.all(Array.from({ length: 8 }, (_, index) => writeAgentProcess("p1", `t${index}`, 100 + index, `w${index}`, dir)));
