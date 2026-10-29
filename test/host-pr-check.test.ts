@@ -177,7 +177,7 @@ describe("Check", () => {
     ]);
     expect(h.launched).toEqual([]);
     expect(existsSync(storage)).toBe(false);
-  });
+  }, GIT_TEST_MS);
 
   test("a second PR Check is refused while one runs, and Check is blocked for every pull request", async () => {
     const pr = repositories();
@@ -350,7 +350,7 @@ describe("a preparation that fails", () => {
     const ports: PrCheckPorts = { project: () => h.project, storage: () => undefined, skillsDir: () => ".agents/skills", runInProgress: () => false, writeSkills: () => {}, launch: async () => {}, stop: () => false, error: (text) => void h.errors.push(text), warning: () => {}, changed: () => {} };
     await new PrChecks(ports).start(7, [pr], true);
     expect(h.errors).toEqual(["Trama: could not check #7: the editor has no storage for this workspace."]);
-  });
+  }, GIT_TEST_MS);
 });
 
 describe("the worktrees left behind", () => {

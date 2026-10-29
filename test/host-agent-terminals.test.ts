@@ -2441,7 +2441,7 @@ describe("the execution check of agent terminals (time.CHECK_DUE)", () => {
     } finally {
       watching.dispose();
     }
-  });
+  }, PROCESS_START_TEST_MS);
 
   test("without a hook process the terminal's shell decides; with autoExit off the terminal stays open at rest", async () => {
     settingValues.autoExit = false;
