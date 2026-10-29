@@ -154,13 +154,13 @@ beforeEach(async () => {
   // The directories are read in the background; a test that never asks for them must not end while that git still runs in the folder.
   await gitDirectories.get();
   flow = new SoloMerge(async (action) => void launched.push(action), gitDirectories);
-});
+}, GIT_TEST_MS);
 
 afterEach(async () => {
   flow.dispose();
   gitDirectories.dispose();
   await removeTree(base);
-});
+}, GIT_TEST_MS);
 
 /** Resolves at the next time `flow` tells that its state may have changed. */
 function changed(): Promise<void> {

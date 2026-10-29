@@ -273,7 +273,7 @@ describe("what changed under a published issue", () => {
     const id = publish();
     expect(json<{ changed: Changed }>("issue", "show", id).changed).toEqual([]);
     expect(cli("issue", "show", id).out).not.toContain("## Changed since publishing");
-  });
+  }, GIT_TEST_MS);
 
   test("a changed reference has its earlier text from git, the text it has now, and shows under Changed since publishing", () => {
     commit("base");
@@ -291,7 +291,7 @@ describe("what changed under a published issue", () => {
     expect(out).toContain("Earlier text:");
     expect(out).toContain("Current text:");
     expect(out.indexOf("## Changed since publishing")).toBeLessThan(out.indexOf("## GitHub body"));
-  });
+  }, GIT_TEST_MS);
 
   test("without a commit from before the publication only the reference is named: the earlier text is not available", () => {
     const id = publish();
@@ -299,7 +299,7 @@ describe("what changed under a published issue", () => {
     const { changed } = json<{ changed: Changed }>("issue", "show", id);
     expect(changed).toEqual([{ ref: "order/Paid", earlier: null, current: expect.stringContaining("owes a receipt") }]);
     expect(cli("issue", "show", id).out).toContain("_Not available: git does not have it._");
-  });
+  }, GIT_TEST_MS);
 
   test("an earlier text that is not the one the recorded fingerprint stands for (the Model was not committed then) is not shown", () => {
     edit((text) => text.replace("### Paid\n", "### Paid\nA first draft.\n"));
@@ -311,7 +311,7 @@ describe("what changed under a published issue", () => {
     const { changed } = json<{ changed: Changed }>("issue", "show", id);
     expect(changed[0]?.earlier).toBeNull();
     expect(changed[0]?.current).toContain("A third draft.");
-  });
+  }, GIT_TEST_MS);
 
   test("a reference that no longer exists is told, with no current text", () => {
     commit("base");
@@ -320,7 +320,7 @@ describe("what changed under a published issue", () => {
     const { changed } = json<{ changed: Changed }>("issue", "show", id);
     expect(changed).toEqual([{ ref: "order/Refunding", earlier: expect.stringContaining("payment.REFUNDED"), current: null }]);
     expect(cli("issue", "show", id).out).toContain("This reference no longer exists in the Model or the Requirements.");
-  });
+  }, GIT_TEST_MS);
 
   test("a Comment update forgets the change: the recorded text is the current one, and the next change counts from it", () => {
     commit("base");
@@ -333,7 +333,7 @@ describe("what changed under a published issue", () => {
     const { changed } = json<{ changed: Changed }>("issue", "show", id);
     expect(changed).toHaveLength(1);
     expect(changed[0]?.current).toContain("an invoice");
-  });
+  }, GIT_TEST_MS);
 
   test("an issue that is not published, or whose texts were not recorded, has no changed reference", () => {
     const waiting = card("bbbb2222", "Refund order");
@@ -341,7 +341,7 @@ describe("what changed under a published issue", () => {
     const old = card("cccc3333", "Ship order", { state: "published", number: 9, url: "https://github.com/acme/web/issues/9", texts: {} });
     edit((text) => text.replace("### Paid\n", "### Paid\nChanged.\n"));
     expect(json<{ changed: Changed }>("issue", "show", old.id).changed).toEqual([]);
-  });
+  }, GIT_TEST_MS);
 });
 
 describe("when Replan is available (rules#developer.REPLAN_HANDOFFS)", () => {

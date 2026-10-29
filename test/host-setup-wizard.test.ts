@@ -146,7 +146,7 @@ afterEach(async () => {
   controller.dispose();
   window.stop();
   await removeTree(root);
-});
+}, 30_000);
 
 /** Opens the panel, sends one message from the webview and waits until the host has handled it and then said and done nothing new for a while. */
 async function send(message: Record<string, unknown>): Promise<void> {

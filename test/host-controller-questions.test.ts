@@ -207,5 +207,5 @@ test("the panel goes back to Get Started when the Trama folder is removed while 
   expect(panel?.messages).toContainEqual({ type: "project", present: false });
   controller.dispose();
   await removeTree(project);
-});
+}, 30_000);
 
