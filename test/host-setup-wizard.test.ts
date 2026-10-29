@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startCursorApiKey } from "../extension/src/host/cursor-api-key";
+import { removeTree } from "./remove-tree";
 import type { WindowOrigin } from "./window-origin";
 
 const NO_ORIGIN = { repository: null, reason: "No origin remote" };
@@ -13,7 +14,7 @@ const userSettings = new Map<string, unknown>();
 const writes: string[] = [];
 let failOn: string | undefined;
 let workspaceFolders: { name: string; uri: { fsPath: string; scheme: string } }[] = [];
-let receive: ((raw: unknown) => void) | undefined;
+let receive: ((raw: unknown) => unknown) | undefined;
 let modalAnswer: string | undefined;
 /** Called with every message the panel is sent, so a test can wait for one instead of guessing a delay. */
 const postListeners = new Set<(message: Record<string, unknown>) => void>();
@@ -28,26 +29,33 @@ const logins: { program: string; provider: { id: string; name: string }; finish:
 
 mock.module("vscode", () => ({
   window: {
-    createWebviewPanel: () => ({
-      title: "",
-      reveal() {},
-      onDidDispose: () => ({ dispose() {} }),
-      dispose() {},
-      webview: {
-        html: "",
-        cspSource: "",
-        asWebviewUri: (uri: unknown) => uri,
-        onDidReceiveMessage: (listener: (raw: unknown) => void) => {
-          receive = listener;
-          return { dispose() {} };
+    // A disposed panel, as in the editor, delivers nothing: work a test left running cannot post into the next test's messages.
+    createWebviewPanel: () => {
+      let disposed = false;
+      return {
+        title: "",
+        reveal() {},
+        onDidDispose: () => ({ dispose() {} }),
+        dispose() {
+          disposed = true;
         },
-        postMessage: async (message: Record<string, unknown>) => {
-          messages.push(message);
-          for (const listener of [...postListeners]) listener(message);
-          return true;
+        webview: {
+          html: "",
+          cspSource: "",
+          asWebviewUri: (uri: unknown) => uri,
+          onDidReceiveMessage: (listener: (raw: unknown) => unknown) => {
+            receive = listener;
+            return { dispose() {} };
+          },
+          postMessage: async (message: Record<string, unknown>) => {
+            if (disposed) return false;
+            messages.push(message);
+            for (const listener of [...postListeners]) listener(message);
+            return true;
+          },
         },
-      },
-    }),
+      };
+    },
     showInformationMessage: async (message: string) => void infos.push(message),
     showWarningMessage: async (message: string, options?: unknown, ...items: string[]) => {
       modals.push(message);
@@ -134,19 +142,19 @@ beforeEach(async () => {
   controller = new Controller({ fsPath: root } as never, undefined, undefined, { writeSetup: async () => void setups++ } as never, undefined, undefined, undefined, window.git, window.origin);
 });
 
-afterEach(() => {
+afterEach(async () => {
   controller.dispose();
   window.stop();
-  rmSync(root, { recursive: true, force: true });
+  await removeTree(root);
 });
 
-/** Opens the panel, sends one message from the webview and waits for the host to answer. */
+/** Opens the panel, sends one message from the webview and waits until the host has handled it and then said and done nothing new for a while. */
 async function send(message: Record<string, unknown>): Promise<void> {
   if (receive === undefined) {
     await controller.open();
     messages.length = 0;
   }
-  receive?.(message);
+  await receive?.(message);
   await settled();
 }
 
@@ -288,7 +296,6 @@ test.skipIf(process.platform === "win32")("omp is prepared once per window: the 
   await controller.open();
   messages.length = 0;
   await Promise.all([send({ type: "modelSuggestionsWanted" }), send({ type: "ompStatusWanted" })]);
-  await controller.refreshOmp();
   expect(calls()).toBe(1);
   const done = { type: "ompStatus", state: "done", missing: false, version: "18.12.6", models: 3, providers: ["anthropic", "xai-oauth"] };
   expect(messages.filter((m) => m["type"] === "ompStatus")).toEqual([{ type: "ompStatus", state: "checking" }, done]);

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { DocumentCache } from "../src/core/document-cache";
 import { buildSnapshot } from "../src/core/snapshot";
 import { projectAt, writeDocument } from "../src/core/store";
@@ -201,7 +201,7 @@ test("events for files no picture reads, and for files already read as they are,
   expect(cache.observe("changed", file)).toBe(false);
   expect(cache.observe("created", file)).toBe(false);
   expect(cache.observe("changed", join(dir, ".trama", "short-numbers", "assigned"))).toBe(false);
-  expect(cache.observe("created", join(dir, ".trama", "drifts", `${file.split("/").at(-1)}.123.abc.tmp`))).toBe(false);
+  expect(cache.observe("created", join(dir, ".trama", "drifts", `${basename(file)}.123.abc.tmp`))).toBe(false);
   expect(cache.observe("created", join(dir, ".trama", "drifts", ".gitignore"))).toBe(false);
   // A path the cache never held and the listings never named.
   expect(cache.observe("deleted", join(dir, ".trama", "drifts", "zzzzzzzz-gone.md"))).toBe(false);
@@ -228,7 +228,7 @@ test("an action that writes files gives one picture: the cache is told of the wr
     expect(raw).not.toBe(readFileSync(task, "utf8"));
 
     const picture = buildSnapshot(p, [], [], [], cache);
-    expect(picture.tasks.find((t) => t.file.endsWith(task.split("/").at(-1) as string))?.title).toBe("Task 1 changed");
+    expect(picture.tasks.find((t) => t.file.endsWith(basename(task)))?.title).toBe("Task 1 changed");
     expect(allDrifts(picture).some((d) => d.id === "eeeeeeee")).toBe(true);
     expect(allDrifts(picture).some((d) => d.id === id("d", 150))).toBe(false);
     // The task and the new drift are read again; the folder of the Drifts, which changed, is listed again.

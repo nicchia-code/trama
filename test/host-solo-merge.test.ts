@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MergeMenuState } from "../extension/src/menu-protocol";
+import { removeTree } from "./remove-tree";
 
 // A minimal editor: what the flow shows is recorded, and the answers of the developer are set by each test.
 const infos: string[] = [];
@@ -122,7 +123,7 @@ function commit(repo: string, message: string, files: Record<string, string>): s
   return git(repo, "rev-parse", "HEAD");
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   base = realpathSync(mkdtempSync(join(tmpdir(), "trama-host-merge-")));
   origin = join(base, "origin.git");
   work = join(base, "work");
@@ -150,13 +151,15 @@ beforeEach(() => {
   // The window's git directories: the real ones, read with git; the watcher of `config` is not the subject here.
   gitDirectories = new GitDirectories({ watch: () => ({ dispose() {} }) });
   gitDirectories.follow();
+  // The directories are read in the background; a test that never asks for them must not end while that git still runs in the folder.
+  await gitDirectories.get();
   flow = new SoloMerge(async (action) => void launched.push(action), gitDirectories);
 });
 
-afterEach(() => {
+afterEach(async () => {
   flow.dispose();
   gitDirectories.dispose();
-  rmSync(base, { recursive: true, force: true });
+  await removeTree(base);
 });
 
 /** Resolves at the next time `flow` tells that its state may have changed. */

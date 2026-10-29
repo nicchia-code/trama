@@ -3,6 +3,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { questionAborted, type QuestionRequest } from "../src/core/questions";
+import { removeTree } from "./remove-tree";
 
 // A minimal editor: one webview panel that records what it is shown and what it is sent.
 interface FakePanel {
@@ -205,6 +206,6 @@ test("the panel goes back to Get Started when the Trama folder is removed while 
   internals.refresh();
   expect(panel?.messages).toContainEqual({ type: "project", present: false });
   controller.dispose();
-  rmSync(project, { recursive: true, force: true });
+  await removeTree(project);
 });
 
