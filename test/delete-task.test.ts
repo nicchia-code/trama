@@ -183,7 +183,9 @@ test("trama task delete deletes the Task by its short number and prints its iden
 
 test("trama task delete --json prints the identity and the title, and an identity prefix names the Task", () => {
   const id = task("Cancel order");
-  const out = cli("--json", "task", "delete", id.slice(0, 4));
+  // A letter followed only by digits is always a short number, never a prefix (`citedCard`): a random identity such as `p765…` is cited by a longer prefix.
+  const prefix = [4, 5, 6, 7].map((length) => id.slice(0, length)).find((candidate) => !/^[ptd]\d+$/i.test(candidate)) ?? id;
+  const out = cli("--json", "task", "delete", prefix);
   expect(JSON.parse(out.out)).toEqual({ id, title: "Cancel order" });
   expect(listTasks(p).map((t) => t.id)).not.toContain(id);
 });
