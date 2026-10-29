@@ -121,7 +121,12 @@ let controller: InstanceType<typeof Controller>;
 let window: WindowOrigin;
 let setups: number;
 
+/** The editor's own Cursor credential, set aside so the tests never depend on the environment they run in. */
+let inheritedCursorToken: string | undefined;
+
 beforeEach(async () => {
+  inheritedCursorToken = process.env.CURSOR_ACCESS_TOKEN;
+  delete process.env.CURSOR_ACCESS_TOKEN;
   root = mkdtempSync(join(tmpdir(), "trama-wizard-host-"));
   workspaceFolders = [{ name: "app", uri: { fsPath: root, scheme: "file" } }];
   messages.length = 0;
@@ -146,6 +151,8 @@ afterEach(async () => {
   controller.dispose();
   window.stop();
   await removeTree(root);
+  if (inheritedCursorToken === undefined) delete process.env.CURSOR_ACCESS_TOKEN;
+  else process.env.CURSOR_ACCESS_TOKEN = inheritedCursorToken;
 }, 30_000);
 
 /** Opens the panel, sends one message from the webview and waits until the host has handled it and then said and done nothing new for a while. */

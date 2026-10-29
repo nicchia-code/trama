@@ -48,4 +48,4 @@ Read [CONTEXT.md](./CONTEXT.md) first: Trama's words (Model, Machine, Proposal, 
 
 ## Releases
 
-Pushing a `v*` tag builds and tests the packages on GitHub Actions and attaches them to a prerelease. Note user-visible changes in [CHANGELOG.md](./CHANGELOG.md).
+To release, raise the version in `package.json` and start the `Release` workflow by hand, from any branch (for example `gh workflow run release.yml --ref <branch>`). It builds and tests the packages on GitHub Actions and, only when the three platforms pass, creates the tag `v<version>` and the prerelease together, on the run's commit. A tag that already exists stops the run before any package is built: raise the version. The workflow never moves, deletes or rewrites a tag, so a failed run is fixed with a new commit and a new run on the same version. Note user-visible changes in [CHANGELOG.md](./CHANGELOG.md).

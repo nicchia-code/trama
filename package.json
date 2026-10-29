@@ -1,11 +1,12 @@
 {
   "name": "trama",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "license": "AGPL-3.0-only",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "bun test --isolate",
+    "test:ci": "bun run scripts/run-tests.ts",
     "typecheck": "tsc --noEmit",
     "build": "bun build --compile src/cli/bin.ts --outfile dist/trama",
     "build:extension": "bun run scripts/build-extension.ts",

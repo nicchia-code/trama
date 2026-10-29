@@ -1,0 +1,14 @@
+---
+description: "Use when changing the release workflow, its tags, its time limits, the test watchdog or the Windows package."
+---
+# Release workflow and platforms
+
+## General
+- Every job of the release workflow has a time limit (`timeout-minutes`), so a hang fails the job instead of holding the runner for hours: 25 minutes for the jobs that build and test a package, 15 minutes for the others. The test suite never hangs on any platform: a test that waits for a process, a file or a connection always ends, with success or with an error, also with `bun test --isolate`.
+- The test step of the release workflow fails when the suite prints nothing new for 3 minutes: it stops the suite, with every process it started, and prints the test file that was running, so the log names the file of a hang.
+- A release starts only by hand (`workflow_dispatch`), from any branch, and has no input: every release builds and tests all three platforms. Pushing a `v*` tag starts no workflow. The version is the one in `package.json` and the tag is `v<version>`.
+- Before building anything, the release workflow checks that the tag `v<version>` does not exist on the repository; when it exists, with or without a release, the run fails at once with a message that names the tag and says to raise the version, and builds nothing.
+- The tag and the release are created together, on the commit of the run, only after all three packages have passed every step (type-check, tests, packaging, smoke test and, on macOS, the signature check). When any platform fails, no release and no tag are created, and the packages that passed are not published. The workflow never moves, deletes or rewrites an existing tag, so a failed run is fixed with a new commit and a new run on the same version.
+- Windows: solo `win32-x64`, nessun pacchetto arm64. Il binario si chiama `trama.exe`. Il pacchetto Windows si costruisce e si prova su `windows-latest` con le stesse fasi degli altri: type-check, tutti i test e smoke test del binario estratto dal `.vsix` (`trama.exe --help`, `project new` e `model check`). I test sono portabili: non dipendono da `process.getuid`, `/tmp`, `sh`, link simbolici o `SIGTERM` su Windows; ciò che su Windows non esiste si salta solo lì, con il motivo scritto nel test.
+- `trama.exe` non è firmato: la README dice che Windows SmartScreen o un antivirus possono avvisare al primo avvio. La riga di comando si distribuisce solo dentro il `.vsix`, come sulle altre piattaforme.
+- Windows è in anteprima: la README lo dice accanto alle piattaforme finché la verifica manuale di `docs/uat.md` su Windows 11 x64 non passa con VS Code e omp, in Windows PowerShell 5.1, PowerShell 7 e Git Bash. Dopo quella verifica, le versioni provate di Windows, di VS Code, delle shell e di omp si scrivono qui, e l'anteprima finisce.

@@ -43,7 +43,7 @@ The technologies this project is built, tested and released with, from the devel
 
 ## CI
 
-- GitHub Actions: tagged releases on Bun 1.4.0, one `.vsix` per platform; a second workflow builds and publishes the site to GitHub Pages on every push to `main` that touches the site or the settings of the extension; it never takes screenshots
+- GitHub Actions: releases started by hand on Bun 1.4.4, one `.vsix` per platform, with the tag created only when all three platforms pass; a second workflow builds and publishes the site to GitHub Pages on every push to `main` that touches the site or the settings of the extension, on the same Bun version; it never takes screenshots
 
 ## Deployment
 

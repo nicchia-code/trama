@@ -1,52 +1,59 @@
 name: Release
 
 # Builds the platform .vsix files on their own OS (so the macOS CLI is signed ad hoc by Bun on a Mac), runs the
-# tests there, and attaches the packages to a GitHub release when a `v*` tag is pushed. A manual run builds the
-# chosen target (default all) and creates the release v<package.json version> from the run's commit.
+# tests there and, only when all three platforms pass, creates the tag v<package.json version> and its prerelease
+# together, on the run's commit. The workflow starts by hand only (`gh workflow run release.yml --ref <branch>`), from
+# any branch, and takes no input. A tag that already exists stops the run before any package is built, and the workflow
+# never moves, deletes or rewrites a tag: a failed run is fixed with a new commit and a new run on the same version.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
-    inputs:
-      target:
-        description: Platform to build and release
-        type: choice
-        default: all
-        options: [all, linux-x64, darwin-arm64, win32-x64]
 
 permissions:
   contents: write
 
 jobs:
-  plan:
+  check-tag:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    outputs:
-      matrix: ${{ steps.pick.outputs.matrix }}
     steps:
-      - id: pick
-        env:
-          TARGET: ${{ inputs.target }}
+      - uses: actions/checkout@v4
+      - env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          all='[{"os":"ubuntu-latest","target":"linux-x64"},{"os":"macos-14","target":"darwin-arm64"},{"os":"windows-latest","target":"win32-x64"}]'
-          if [ -n "$TARGET" ] && [ "$TARGET" != all ]; then all=$(jq -c --arg t "$TARGET" 'map(select(.target == $t))' <<< "$all"); fi
-          echo "matrix={\"include\":$all}" >> "$GITHUB_OUTPUT"
+          tag="v$(jq -r .version package.json)"
+          # Authenticated lookup (works on private repositories too). matching-refs matches by prefix, so keep the exact ref.
+          # A failed call fails the job: it must never read as "the tag is absent".
+          found=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag" --jq "[.[] | select(.ref == \"refs/tags/$tag\")] | length") || {
+            echo "::error::Could not check whether the tag $tag exists. Run the workflow again."
+            exit 1
+          }
+          # A release with no tag (a draft) also counts; a failed call here is only a missing extra signal.
+          if [ "$found" -ne 0 ] || gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::error::The tag $tag already exists on the repository (with or without a release). Raise the version in package.json and run the workflow again."
+            exit 1
+          fi
 
   package:
-    needs: plan
+    needs: check-tag
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: linux-x64 }
+          - { os: macos-14, target: darwin-arm64 }
+          - { os: windows-latest, target: win32-x64 }
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.0
+          bun-version: 1.4.4
       - run: bun install --frozen-lockfile
       - run: bunx tsc --noEmit
-      - run: bun test --isolate
+      # The suite runs under a watchdog: after 3 minutes without output it is stopped, with its processes, and the step
+      # fails naming the test file in progress.
+      - run: bun run test:ci
       - run: bun run package ${{ matrix.target }}
       - name: Smoke-test the packaged CLI
         if: runner.os != 'Windows'
@@ -82,7 +89,6 @@ jobs:
 
   release:
     needs: package
-    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -94,8 +100,8 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # A pushed tag names the release; a manual run names it after the version in package.json and creates the tag.
-          if [ "$GITHUB_REF_TYPE" = tag ]; then tag="$GITHUB_REF_NAME"; else tag="v$(jq -r .version package.json)"; fi
+          # The release is named after the version in package.json; creating it creates the tag on the run's commit.
+          tag="v$(jq -r .version package.json)"
           notes="Install with: code --install-extension trama-<platform>-<version>.vsix"
           if ls packages/*win32-x64*.vsix > /dev/null 2>&1; then
             notes="$notes"$'\n\n'"**Windows is untested by hand.** The win32-x64 package is built, tested (the full suite must pass) and smoke-tested (\`--help\`, \`project new\`, \`model check\`) on a Windows CI runner, but nobody has tried it by hand on a Windows machine, with VS Code and omp. Expect rough edges and please report them."
