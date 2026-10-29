@@ -21,11 +21,14 @@ let p: Project;
 let servers: QuestionServer[];
 
 function git(...args: string[]): void {
+  console.error(`DBG ${Date.now()} git ${args.join(" ")}`);
   const r = spawnSync("git", args, { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30_000, killSignal: "SIGKILL", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+  console.error(`DBG ${Date.now()} git done ${r.status}`);
   if (r.error !== undefined || r.status !== 0) throw new Error(r.error?.message ?? r.stderr);
 }
 
 beforeEach(() => {
+  console.error(`DBG ${Date.now()} beforeEach`);
   // A Unix socket path is limited to about 100 bytes: the system temp directory of macOS is already most of that.
   root = mkdtempSync(process.platform === "win32" ? join(tmpdir(), "trama-pi-") : "/tmp/trama-pi-");
   dir = join(root, "project");
@@ -35,9 +38,12 @@ beforeEach(() => {
   git("init", "-q");
   git("remote", "add", "origin", "https://github.com/acme/web");
   p = projectAt(dir);
+  console.error(`DBG ${Date.now()} manager`);
   setManagerMode(p, true);
+  console.error(`DBG ${Date.now()} link`);
   linkGithubProject(p, { owner: "acme", number: 1, title: "Roadmap", iteration: true });
   servers = [];
+  console.error(`DBG ${Date.now()} beforeEach done`);
 }, 60_000);
 afterEach(async () => {
   await Promise.all(servers.map((server) => server.dispose()));
@@ -92,9 +98,9 @@ describe("the published issues in the briefing of a comparison", () => {
   });
 
   test("the command prints the section `## Published issues` with the rule for the Drifts, and adds `publishedIssues` to the JSON; without issues there is no section", () => {
-    expect(run(["--root", dir, "comparison", "new", "order"], dir, {}).out).not.toContain("## Published issues");
+    expect((console.error(`DBG ${Date.now()} cli`), run(["--root", dir, "comparison", "new", "order"], dir, {})).out).not.toContain("## Published issues");
     publish([["Paid orders", ["order/Paid"]]]);
-    const out = run(["--root", dir, "comparison", "new", "order"], dir, {}).out;
+    const out = (console.error(`DBG ${Date.now()} cli`), run(["--root", dir, "comparison", "new", "order"], dir, {})).out;
     expect(out).toContain("## Published issues\n\n- #126 Paid orders (Open): `order/Paid`");
     expect(out).toContain("names the issue (`#<n>`)");
     expect(out).toContain("first Fix option is to fix the code");
