@@ -1,11 +1,12 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, mock, spyOn, test } from "bun:test";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as childProcess from "node:child_process";
 import * as fs from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { PictureOutcome } from "../extension/src/host/picture";
 import type { Snapshot } from "../src/core/snapshot";
+import { noteWritten } from "../src/core/written";
 
 // A minimal editor: webview panels and one webview view that record what they are shown and sent, and a watcher the test fires.
 interface FakePanel {
@@ -20,8 +21,9 @@ const executed: unknown[][] = [];
 let workspaceFolders: { uri: { fsPath: string; scheme: string } }[] = [];
 let providers: Record<string, { resolveWebviewView(view: unknown): void }> = {};
 const configuration: Record<string, unknown> = {};
-const watcherListeners: (() => void)[] = [];
+const watcherListeners: ((uri: { fsPath: string }) => void)[] = [];
 const folderListeners: (() => void)[] = [];
+const windowStateListeners: ((state: { focused: boolean }) => void)[] = [];
 const configListeners: ((event: { affectsConfiguration(section: string): boolean }) => void)[] = [];
 const modals: { message: string; options: unknown }[] = [];
 let modalAnswer: string | undefined;
@@ -59,6 +61,7 @@ mock.module("vscode", () => ({
       providers[id] = provider;
       return { dispose() {} };
     },
+    onDidChangeWindowState: (listener: (state: { focused: boolean }) => void) => (windowStateListeners.push(listener), { dispose() {} }),
     showInformationMessage: async (message: string) => {
       informationMessages.push(message);
       return undefined;
@@ -76,6 +79,10 @@ mock.module("vscode", () => ({
     onDidChangeConfiguration: (listener: (event: { affectsConfiguration(section: string): boolean }) => void) => {
       configListeners.push(listener);
       return { dispose() {} };
+    },
+    createFileSystemWatcher: () => {
+      const listen = () => ({ dispose() {} });
+      return { onDidCreate: listen, onDidChange: listen, onDidDelete: listen, dispose() {} };
     },
   },
   extensions: { getExtension: () => undefined },
@@ -105,6 +112,9 @@ const { boardDecisionCount } = await import("../src/core/board-decisions");
 const { buildSnapshot } = await import("../src/core/snapshot");
 const { projectAt } = await import("../src/core/store");
 const { setOmpLauncher } = await import("../extension/src/host/omp-launch");
+const { originOf, managerFile } = await import("../src/core/manager-mode");
+const { GitDirectories } = await import("../extension/src/host/git-directories");
+const { ProjectOrigin } = await import("../extension/src/host/origin");
 
 let project: string;
 let plain: string;
@@ -125,12 +135,14 @@ beforeEach(() => {
   modalAnswer = undefined;
   providers = {};
   watcherListeners.length = 0;
+  windowStateListeners.length = 0;
   folderListeners.length = 0;
   configListeners.length = 0;
   mergeCalls.length = 0;
   mergeListeners.length = 0;
   mergeState = undefined;
   mergeStateReads = 0;
+  mergeVisibility.length = 0;
   for (const key of Object.keys(configuration)) delete configuration[key];
   workspaceFolders = [{ uri: { fsPath: project, scheme: "file" } }];
 });
@@ -163,8 +175,8 @@ function projectWithStaleFile(): { root: string; stale: string } {
   writeFileSync(stale, "old");
   return { root, stale };
 }
-// The check starts in a `setTimeout(…, 0)` the controller queues first and then works synchronously: a timer queued after it runs after the whole check.
-const afterCheck = () => new Promise((resolve) => setTimeout(resolve, 0));
+// The check of the skills starts in a `setTimeout(…, 0)` the controller queues and works in the background: a wait after it gives it time to end.
+const afterCheck = () => new Promise((resolve) => setTimeout(resolve, 150));
 
 test("a side menu entry that opens the closed panel checks the installed skills", async () => {
   const { root, stale } = projectWithStaleFile();
@@ -331,19 +343,37 @@ function fakeView(): FakeView {
 
 const watcher = () =>
   ({
-    onDidCreate: (listener: () => void) => (watcherListeners.push(listener), { dispose() {} }),
+    onDidCreate: (listener: (uri: { fsPath: string }) => void) => (watcherListeners.push(listener), { dispose() {} }),
     onDidChange: () => ({ dispose() {} }),
     onDidDelete: () => ({ dispose() {} }),
   }) as never;
 
+// What the extension's global watcher of `.trama/**` tells the menu directly: the listeners of created, changed and deleted files.
+const treeListeners: ((uri: { fsPath: string }) => void)[] = [];
+const tramaFiles = () => {
+  const listen = (listener: (uri: { fsPath: string }) => void) => (treeListeners.push(listener), { dispose() {} });
+  return { onDidCreate: listen, onDidChange: listen, onDidDelete: listen } as never;
+};
+
+let fileClock = Date.now() + 60_000;
+/** The editor's watcher reports `path`, a file whose time is moved on, so the cache sees it changed whatever the clock's grain. */
+function heard(path: string): void {
+  fileClock += 1000;
+  utimesSync(path, new Date(fileClock), new Date(fileClock));
+  for (const listener of watcherListeners) listener({ fsPath: path });
+}
+
 // Merge of Solo mode as the menu sees it: the state it answers, how often it was asked, what it was asked, and the listeners of its changes.
 const mergeCalls: string[] = [];
 const mergeListeners: (() => void)[] = [];
+/** What the menu told Merge about its visibility, in order. */
+const mergeVisibility: boolean[] = [];
 let mergeStateReads = 0;
 let mergeState: { available: boolean; reason?: string; trackedTrama: boolean; open?: { branch: string; conflict: boolean } } | undefined;
 const soloMerge = () =>
   ({
     state: () => (mergeStateReads++, mergeState),
+    setMenuVisible: (visible: boolean) => void mergeVisibility.push(visible),
     merge: async () => void mergeCalls.push("merge"),
     openMergeEditor: async () => void mergeCalls.push("openMergeEditor"),
     reconcile: async () => void mergeCalls.push("reconcile"),
@@ -356,15 +386,16 @@ const states = (view: FakeView) => view.messages.filter((message) => message.typ
 const pictures: { dispose(): void }[] = [];
 afterEach(() => {
   for (const picture of pictures.splice(0)) picture.dispose();
+  treeListeners.length = 0;
 });
 
 /** The window as the extension makes it: one picture, built on the watcher and the folders, that the controller (the panel) and the menu both listen to. */
-function windowWithMenu() {
+function windowWithMenu(origin: InstanceType<typeof ProjectOrigin> = new ProjectOrigin(new GitDirectories())) {
   const picture = new WindowPicture(watcher());
   picture.register();
   pictures.push(picture);
   const controller = new Controller(extensionUri, undefined, picture);
-  const menu = new MenuView(extensionUri, controller, picture, soloMerge());
+  const menu = new MenuView(extensionUri, controller, picture, soloMerge(), origin, tramaFiles());
   menu.register();
   return { picture, controller, menu };
 }
@@ -442,6 +473,78 @@ test("a change of the panel's view and a new visibility send the last state with
   controller.dispose();
 });
 
+test("the menu tells Merge when it becomes visible or hidden, which is the only time the state of Merge is worked out", () => {
+  const { controller, menu } = windowWithMenu();
+  const view = fakeView();
+  providers["trama.home"]?.resolveWebviewView(view);
+  expect(mergeVisibility).toEqual([true]);
+  view.visible = false;
+  view.shown?.();
+  view.visible = true;
+  view.shown?.();
+  expect(mergeVisibility).toEqual([true, false, true]);
+  menu.dispose();
+  controller.dispose();
+});
+
+test("the Team entry follows origin and Manager mode without reloading the window", async () => {
+  let address: string | null = null;
+  let changeConfig: (() => void) | undefined;
+  const git = new GitDirectories({
+    projectRoot: () => project,
+    read: async () => ({ dir: project, common: project }),
+    watch: (_common, onChange) => ((changeConfig = onChange), { dispose() {} }),
+  });
+  const origin = new ProjectOrigin(git, async () => originOf(address));
+  const stop = origin.start();
+  const { controller, menu } = windowWithMenu(origin);
+  const view = fakeView();
+  providers["trama.home"]?.resolveWebviewView(view);
+  view.receive?.({ type: "ready" });
+  git.follow();
+  await git.get();
+  await origin.settled();
+  const mode = managerFile(projectAt(project));
+  const changeOrigin = async (next: string | null) => {
+    const sent = states(view).length;
+    address = next;
+    changeConfig?.();
+    while (states(view).length === sent) await new Promise((resolve) => setImmediate(resolve));
+  };
+  const changeMode = async (on: boolean) => {
+    const sent = states(view).length;
+    if (on) {
+      mkdirSync(dirname(mode), { recursive: true });
+      writeFileSync(mode, "{}\n");
+    } else rmSync(mode, { force: true });
+    for (const listener of treeListeners) listener({ fsPath: mode });
+    while (states(view).length === sent) await new Promise((resolve) => setImmediate(resolve));
+  };
+  try {
+    expect(states(view).at(-1)).not.toHaveProperty("manager");
+    // Origin on GitHub alone is not Team: Manager mode is not recorded.
+    await changeOrigin("https://github.com/acme/shop");
+    expect(states(view).at(-1)).not.toHaveProperty("manager");
+    expect(states(view).at(-1)).not.toHaveProperty("team");
+    // Manager mode recorded: the entry appears; turned off, it goes.
+    await changeMode(true);
+    expect(states(view).at(-1)).toMatchObject({ manager: true });
+    await changeMode(false);
+    expect(states(view).at(-1)).not.toHaveProperty("manager");
+    // Manager mode recorded and origin away from GitHub: no Team either.
+    await changeMode(true);
+    expect(states(view).at(-1)).toMatchObject({ manager: true });
+    await changeOrigin("https://gitlab.com/acme/shop");
+    expect(states(view).at(-1)).not.toHaveProperty("manager");
+  } finally {
+    rmSync(dirname(mode), { recursive: true, force: true });
+    stop.dispose();
+    git.dispose();
+    menu.dispose();
+    controller.dispose();
+  }
+});
+
 function countingSurface() {
   const calls = { facts: 0, mergeState: 0, manager: 0, situation: 0 };
   const posted: Record<string, unknown>[] = [];
@@ -457,7 +560,7 @@ function countingSurface() {
     scan: () => {},
     openFolder: () => {},
     mergeState: () => (calls.mergeState++, { available: true, trackedTrama: false }),
-    manager: () => (calls.manager++, { team: true, manager: true }),
+    manager: () => (calls.manager++, true),
     startMerge: () => {},
     openMergeEditor: () => {},
     reconcileMerge: () => {},
@@ -472,7 +575,7 @@ test("the model sends its last full state again with only the highlight changed,
   model.refresh();
   expect(calls).toMatchObject({ facts: 1, mergeState: 1, manager: 1 });
   const full = posted.at(-1);
-  expect(full).toMatchObject({ situation: "project", decisions: 3, tasksSinceScan: 2, handoffs: 1, team: true, manager: true, merge: { available: true, trackedTrama: false }, panelView: null });
+  expect(full).toMatchObject({ situation: "project", decisions: 3, tasksSinceScan: 2, handoffs: 1, manager: true, merge: { available: true, trackedTrama: false }, panelView: null });
 
   setView("board");
   model.highlight();
@@ -492,7 +595,9 @@ test("the model sends its last full state again with only the highlight changed,
 });
 
 test("Merge of Solo mode: the state carries merge only when the flow gives one, a change of it sends the state again, and the four messages reach the flow", async () => {
-  const { controller, menu } = windowWithMenu();
+  const { picture, controller, menu } = windowWithMenu();
+  // The window's opening check builds the first picture; the states below are counted after it.
+  await picture.opening;
   const view = fakeView();
   providers["trama.home"]?.resolveWebviewView(view);
   view.receive?.({ type: "ready" });
@@ -518,8 +623,8 @@ test("a change of the files of `.trama/` sends the state again, with the panel c
   view.receive?.({ type: "ready" });
   const before = states(view).length;
   mergeStateReads = 0;
-  for (const listener of watcherListeners) listener();
-  for (const listener of watcherListeners) listener();
+  heard(join(project, ".trama/model/system.md"));
+  heard(join(project, ".trama/model/system.md"));
   await new Promise((resolve) => setTimeout(resolve, 400));
   expect(states(view)).toHaveLength(before + 1);
   expect(mergeStateReads).toBe(1);
@@ -620,7 +725,7 @@ test("the title follows a change of the name of the System, without the spaces a
   view.receive?.({ type: "ready" });
   expect(view.title).toBe("Shop");
   writeFileSync(join(root, ".trama/model/system.md"), "#  New System  \n");
-  for (const listener of watcherListeners) listener();
+  heard(join(root, ".trama/model/system.md"));
   await new Promise((resolve) => setTimeout(resolve, 400));
   expect(view.title).toBe("New System");
   menu.dispose();
@@ -637,7 +742,7 @@ test("the title is the name of the project's folder when the Model cannot be rea
   view.receive?.({ type: "ready" });
   const retitle = async (system: string) => {
     writeFileSync(join(root, ".trama/model/system.md"), system);
-    for (const listener of watcherListeners) listener();
+    heard(join(root, ".trama/model/system.md"));
     await new Promise((resolve) => setTimeout(resolve, 400));
     return view.title;
   };
@@ -695,8 +800,8 @@ test("one change of the files gives one picture, and the panel and the side menu
   picture.onDidBuild((outcome, cause) => void built.push({ outcome, cause }));
   const [builds, shown, shownByMenu] = [built.length, snapshotsOf(panels[0]).length, states(view).length];
 
-  for (const listener of watcherListeners) listener();
-  for (const listener of watcherListeners) listener();
+  heard(join(project, ".trama/model/system.md"));
+  heard(join(project, ".trama/model/system.md"));
   await new Promise((resolve) => setTimeout(resolve, 400));
   expect(built).toHaveLength(builds + 1);
   expect(built.at(-1)?.cause).toBe("files");
@@ -728,6 +833,8 @@ test("a refresh the panel asks for builds a fresh picture at once, sees what was
 
   mkdirSync(join(root, ".trama/drifts"), { recursive: true });
   writeFileSync(join(root, ".trama/drifts/dddddddd-fresh.md"), "---\nstatus: open\nrefs:\n  - order\n---\n# Fresh\n\n## What happens\n\nA.\n\n## What should happen\n\nB.\n");
+  // What a core function of this process writes is told to the window's cache, so the picture the action asks for reads it at once.
+  noteWritten(join(root, ".trama/drifts/dddddddd-fresh.md"));
   panels[0]?.receive?.({ type: "ready" });
   expect(causes).toEqual(["requested"]);
   expect(snapshotsOf(panels[0])).toHaveLength(shown + 1);
@@ -740,15 +847,54 @@ test("a refresh the panel asks for builds a fresh picture at once, sees what was
   rmSync(root, { recursive: true, force: true });
 });
 
+test("the watcher events of what an action wrote ask for no second picture, and a change nobody reported shows when the window comes back", async () => {
+  const root = copyOfProject();
+  workspaceFolders = folder(root);
+  const { picture, controller, menu } = windowWithMenu();
+  await picture.opening;
+  await controller.open();
+  panels[0]?.receive?.({ type: "ready" });
+  const causes: string[] = [];
+  picture.onDidBuild((_outcome, cause) => void causes.push(cause));
+
+  // An action of this process writes a card and asks for its picture; the watcher reports the write afterwards, for a file the picture read as it is.
+  mkdirSync(join(root, ".trama/drifts"), { recursive: true });
+  const file = join(root, ".trama/drifts/dddddddd-action.md");
+  writeFileSync(file, "---\nstatus: open\nrefs:\n  - order\n---\n# Action\n\n## What happens\n\nA.\n\n## What should happen\n\nB.\n");
+  noteWritten(file);
+  panels[0]?.receive?.({ type: "ready" });
+  for (const listener of watcherListeners) listener({ fsPath: file });
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(causes).toEqual(["requested"]);
+
+  // A card changed with no event (an editor that was suspended): nothing shows until the window comes back to the foreground.
+  writeFileSync(file, readFileSync(file, "utf8").replace("# Action", "# Changed"));
+  const later = new Date(Date.now() + 60_000);
+  utimesSync(file, later, later);
+  windowStateListeners.forEach((listener) => listener({ focused: false }));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(causes).toEqual(["requested"]);
+  windowStateListeners.forEach((listener) => listener({ focused: true }));
+  for (let waited = 0; causes.length < 2 && waited < 2000; waited += 20) await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(causes).toEqual(["requested", "files"]);
+  expect(snapshotsOf(panels[0]).at(-1)?.snapshot.drifts.find((d) => d.id === "dddddddd")?.title).toBe("Changed");
+  // The opening started the check of the skills in the background: it ends before the next test counts reads.
+  await afterCheck();
+  menu.dispose();
+  controller.dispose();
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("changing the view of the panel builds no picture, reads no file of `.trama/` and starts no process", async () => {
   const { picture, controller, menu } = windowWithMenu();
+  await picture.opening;
   const view = fakeView();
   providers["trama.home"]?.resolveWebviewView(view);
   view.receive?.({ type: "ready" });
   await controller.open();
   panels[0]?.receive?.({ type: "ready" });
   // The opening above started the check of the skills in the background: it has to be over before the reads are counted.
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await afterCheck();
 
   let builds = 0;
   picture.onDidBuild(() => void builds++);

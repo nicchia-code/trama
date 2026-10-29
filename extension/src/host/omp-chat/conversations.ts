@@ -139,6 +139,8 @@ export class OmpConversations {
   private readonly conversations = new Map<string, Conversation>();
   private saved: SavedConversation[] = [];
   private readonly subscriptions: Disposable[];
+  /** The saved conversations waiting for their turn to resume, in the order they were saved; `windowClosed` and `stopResuming` empty it. */
+  private readonly resumeQueue: { conversation: Conversation; entry: SavedConversation }[] = [];
 
   constructor(
     private readonly client: OmpClientPort,
@@ -174,7 +176,11 @@ export class OmpConversations {
     return [...this.conversations.values()].some((conversation) => (conversation.hook || conversation.job !== undefined) && conversation.state === "running");
   }
 
-  /** Opens a conversation. On a failed start nothing stays open or saved, and the reason is returned: the caller sends the same instruction to a terminal. */
+  /**
+   * Opens a conversation: its tab shows at once, while omp starts, and the instruction (the first message) goes to omp once its session is open. On a failed start nothing
+   * stays open or saved, the tab goes, and the reason is returned: the caller sends the same instruction to a terminal. A tab the developer closes while omp starts ends the
+   * work as the closing of a terminal does and nothing is returned to send: the process that arrives is stopped.
+   */
   async open(spec: OpenConversation): Promise<OpenResult> {
     if (spec.instruction !== undefined) return this.openHeld(spec, spec.instruction);
     const conversation: Conversation = {
@@ -191,19 +197,36 @@ export class OmpConversations {
     };
     this.conversations.set(spec.id, conversation);
     this.hooks.notices.opened(conversation, spec.hook);
+    this.view.open({ id: conversation.id, name: conversation.name }, undefined, { focus: spec.focus });
     let session: OmpSessionPort;
     try {
       // The first message is the prompt of the job's work: the client marks it, and omp's answer to it ends the work.
       session = await this.client.start({ ...spec.launch, hook: spec.hook }, spec.first, (pid) => this.hooks.registerProcess(conversation, pid));
     } catch (err) {
+      this.hooks.unregisterProcess(conversation);
+      // The developer closed the tab while omp started: the work already ended with it, and the instruction is not sent anywhere.
+      if (this.conversations.get(spec.id) !== conversation) return { opened: true };
       this.conversations.delete(spec.id);
       this.hooks.notices.closed(conversation);
-      this.hooks.unregisterProcess(conversation);
+      this.view.close(spec.id);
       return notOpened(err);
+    }
+    // The developer may have closed the tab while omp started: nothing is open to take the process then, so it is stopped.
+    if (this.conversations.get(spec.id) !== conversation) {
+      await session.stop().catch(() => undefined);
+      this.hooks.unregisterProcess(conversation);
+      return { opened: true };
+    }
+    // The window closed while omp started: the conversation is kept to be resumed, and the process goes with the window.
+    if (conversation.state === "waiting") {
+      conversation.session = session;
+      this.persist(conversation);
+      await session.stop({ deactivating: true }).catch(() => undefined);
+      return { opened: true };
     }
     this.attach(conversation, session);
     this.persist(conversation);
-    this.view.open({ id: conversation.id, name: conversation.name }, session, { focus: spec.focus, ...(spec.first === undefined ? {} : { first: spec.first }) });
+    this.view.setSession(conversation.id, session, spec.first === undefined ? {} : { first: spec.first });
     this.view.setWorking(conversation.id, true);
     return { opened: true };
   }
@@ -303,6 +326,8 @@ export class OmpConversations {
    * resumed. A conversation with no hook (Ask more) saves whether its agent was in a turn as its state. Resolves when the processes are gone.
    */
   async windowClosed(): Promise<void> {
+    // What still waits for its turn to resume is not started: its entry stays saved for the next window.
+    this.resumeQueue.length = 0;
     const stopped: Promise<void>[] = [];
     for (const conversation of [...this.conversations.values()]) {
       // Ask more (no hook, no job) saves whether its agent was in a turn as its state, and reopens at rest either way; a job's conversation keeps its own state, with or without the hook.
@@ -314,10 +339,17 @@ export class OmpConversations {
     await Promise.all(stopped);
   }
 
+  /** `trama.ompChat` was turned off: the conversations still waiting for their turn to resume are not resumed, and their entries stay saved. */
+  stopResuming(): void {
+    for (const { conversation } of this.resumeQueue.splice(0)) this.conversations.delete(conversation.id);
+  }
+
   /**
    * Resumes the conversations saved by this window (activation). Each reopens its session in a new process with the same arguments and identity: back as it was
    * (working with the fixed prompt, or at rest with its history) or, when it cannot, lost with its job ended as for a vanished agent. An unreadable entry is
-   * deleted at once without a resume. A conversation's Tasks are not released before its outcome: it is followed while it waits.
+   * deleted at once without a resume. A conversation's Tasks are not released before its outcome: it is followed while it waits. The ones whose agent worked for Trama
+   * reopen first, all at once; then the others, in the order they were saved, one at a time, each after the previous one has reopened or failed, so the window never
+   * starts a process of omp for every saved conversation at once.
    */
   async resume(): Promise<void> {
     const { entries, unreadable } = readSavedConversations(this.store.get(CONVERSATIONS_KEY));
@@ -351,7 +383,11 @@ export class OmpConversations {
     for (const conversation of waiting) {
       if (root !== undefined && conversation.job !== undefined) this.hooks.restoreJob(conversation, conversation.job);
     }
-    await Promise.all(waiting.map((conversation, index) => this.resumeOne(conversation, entries[index] as SavedConversation, root)));
+    const resumes = waiting.map((conversation, index) => ({ conversation, entry: entries[index] as SavedConversation }));
+    const working = resumes.filter(({ entry }) => resumeDecision(entry).wasRunning);
+    this.resumeQueue.push(...resumes.filter(({ entry }) => !resumeDecision(entry).wasRunning));
+    await Promise.all(working.map(({ conversation, entry }) => this.resumeOne(conversation, entry, root)));
+    for (let next = this.resumeQueue.shift(); next !== undefined; next = this.resumeQueue.shift()) await this.resumeOne(next.conversation, next.entry, root);
   }
 
   private async resumeOne(conversation: Conversation, entry: SavedConversation, root: string | undefined): Promise<void> {

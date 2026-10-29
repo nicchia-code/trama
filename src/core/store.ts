@@ -8,6 +8,7 @@ import { asObject, compareByCreation, type Raw } from "./schema";
 import { buildModel } from "./model";
 import { SPECS_FILE } from "./specs";
 import type { FileMap, Model } from "./types";
+import { noteWritten } from "./written";
 
 export const TRAMA_DIR = ".trama";
 
@@ -21,13 +22,27 @@ export function projectAt(root: string): Project {
   return { root, dir: join(root, TRAMA_DIR) };
 }
 
+/** One name in a folder: what `readdirSync(dir, { withFileTypes: true })` says of it. */
+export interface DirEntry {
+  name: string;
+  directory: boolean;
+}
+
 /**
- * What one picture of the project reads through (`src/core/document-cache.ts`): each parsed document, each folder listing and each tracked tree is read once, and the
+ * What one picture of the project reads through (`src/core/document-cache.ts`): each parsed document, each text file, each folder listing and each tracked tree is read once, and the
  * values a picture works out once (the short numbers) are kept for its whole build. Active only while `withPictureReads` runs; every other read goes to the disk.
  */
 export interface PictureReads {
   /** The document at `path`, read and parsed at most once per picture; what it returns is never changed by its callers. */
   document(path: string): Document;
+  /** The text of the file at `path` with LF line endings (a Model, Requirement or Specs file), read at most once per picture; it throws as `readFileSync` does when the file cannot be read. */
+  text(path: string): string;
+  /** The names in the folder `dir` (none when it is not there), listed at most once per picture. */
+  entries(dir: string): readonly DirEntry[];
+  /** Whether `path` (a file or a folder under `.trama/`) is there, from the listing of its folder. */
+  exists(path: string): boolean;
+  /** The modification time of the file at `path` (an image of a Task), or undefined when it is not there; looked at once per picture. */
+  fileTime(path: string): number | undefined;
   /** What `compute` returns for `key`, computed at most once per picture. Callers must not change it. */
   once<T>(key: string, compute: () => T): T;
   /** Keeps `value` as what `once(key, …)` returns from now on. */
@@ -50,10 +65,38 @@ export function withPictureReads<T>(reads: PictureReads, fn: () => T): T {
 /** The picture being built, if any. */
 export const currentPictureReads = (): PictureReads | undefined => activeReads;
 
+/** The entries of the folder `dir` as the disk lists them (none when it is not there or cannot be listed). The window's cache and the command line's pictures list through it. */
+export function readDirEntries(dir: string): DirEntry[] {
+  try {
+    return readdirSync(dir, { withFileTypes: true }).map((entry) => ({ name: entry.name, directory: entry.isDirectory() }));
+  } catch {
+    return [];
+  }
+}
+
+/** The entries of `dir` (empty when it is not there); through the picture being built when there is one, so a folder is listed once per picture. */
+export function dirEntries(dir: string): readonly DirEntry[] {
+  return activeReads === undefined ? readDirEntries(dir) : activeReads.entries(dir);
+}
+
 /** The names in `dir` (empty when it is not there), as `readdirSync` lists them; listed once per picture. */
 export function listNames(dir: string): string[] {
-  const list = () => (existsSync(dir) ? readdirSync(dir) : []);
-  return activeReads === undefined ? list() : [...activeReads.once(`names:${dir}`, list)];
+  return dirEntries(dir).map((entry) => entry.name);
+}
+
+/** Whether `path` exists: from the picture's listing of its folder while a picture is built, else from the disk. Only for paths under `.trama/`. */
+export function pathExists(path: string): boolean {
+  return activeReads === undefined ? existsSync(path) : activeReads.exists(path);
+}
+
+/** The modification time of the file at `path`, or undefined when it is not there; looked at once per picture, and kept by the window until the file changes. */
+export function fileModified(path: string): number | undefined {
+  if (activeReads !== undefined) return activeReads.fileTime(path);
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Walks up from `start` to the first folder that contains `.trama/`. */
@@ -69,18 +112,21 @@ export const modelDir = (p: Project) => join(p.dir, "model");
 /** A file's text with LF line endings, read through `normalizeLf`. */
 export const readTextLf = (path: string): string => normalizeLf(readFileSync(path, "utf8"));
 
+/** The text of `path` with LF line endings: through the picture being built when there is one (read once, and from the window's cache when it has one), else from the disk. */
+export const readFileText = (path: string): string => (activeReads === undefined ? readTextLf(path) : activeReads.text(path));
+
 /** Every non-hidden file under `dir`, keyed by `/`-separated relative path, with LF line endings so a CRLF checkout hashes and compares like Linux. */
 export function readTree(dir: string): FileMap {
   const files: FileMap = new Map();
   const visit = (abs: string, rel: string) => {
-    for (const entry of readdirSync(abs, { withFileTypes: true })) {
+    for (const entry of dirEntries(abs)) {
       if (entry.name.startsWith(".")) continue;
       const childRel = rel ? `${rel}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) visit(join(abs, entry.name), childRel);
-      else files.set(childRel, readTextLf(join(abs, entry.name)));
+      if (entry.directory) visit(join(abs, entry.name), childRel);
+      else files.set(childRel, readFileText(join(abs, entry.name)));
     }
   };
-  if (existsSync(dir)) visit(dir, "");
+  visit(dir, "");
   return files;
 }
 
@@ -107,7 +153,7 @@ export function readTracked(root: string): FileMap {
     const files = readTree(join(root, "model"));
     for (const [path, content] of readTree(join(root, "requirements"))) files.set(`${REQUIREMENTS_PREFIX}${path}`, content);
     const specs = join(root, SPECS_FILE);
-    if (existsSync(specs)) files.set(SPECS_FILE, readTextLf(specs));
+    if (pathExists(specs)) files.set(SPECS_FILE, readFileText(specs));
     return files;
   };
   return activeReads === undefined ? read() : new Map(activeReads.once(`tracked:${root}`, read));
@@ -120,6 +166,7 @@ export const sha256 = (text: string): string => createHash("sha256").update(text
 export function writeFileEnsuringDir(path: string, content: string) {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, content);
+  noteWritten(path);
 }
 
 /** Joins `rel` under `base`, refusing anything that escapes it. */
@@ -135,10 +182,8 @@ export interface Document {
   body: string;
 }
 
-/** Reads and parses the document at `path` from the disk, whatever picture is being built. */
-export function readDocumentFile(path: string): Document {
-  if (!existsSync(path)) throw new TramaError(`${path}: file not found`);
-  const text = readTextLf(path);
+/** Parses the text of the document at `path` (LF line endings): its front matter and its body. */
+export function parseDocument(path: string, text: string): Document {
   const m = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(text);
   if (!m) throw new TramaError(`${path}: missing YAML front matter`);
   let data: unknown;
@@ -148,6 +193,12 @@ export function readDocumentFile(path: string): Document {
     throw new TramaError(`${path}: invalid YAML front matter: ${(err as Error).message.split("\n")[0]}`);
   }
   return { data: asObject(data, path), body: m[2] as string };
+}
+
+/** Reads and parses the document at `path` from the disk, whatever picture is being built. */
+export function readDocumentFile(path: string): Document {
+  if (!existsSync(path)) throw new TramaError(`${path}: file not found`);
+  return parseDocument(path, readTextLf(path));
 }
 
 /** The document at `path`: through the picture being built when there is one (read once, and from the cache of the window when it has one), else from the disk. */
@@ -200,7 +251,7 @@ function cardFile(dir: string, name: string, layout: CardLayout): string {
 
 /** True when the card's front matter remembers when it was created. Numbered cards written before that field have none. */
 function remembersCreated(path: string): boolean {
-  if (!existsSync(path)) return false;
+  if (!pathExists(path)) return false;
   try {
     const created = readDocument(path).data["created"];
     return created !== undefined && created !== null;

@@ -21,7 +21,7 @@ const ICONS: Record<MenuViewName, LucideIcon> = {
 function Entry({ view, state, post }: { view: MenuViewName; state: MenuState; post: (message: ToMenuHost) => void }) {
   const Icon = ICONS[view];
   const shown = state.panelView === view;
-  // The number of handoffs is the Manager's: with Manager mode off the entry has none, whatever the state carries.
+  // The number of handoffs belongs to Team: the entry exists only with Team available.
   const handoffs = state.manager === true ? (state.handoffs ?? 0) : 0;
   const awaiting = view === "board" ? state.decisions : view === "team" ? handoffs : 0;
   return (

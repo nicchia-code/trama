@@ -52,7 +52,7 @@ This is the index of the Area's Requirements. The General Requirements are below
 - **Solo mode** (`solo-mode.md`): Use when building the Solo Mode row of the Settings tab and of the setup wizard's Project step. Sections: `solo-switch`.
 - **Scheda Specs** (`specs.md`): Usa quando costruisci o cambi la scheda Specs del pannello. Sections: `panel/Specs`.
 - **System certificates** (`system-certificates.md`): Use when building the System Certificates setting, its state and Refresh, its command and warnings, or the text that tells a certificate error. Sections: `developer.REFRESH_SYSTEM_CERTIFICATES`.
-- **Task progress interface** (`task-progress.md`): Use when showing the percentage the agent declared on a Task, on the Board or in the command line. Sections: `task/Taken by the agent`.
+- **Task progress interface** (`task-progress.md`): Use when showing the percentage the agent declared on a Task in the command line, or touching the Board card of a taken Task. Sections: `task/Taken by the agent`.
 - **Interfaccia di Proposal e Task** (`tasks.md`): Usa quando mostri Task, le loro immagini, e Proposal di risoluzione o allegate a un Drift. Sections: `proposal`, `task`.
 - **Team view** (`team.md`): Use when building or changing the Team view of the panel, its tabs, the People tab, the person dialog and the Manager Mode rows of Settings and the wizard. Sections: `panel/Team`, `person`, `manager-mode`.
 - **Timeline and signals** (`timeline.md`): Use when building or changing the Timeline tab of the Team view, the states and signals of published issues in the Issues tab, and their Scan and Comment update actions. Sections: `issue/Published`, `github-project/Linked`.

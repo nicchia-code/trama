@@ -1,6 +1,6 @@
 # Pull request check
 
-The PR Check of one pull request, as one window of the editor runs it: at most one at a time per window. Trama prepares a git worktree on the head of the pull request, in the editor's private folder for the workspace, has the agent scan the whole System there and, when the agent has finished, writes the report and removes the worktree (see the PR Check feature).
+The PR Check of one pull request, as one window of the editor runs it: at most one at a time per window. Trama prepares a git worktree on the head of the pull request, in the editor's private folder for the workspace, has the agent scan the whole System there and, when the agent has finished, writes the report and removes the worktree (see the PR Check feature). While the PR Check is hidden it stays Idle: nothing offers Check.
 
 The agent works in the worktree like any other job, in a terminal or in omp Chat (see the Agent terminal), with the role of the scan; Trama announces it as a work titled after the pull request, whose ghost stays in the editor's status bar. The cards the scan files stay in the worktree and never reach the Board of the open folder; the scan never counts as the last scan of the System of the open folder.
 

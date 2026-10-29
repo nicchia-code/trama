@@ -62,6 +62,8 @@ const listeners: { start: Listener<ShellEvent>[]; end: Listener<ShellEvent>[]; c
 class TabInputTerminal {}
 /** What the editor reports about a command in `terminal`: by default the line Trama typed into it. */
 const shell = (terminal: FakeTerminal, commandLine = terminal.line, exitCode?: number): ShellEvent => ({ terminal, execution: { commandLine: { value: commandLine } }, exitCode });
+/** The work the host started in the background (a withdrawal of ghosts waiting for its lock) is done: every turn of the event loop that was waiting has run. */
+const settled = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 const subscribe = <T>(list: Listener<T>[]) => (fn: Listener<T>) => {
   list.push(fn);
   return { dispose() {} };
@@ -1701,10 +1703,12 @@ describe("withdrawing the ghosts", () => {
     announce(p, { kind: "task", title: "A Task", terminal: id });
     listeners.end.forEach((fn) => fn(shell(terminal)));
     expect(listAnnouncements(p)).toEqual([]);
+    await settled();
     expect(told).toEqual([["proposal:Cancel orders", "task:A Task"]]);
 
     // Nothing waiting: nobody is told.
     listeners.end.forEach((fn) => fn(shell(terminal)));
+    await settled();
     expect(told).toHaveLength(1);
 
     await launchAgent(dir, "Use the trama-design skill. Close", "Design", "Close");
@@ -1713,6 +1717,7 @@ describe("withdrawing the ghosts", () => {
     announce(p, { kind: "drift", title: "A Drift", terminal: closeId });
     listeners.close.forEach((fn) => fn(closeTerminal));
     expect(listAnnouncements(p)).toEqual([]);
+    await settled();
     expect(told[1]).toEqual(["proposal:Close", "drift:A Drift"]);
 
     // A terminal Trama did not start ends nothing.
@@ -1740,6 +1745,7 @@ describe("withdrawing the ghosts", () => {
     announce(p, { kind: "task", title: "Left behind", terminal: id });
     listeners.end.forEach((fn) => fn(shell(terminal)));
     expect(listAnnouncements(p)).toEqual([]);
+    await settled();
     expect(told).toEqual([["proposal:Import", "task:Left behind"]]);
     subscription.dispose();
     withdrawAll(p);
@@ -1861,6 +1867,7 @@ describe("withdrawing the ghosts", () => {
     listeners.end.forEach((fn) => fn(shell(terminal, "")));
     listeners.end.forEach((fn) => fn(shell(terminal, ` ${terminal.line}x`)));
     expect(listAnnouncements(p).map((a) => a.title)).toEqual(["Alone"]);
+    await settled();
     expect(told).toEqual([]);
 
     // Still busy: the next launch opens another terminal instead of typing into this one.
@@ -1871,6 +1878,7 @@ describe("withdrawing the ghosts", () => {
     // The line, trimmed, is the typed command: its end withdraws.
     listeners.end.forEach((fn) => fn(shell(terminal, `  ${terminal.line}\n`)));
     expect(listAnnouncements(p)).toEqual([]);
+    await settled();
     expect(told).toEqual([["Alone"]]);
     subscription.dispose();
   });
@@ -1882,7 +1890,7 @@ describe("withdrawing the ghosts", () => {
     const subscription = onAnnouncementsWithdrawn((views) => told.push(...views.map((v) => `${v.phase}:${v.title}`)));
     withdrawAll(p);
     newProposal(p, "Real title", "", { origin: { terminal: "aaa111" } });
-    withdrawWaiting(dir);
+    await withdrawWaiting(dir);
     subscription.dispose();
     expect(told).toEqual(["writing:Real title"]);
   });
@@ -1995,6 +2003,14 @@ describe("Requirement skills in a multi-root workspace", () => {
     const fragment = (root: string) => join(root, ".trama/requirements/ui/main.md");
     const skill = (root: string) => join(root, ".agents/skills/trama-req-ui-main/SKILL.md");
     const emit = (kind: keyof typeof requirementEvents, path: string) => requirementEvents[kind].forEach((fn) => fn({ scheme: "file", fsPath: path }));
+    // The pause passes, and the regeneration, which gives the thread back between the files, is let to finish: the immediates it waits for are driven by the fake clock too.
+    const regenerate = async (ms: number) => {
+      vi.advanceTimersByTime(ms);
+      for (let turn = 0; turn < 100; turn++) {
+        vi.advanceTimersByTime(0);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+    };
     vi.useFakeTimers();
     let watching: { dispose(): void } | undefined;
     const panelsBefore = panelsCreated;
@@ -2012,19 +2028,19 @@ describe("Requirement skills in a multi-root workspace", () => {
       const originalFirst = readFileSync(skill(first), "utf8");
       writeFileSync(fragment(second), `${readFileSync(fragment(second), "utf8")}\nSecond-project change.\n`);
       emit("change", fragment(second));
-      vi.advanceTimersByTime(300);
+      await regenerate(300);
       expect(readFileSync(skill(second), "utf8")).toContain("Second-project change.");
       expect(readFileSync(skill(first), "utf8")).toBe(originalFirst);
 
       writeFileSync(fragment(first), `${readFileSync(fragment(first), "utf8")}\nFirst-project change.\n`);
       emit("change", fragment(first));
-      vi.advanceTimersByTime(150);
+      await regenerate(150);
       writeFileSync(fragment(second), `${readFileSync(fragment(second), "utf8")}\nSecond-project latest.\n`);
       emit("change", fragment(second));
-      vi.advanceTimersByTime(150);
+      await regenerate(150);
       expect(readFileSync(skill(first), "utf8")).toContain("First-project change.");
       expect(readFileSync(skill(second), "utf8")).not.toContain("Second-project latest.");
-      vi.advanceTimersByTime(150);
+      await regenerate(150);
       expect(readFileSync(skill(first), "utf8")).toContain("First-project change.");
       expect(readFileSync(skill(second), "utf8")).toContain("Second-project latest.");
 
@@ -2032,11 +2048,11 @@ describe("Requirement skills in a multi-root workspace", () => {
       const extraSkill = join(second, ".agents/skills/trama-req-ui-extra/SKILL.md");
       writeFileSync(extra, "---\ndescription: Extra requirements\n---\n# Extra\n\n## General\n\nCreated requirement.\n");
       emit("create", extra);
-      vi.advanceTimersByTime(300);
+      await regenerate(300);
       expect(readFileSync(extraSkill, "utf8")).toContain("Created requirement.");
       rmSync(extra);
       emit("delete", extra);
-      vi.advanceTimersByTime(300);
+      await regenerate(300);
       expect(existsSync(extraSkill)).toBe(false);
       expect(readFileSync(skill(first), "utf8")).not.toContain("Second-project");
       expect(panelsCreated).toBe(panelsBefore);
@@ -2047,7 +2063,7 @@ describe("Requirement skills in a multi-root workspace", () => {
       renameSync(skillFolder, savedSkill);
       writeFileSync(skillFolder, "A file prevents writing the skill directory.");
       emit("change", fragment(second));
-      vi.advanceTimersByTime(300);
+      await regenerate(300);
       rmSync(skillFolder);
       renameSync(savedSkill, skillFolder);
       expect(errorMessages.slice(errorsBefore).join("\n")).toContain("could not regenerate the Requirement skills");
@@ -2056,7 +2072,7 @@ describe("Requirement skills in a multi-root workspace", () => {
       writeFileSync(fragment(second), `${readFileSync(fragment(second), "utf8")}\nCancelled on disposal.\n`);
       emit("change", fragment(second));
       watching.dispose();
-      vi.advanceTimersByTime(300);
+      await regenerate(300);
       expect(readFileSync(skill(second), "utf8")).not.toContain("Cancelled on disposal.");
     } finally {
       watching?.dispose();
@@ -2349,16 +2365,28 @@ describe("the agent command waits for the shell", () => {
   });
 });
 
-/** The tests that register an agent's process wait for the system to tell its start: PowerShell on Windows may take seconds. */
+/** The tests that register an agent's process may wait for the start of the process too: PowerShell on Windows may take seconds. */
 const PROCESS_START_TEST_MS = 30_000;
 
-/** The registry entry of `id`, waited for: the registration reads the start of the process first, which may take a program on macOS and Windows. */
+/** The registry entry of `id`, waited for: the registration writes the pid at once, from the hook's message or a conversation's process. */
 const registered = async (p: Project, id: string) => {
   const { readAgentProcess } = await import("../src/core/agent-processes");
   const { questionProjectId } = await import("../src/core/question-channel");
   for (let attempt = 0; attempt < 150; attempt++) {
     const entry = readAgentProcess(questionProjectId(p), id);
     if (entry !== undefined) return entry;
+    await new Promise((done) => setTimeout(done, 20));
+  }
+  return undefined;
+};
+
+/** The registry entry of `id` once its start has been added: the system tells it after the entry is written, which may take a program on macOS and Windows. */
+const registeredWithStart = async (p: Project, id: string) => {
+  const { readAgentProcess } = await import("../src/core/agent-processes");
+  const { questionProjectId } = await import("../src/core/question-channel");
+  for (let attempt = 0; attempt < 1500; attempt++) {
+    const entry = readAgentProcess(questionProjectId(p), id);
+    if (entry?.processStart !== undefined) return entry;
     await new Promise((done) => setTimeout(done, 20));
   }
   return undefined;
@@ -2412,8 +2440,8 @@ describe("the execution check of agent terminals (time.CHECK_DUE)", () => {
     const watching = watchAgentTerminal();
     try {
       const { terminal, id, task, p } = await start(process.pid);
-      // The registration carries the start of the process, as the system tells it, so the process can be recognised later.
-      expect((await registered(p, id))?.processStart).toBeDefined();
+      // The registration is there at once; the start of the process, as the system tells it, is added when its reading ends, so the process can be recognised later.
+      expect((await registeredWithStart(p, id))?.processStart).toBeDefined();
       await checkAgentTerminals();
       await checkAgentTerminals();
       expect(driftWork().running).toBe(true);
@@ -2480,6 +2508,7 @@ describe("the execution check of agent terminals (time.CHECK_DUE)", () => {
       announce(p, { kind: "task", title: "Elsewhere", terminal: "other1" });
       await checkAgentTerminals();
       expect(listAnnouncements(p).map((a) => a.title)).toEqual(["Elsewhere"]);
+      await settled();
       expect(told).toEqual([["drift:Ghost", "check:Final check"]]);
       expect(terminal.disposals).toBe(1);
     } finally {
@@ -2490,13 +2519,13 @@ describe("the execution check of agent terminals (time.CHECK_DUE)", () => {
   }, PROCESS_START_TEST_MS);
 });
 
-/** A fake `.trama` watcher whose events the test fires. */
-const fakeFiles = () => {
-  const created: Listener<FileUri>[] = [];
-  return {
-    watcher: { onDidCreate: subscribe(created), onDidChange: () => ({ dispose() {} }) } as never,
-    fire: (fsPath: string) => created.forEach((listener) => listener({ scheme: "file", fsPath })),
-  };
+/** The workspace folder the scheduler's picture looks for the project in, and the scheduler's own picture: the window's `WindowPicture`, with no watcher (the test builds it). */
+const startPicture = async () => {
+  const { WindowPicture } = await import("../extension/src/host/picture");
+  const previousRoot = workspaceRoot;
+  workspaceRoot = dir;
+  const picture = new WindowPicture();
+  return { picture, restore: () => void (workspaceRoot = previousRoot) };
 };
 const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
 
@@ -2504,10 +2533,10 @@ describe("the minute timer of the execution check", () => {
   /** Starts the window's scheduler, with the fake timers already installed, and lets its startup check settle. */
   const startScheduler = async () => {
     const { startExecutionCheck } = await import("../extension/src/host/execution-check");
-    const files = fakeFiles();
-    const scheduler = startExecutionCheck(() => dir, files.watcher);
+    const { picture, restore } = await startPicture();
+    const started = startExecutionCheck(() => dir, picture);
     await flush();
-    return { scheduler, files };
+    return { scheduler: { dispose: () => (started.dispose(), picture.dispose(), restore()) }, picture };
   };
 
   test("a minute after a launch the check finds the vanished agent without any other signal", async () => {
@@ -2522,10 +2551,10 @@ describe("the minute timer of the execution check", () => {
     try {
       await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, () => true, "run");
       receiveAgentStarted(environments.at(-1)?.["TRAMA_TERMINAL"] as string, 2_000_000_000, dir);
-      // The hook's registration reads the start of the process first and finishes on its own time, which fake timers cannot wait for: the entry is written here, awaited.
-      const { writeAgentProcess } = await import("../src/core/agent-processes");
+      // The hook's registration writes the pid at once; only its start time arrives later.
+      const { readAgentProcess } = await import("../src/core/agent-processes");
       const { questionProjectId } = await import("../src/core/question-channel");
-      await writeAgentProcess(questionProjectId(projectAt(dir)), environments.at(-1)?.["TRAMA_TERMINAL"] as string, 2_000_000_000);
+      expect(readAgentProcess(questionProjectId(projectAt(dir)), environments.at(-1)?.["TRAMA_TERMINAL"] as string)?.pid).toBe(2_000_000_000);
       expect(driftWork().running).toBe(true);
       vi.advanceTimersByTime(59_000);
       await flush();
@@ -2551,18 +2580,21 @@ describe("the minute timer of the execution check", () => {
     const notices: string[] = [];
     const noticing = onStoppedFollowing((subject, reason) => notices.push(`${subject}: ${reason}`));
     vi.useFakeTimers();
-    const { scheduler, files } = await startScheduler();
+    const { scheduler, picture } = await startScheduler();
     try {
       expect(vi.getTimerCount()).toBe(0);
       const task = moveTask(p, newTask(p, { title: "Orphan", refs: ["order/Paid"], technical: false }).id, "doing", "agent", { terminal: "gone-terminal" }).id;
-      files.fire(join(dir, ".trama", "tasks", "orphan.md"));
+      // Nothing reads the Task before a picture shows it.
+      expect(vi.getTimerCount()).toBe(0);
+      picture.build("files");
       expect(vi.getTimerCount()).toBe(1);
       vi.advanceTimersByTime(61_000);
       await flush();
       expect(getTask(p, task).data.column).toBe("todo");
       expect(notices).toHaveLength(1);
       expect(notices[0]).toContain("no window follows its agent");
-      // Nothing left to follow: the timer is not re-armed.
+      // The picture that shows the release arrives with the watcher's events: nothing is left to follow, so the timer is not kept.
+      picture.build("files");
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       scheduler.dispose();
@@ -2582,17 +2614,21 @@ describe("the minute timer of the execution check", () => {
     const { addHolderFollower } = await import("../extension/src/host/followed-holders");
     const following = addHolderFollower((holder) => holder === "mine01");
     vi.useFakeTimers();
-    const { scheduler, files } = await startScheduler();
+    const { scheduler, picture } = await startScheduler();
     try {
       announce(p, { kind: "task", title: "Mine", terminal: "mine01" });
-      files.fire(join(dir, ".trama", "announcements", "mine.json"));
+      picture.build("files");
       expect(vi.getTimerCount()).toBe(0);
       announce(p, { kind: "task", title: "Nobody's" });
-      files.fire(join(dir, ".trama", "announcements", "nobody.json"));
+      // A raw event of the watcher reads no announcement: the new ghost arms the check only when the picture that shows it arrives.
+      expect(vi.getTimerCount()).toBe(0);
+      picture.build("files");
       expect(vi.getTimerCount()).toBe(1);
       vi.advanceTimersByTime(61_000);
       await flush();
       expect(listAnnouncements(p).map((a) => a.title)).toEqual(["Mine"]);
+      // The picture that shows the withdrawal arrives with the watcher's events: nothing is left to follow, so the timer goes.
+      picture.build("files");
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       scheduler.dispose();
@@ -2613,10 +2649,10 @@ describe("the minute timer of the execution check", () => {
     try {
       await launchAgent(dir, "Use the trama-implement skill on Task abcd1234.", "T3", undefined, () => true, "run");
       receiveAgentStarted(environments.at(-1)?.["TRAMA_TERMINAL"] as string, 2_000_000_000, dir);
-      // The hook's registration reads the start of the process first and finishes on its own time, which fake timers cannot wait for: the entry is written here, awaited.
-      const { writeAgentProcess } = await import("../src/core/agent-processes");
+      // The hook's registration writes the pid at once; only its start time arrives later.
+      const { readAgentProcess } = await import("../src/core/agent-processes");
       const { questionProjectId } = await import("../src/core/question-channel");
-      await writeAgentProcess(questionProjectId(projectAt(dir)), environments.at(-1)?.["TRAMA_TERMINAL"] as string, 2_000_000_000);
+      expect(readAgentProcess(questionProjectId(projectAt(dir)), environments.at(-1)?.["TRAMA_TERMINAL"] as string)?.pid).toBe(2_000_000_000);
       scheduler.dispose();
       vi.advanceTimersByTime(120_000);
       await flush();
@@ -2816,19 +2852,19 @@ describe("Ask more", () => {
     writeFileSync(join(extensionPath, "media", "general.md"), general);
     const storage = { fsPath: join(root, "storage") } as Parameters<typeof generalInstructions>[0];
     try {
-      expect(generalInstructions(storage)).toBe(join(extensionPath, "media", "general.md"));
+      expect(await generalInstructions(storage)).toBe(join(extensionPath, "media", "general.md"));
       settingValues["language"] = "   ";
-      expect(generalInstructions(storage)).toBe(join(extensionPath, "media", "general.md"));
+      expect(await generalInstructions(storage)).toBe(join(extensionPath, "media", "general.md"));
       settingValues["language"] = " Italian ";
-      const italian = generalInstructions(storage) as string;
+      const italian = (await generalInstructions(storage)) as string;
       expect(italian.startsWith(join(root, "storage"))).toBe(true);
       expect(readFileSync(italian, "utf8")).toBe(`${general}\n${languageSentence("Italian")}\n`);
       settingValues["language"] = "Deutsch";
-      const german = generalInstructions(storage) as string;
+      const german = (await generalInstructions(storage)) as string;
       expect(german).not.toBe(italian);
       expect(readFileSync(german, "utf8")).toBe(`${general}\n${languageSentence("Deutsch")}\n`);
       expect(readFileSync(join(extensionPath, "media", "general.md"), "utf8")).toBe(general);
-      expect(() => generalInstructions(undefined)).toThrow();
+      await expect(generalInstructions(undefined)).rejects.toThrow();
     } finally {
       tearDown(root);
     }
@@ -2920,6 +2956,8 @@ describe("omp Chat conversations in place of terminals", () => {
         return { dispose() {} };
       },
       onUpdate: none,
+      history: () => [],
+      onLiveUpdate: none,
       onTurn: none,
       onFormRequest: none,
       answerForm() {},
@@ -3196,10 +3234,12 @@ describe("omp Chat conversations in place of terminals", () => {
       let sentAt: number | undefined;
       expect(await launchAgent(dir, "Scan it.", "Scan", { kind: "check", title: "Scan" }, undefined, "scan", (at) => (sentAt = at))).toBe("terminal");
       expect(warningMessages).toEqual(["Trama: omp Chat could not start omp (omp not found at omp); the job runs in a terminal."]);
-      expect(tabs).toEqual([]);
+      // The tab appeared when the launch had omp, before the process; it went in the step the instruction went to the terminal.
       expect(terminals).toHaveLength(terminalCount + 1);
       const terminal = terminals.at(-1) as FakeTerminal;
       const id = environments.at(-1)?.["TRAMA_TERMINAL"] as string;
+      expect(tabs).toEqual([{ id, name: "Scan", focus: false }]);
+      expect(closedTabs).toEqual([id]);
       expect(terminal.line).toContain("Scan it.");
       expect(listAnnouncements(p).map((a) => [a.kind, a.title, a.terminal])).toEqual([["check", "Scan", id]]);
       expect(localProjectJobs(dir)).toHaveLength(jobsBefore + 1);

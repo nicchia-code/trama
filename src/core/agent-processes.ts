@@ -1,15 +1,16 @@
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomic } from "./atomic-write";
-import { withFileLock } from "./file-lock";
+import { withFileLock, withFileLockAsync } from "./file-lock";
 import { processStartTime, START_TOLERANCE_MS } from "./process-start";
 import { runtimeDirectory, runtimeDirectoryReady } from "./question-channel";
 
 /**
  * The agent process of an omp terminal or conversation of Trama: `pid` is the process, `started` when it was registered
  * (UTC, ISO 8601), `processStart` the instant the system says the process started (UTC, ISO 8601) and `window` the
- * window that follows it. An entry without `processStart`, written by an earlier version or when the system did not tell
- * it, is a process that cannot be recognised: it counts as gone.
+ * window that follows it. The entry is written at once with the pid alone and `processStart` is added when the system has
+ * told it (`writeAgentProcess`): an entry without it, because the reading is not over or the system did not tell, counts as
+ * alive while `process.kill(pid, 0)` does not say `ESRCH`.
  */
 export interface AgentProcess {
   pid: number;
@@ -51,10 +52,28 @@ export function readAgentProcesses(projectId: string, runtimeDir?: string): Agen
 export const readAgentProcess = (projectId: string, terminal: string, runtimeDir?: string): AgentProcess | undefined =>
   readAgentProcesses(projectId, runtimeDir)?.[terminal];
 
+/** Turns the registry into `processes`, or removes its file when none is left. */
 function save(projectId: string, processes: AgentProcesses, runtimeDir?: string): void {
   const file = fileOf(projectId, runtimeDir);
   if (Object.keys(processes).length === 0) rmSync(file, { force: true });
   else writeFileAtomic(file, JSON.stringify(processes), { mode: 0o600 });
+}
+
+/** The folder of the registry's locks, private like the runtime folder so they are never mixed with the records of the editors; undefined without the private folder. */
+function locksOf(runtimeDir?: string): string | undefined {
+  const directory = runtimeDirectory(runtimeDir);
+  if (!runtimeDirectoryReady(directory, true)) return undefined;
+  const locks = join(directory, ".locks");
+  mkdirSync(locks, { recursive: true, mode: 0o700 });
+  return locks;
+}
+
+/** The change of the registry, read and written while the lock is held: in one go, so no other call of this process ever finds the lock held by it. */
+function apply(projectId: string, change: (processes: AgentProcesses) => AgentProcesses | undefined, runtimeDir?: string): void {
+  const processes = readAgentProcesses(projectId, runtimeDir);
+  if (processes === undefined) return;
+  const next = change(processes);
+  if (next !== undefined) save(projectId, next, runtimeDir);
 }
 
 /**
@@ -63,47 +82,63 @@ function save(projectId: string, processes: AgentProcesses, runtimeDir?: string)
  * alone, and nothing is written without the private folder.
  */
 function update(projectId: string, change: (processes: AgentProcesses) => AgentProcesses | undefined, runtimeDir?: string): void {
-  const directory = runtimeDirectory(runtimeDir);
-  if (!runtimeDirectoryReady(directory, true)) return;
-  // The lock lives in a folder of its own, private like the runtime folder, so it is never mixed with the records of the editors.
-  const locks = join(directory, ".locks");
-  mkdirSync(locks, { recursive: true, mode: 0o700 });
-  withFileLock(locks, `agents-${projectId}`, () => {
-    const processes = readAgentProcesses(projectId, runtimeDir);
-    if (processes === undefined) return;
-    const next = change(processes);
-    if (next !== undefined) save(projectId, next, runtimeDir);
-  });
+  const locks = locksOf(runtimeDir);
+  if (locks !== undefined) withFileLock(locks, `agents-${projectId}`, () => apply(projectId, change, runtimeDir));
+}
+
+/** `update` for the editor's host: the wait for the lock gives the thread back. */
+async function updateAsync(projectId: string, change: (processes: AgentProcesses) => AgentProcesses | undefined, runtimeDir?: string): Promise<void> {
+  const locks = locksOf(runtimeDir);
+  if (locks !== undefined) await withFileLockAsync(locks, `agents-${projectId}`, () => apply(projectId, change, runtimeDir));
 }
 
 /**
- * Registers `pid` as the agent of `terminal`, followed by `window`, replacing an earlier one. The start of the process is
- * read from the system first, outside the lock; when it cannot be read the entry has none and counts as gone. An unreadable
- * file is left alone.
+ * Registers `pid` as the agent of `terminal`, followed by `window`, replacing an earlier one. The entry is written at once,
+ * before the system is asked anything; the promise settles when the start of the process has been read from the system and
+ * added to the entry, so a caller that must not wait (a launch, the opening of a conversation, the hook's message) does not
+ * await it. The start is added only to the entry this call wrote: another registration for the terminal in the meantime keeps its own.
+ * A start the system does not tell leaves the entry without one. An unreadable file is left alone.
  */
 export async function writeAgentProcess(projectId: string, terminal: string, pid: number, window?: string, runtimeDir?: string): Promise<void> {
-  const start = await processStartTime(pid);
-  const entry: AgentProcess = { pid, started: new Date().toISOString(), ...(start === undefined ? {} : { processStart: new Date(start).toISOString() }), ...(window === undefined ? {} : { window }) };
+  const started = new Date().toISOString();
+  const entry: AgentProcess = { pid, started, ...(window === undefined ? {} : { window }) };
   update(projectId, (processes) => ({ ...processes, [terminal]: entry }), runtimeDir);
-}
-
-/** Drops the registration of `terminal`; nothing is written when it has none. */
-export function removeAgentProcess(projectId: string, terminal: string, runtimeDir?: string): void {
-  update(projectId, (processes) => {
-    if (processes[terminal] === undefined) return undefined;
-    const { [terminal]: _gone, ...rest } = processes;
-    return rest;
+  const start = await processStartTime(pid);
+  if (start === undefined) return;
+  const processStart = new Date(start).toISOString();
+  await updateAsync(projectId, (processes) => {
+    const current = processes[terminal];
+    if (current === undefined || current.pid !== pid || current.started !== started) return undefined;
+    return { ...processes, [terminal]: { ...current, processStart } };
   }, runtimeDir);
 }
 
+const without = (terminal: string) => (processes: AgentProcesses): AgentProcesses | undefined => {
+  if (processes[terminal] === undefined) return undefined;
+  const { [terminal]: _gone, ...rest } = processes;
+  return rest;
+};
+
+/** Drops the registration of `terminal`; nothing is written when it has none. */
+export function removeAgentProcess(projectId: string, terminal: string, runtimeDir?: string): void {
+  update(projectId, without(terminal), runtimeDir);
+}
+
+/** `removeAgentProcess` for the editor's host: the wait for the lock gives the thread back. */
+export function removeAgentProcessAsync(projectId: string, terminal: string, runtimeDir?: string): Promise<void> {
+  return updateAsync(projectId, without(terminal), runtimeDir);
+}
+
 /**
- * Whether the registered process is still the one registered: `process.kill(pid, 0)` does not say `ESRCH` and its start,
- * read from the system again, is the registered one within two seconds. No entry, an entry without a start, a start that
- * cannot be read and a different start all say no: a number reused by another program holds nothing. Starts a program to
- * read the start on macOS and Windows, so the execution check asks it only for a holder no window follows.
+ * Whether the registered process is still the one registered: `process.kill(pid, 0)` does not say `ESRCH` and, when the
+ * entry has a start, the start read from the system again is the registered one within two seconds. An entry whose start
+ * has not arrived yet counts as alive on `process.kill` alone. No entry, a start that cannot be read now and a different
+ * start all say no: a number reused by another program holds nothing. Starts a program to read the start on macOS and
+ * Windows, so the execution check asks it only for a holder no window follows.
  */
 export async function sameProcess(entry: AgentProcess | undefined, platform?: NodeJS.Platform): Promise<boolean> {
-  if (entry?.processStart === undefined || !processAlive(entry.pid)) return false;
+  if (entry === undefined || !processAlive(entry.pid)) return false;
+  if (entry.processStart === undefined) return true;
   const registered = Date.parse(entry.processStart);
   if (Number.isNaN(registered)) return false;
   const now = await processStartTime(entry.pid, platform);

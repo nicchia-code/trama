@@ -34,8 +34,8 @@ test("with a project every view but Get Started is mounted; without one only Get
   expect(mountedViews()).toEqual(["getstarted", "settings"]);
 });
 
-test("Team is mounted, after History and before Settings, whenever origin is on GitHub, with Manager mode on or off", () => {
-  // The shell store knows only whether origin is on GitHub: Manager mode changes the tabs of the view, not its presence.
+test("Team is mounted, after History and before Settings, only while Team is available", () => {
+  // The shell store knows only whether Team is available (Manager mode on and origin on GitHub).
   const { unmount } = setup({ team: true });
   expect(mountedViews()).toEqual(["board", "diagram", "requirements", "specs", "history", "team", "settings"]);
   unmount();
@@ -46,7 +46,7 @@ test("Team is mounted, after History and before Settings, whenever origin is on 
   expect(mountedViews()).toEqual(["getstarted", "settings"]);
 });
 
-test("when origin stops being on GitHub Team goes away and the view shown is the one the host navigates to", () => {
+test("when Team stops being available Team goes away and the view shown is the one the host navigates to", () => {
   const { store } = setup({ team: true, view: "team" });
   expect(shown()).toEqual(["team"]);
   act(() => store.set({ team: false, view: "board" }));

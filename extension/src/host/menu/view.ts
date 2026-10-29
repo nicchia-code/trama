@@ -1,8 +1,10 @@
+import { measuring } from "../../../../src/core/performance";
+import { messageName, timerWork } from "../performance";
 import { randomBytes } from "node:crypto";
 import { basename } from "node:path";
 import * as vscode from "vscode";
 import { boardDecisionCount } from "../../../../src/core/board-decisions";
-import { managerStatus } from "../../../../src/core/manager-mode";
+import { readManagerMode } from "../../../../src/core/manager-mode";
 import type { WindowPicture } from "../picture";
 import type { Project } from "../../../../src/core/store";
 import type { MenuSituation, MenuViewName, MergeMenuState, ToMenuWebview } from "../../menu-protocol";
@@ -13,6 +15,7 @@ import { configuredAutoUpdateStaleProposals } from "../agent";
 import { webviewHtml } from "../html";
 import { configuredTheme } from "../omp-chat/view";
 import { findProject } from "../project";
+import type { ProjectOrigin } from "../origin";
 import { MenuModel, type MenuSurface } from "./model";
 
 /** The identity of the side menu's view in the manifest (`contributes.views.trama`). */
@@ -32,6 +35,8 @@ export interface MenuPanel {
 export interface MenuMerge {
   /** Merge as the menu shows it; undefined with Solo mode off. */
   state(): MergeMenuState | undefined;
+  /** The menu became visible or hidden: Merge's state is worked out in the background only while it is visible. */
+  setMenuVisible(visible: boolean): void;
   merge(): Promise<void>;
   openMergeEditor(): Promise<void>;
   reconcile(): Promise<void>;
@@ -54,6 +59,9 @@ export function menuSituation(): MenuSituation {
   return findProject() === undefined ? "notProject" : "project";
 }
 
+/** Whether `uri` is `.trama/manager/mode.json`, the file that records Manager mode. */
+const isManagerModeFile = (uri: vscode.Uri): boolean => /[\\/]\.trama[\\/]manager[\\/]mode\.json$/.test(uri.fsPath);
+
 /**
  * The side menu (`menu-laterale`): a `WebviewViewProvider` kept alive while hidden (`retainContextWhenHidden`) in the view `trama.home`. It follows the picture of the
  * project the window builds (`WindowPicture`: the files of `.trama/` and the folders of the window), the settings, Merge of Solo mode and the panel's view, also with the
@@ -73,6 +81,10 @@ export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
     private readonly panel: MenuPanel,
     private readonly picture: WindowPicture,
     private readonly soloMerge: MenuMerge,
+    /** The origin of the window's project: Team is available while it is on GitHub and Manager mode is recorded; the menu follows its changes. */
+    private readonly origin: ProjectOrigin,
+    /** The extension's global watcher of `.trama/**`: the menu follows Manager mode through it, with no watcher of its own. */
+    private readonly tramaFiles: vscode.FileSystemWatcher,
   ) {
     this.model = new MenuModel(this.surface());
   }
@@ -92,6 +104,12 @@ export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
       this.panel.onDidChangeShownView(() => this.highlight()),
       // Merge of Solo mode: git, the files of the working copy and the jobs of the agent decide whether it is available.
       this.soloMerge.onDidChange(onChange),
+      // The `Team` entry follows origin without reloading the window: the state goes out again when the window's origin changes.
+      this.origin.onDidChange(onChange),
+      // and Manager mode, which is the file `.trama/manager/mode.json`: turned on or off here or from the command line.
+      this.tramaFiles.onDidCreate((uri) => isManagerModeFile(uri) && onChange()),
+      this.tramaFiles.onDidChange((uri) => isManagerModeFile(uri) && onChange()),
+      this.tramaFiles.onDidDelete((uri) => isManagerModeFile(uri) && onChange()),
       onDriftResolutionChange(onChange),
     );
   }
@@ -109,14 +127,17 @@ export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
     // The title is the project's name from the first display, not only from the first state the webview asks for.
     this.model.state();
     this.showTitle(view, menuSituation());
-    const received = view.webview.onDidReceiveMessage((raw: unknown) => this.model.receive(raw));
-    // The menu shows at once what it already knows each time it becomes visible: it follows the files while hidden.
+    const received = view.webview.onDidReceiveMessage(measuring("view", messageName, (raw: unknown) => this.model.receive(raw)));
+    // The menu shows at once what it already knows each time it becomes visible, and Merge's state is worked out again in the background while it is visible.
+    this.soloMerge.setMenuVisible(view.visible);
     const visibility = view.onDidChangeVisibility(() => {
+      this.soloMerge.setMenuVisible(view.visible);
       if (view.visible) this.highlight();
     });
     view.onDidDispose(() => {
       received.dispose();
       visibility.dispose();
+      this.soloMerge.setMenuVisible(false);
       if (this.view === view) this.view = undefined;
     });
   }
@@ -128,7 +149,7 @@ export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
 
   private schedule(): void {
     clearTimeout(this.timer);
-    this.timer = setTimeout(() => this.refresh(), DEBOUNCE_MS);
+    this.timer = setTimeout(() => timerWork("refresh side menu", () => this.refresh()), DEBOUNCE_MS);
   }
 
   /** The title of the view (`WebviewView.title`, written at run time): the project's name in a project, `Trama` otherwise. */
@@ -182,13 +203,8 @@ export class MenuView implements vscode.WebviewViewProvider, vscode.Disposable {
       mergeState: () => this.soloMerge.state(),
       manager: () => {
         const project = findProject();
-        if (project === undefined) return { team: false, manager: false };
-        try {
-          const status = managerStatus(project);
-          return { team: status.repository !== null, manager: status.available };
-        } catch {
-          return { team: false, manager: false };
-        }
+        // Team is available (`rules#manager-mode`): the origin the window keeps and the Manager mode file; no process starts.
+        return project !== undefined && this.origin.get().repository !== null && readManagerMode(project);
       },
       startMerge: () => this.guarded(() => this.soloMerge.merge()),
       openMergeEditor: () => this.guarded(() => this.soloMerge.openMergeEditor()),

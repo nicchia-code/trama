@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Circle, CircleCheck, Loader, Square, TriangleAlert } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { ConversationItem, FormAnswerMessage, SendMode } from "../../omp-chat-protocol";
 import { Button } from "../ui/button";
 import { Combobox } from "../ui/combobox";
@@ -11,7 +11,7 @@ import { Form } from "./form";
 import { panelId, tabId } from "./tabs";
 import type { ConversationView, UsageView } from "./state";
 import { UsageBar } from "./usage";
-import { announcement, planDone, type Transcript } from "./transcript";
+import { announcement, type Block, planDone, type Transcript } from "./transcript";
 
 /** What a conversation asks of the host. */
 export interface ConversationActions {
@@ -169,7 +169,7 @@ function Composer({ item, view, actions, sendMode, usage }: { item: Conversation
           ))}
         </div>
       </div>
-      {item.starting === true ? <p className="text-xs text-muted-foreground">Starting omp…</p> : null}
+      {item.starting === true && item.placeholder !== undefined ? <p className="text-xs text-muted-foreground">Starting omp…</p> : null}
       <div className="flex items-center gap-2">
         <Combobox
           aria-label="Model"
@@ -190,27 +190,61 @@ function Composer({ item, view, actions, sendMode, usage }: { item: Conversation
   );
 }
 
+/** The key under which a call or a permission request keeps its open state in its conversation; the other blocks open nothing. */
+const openKey = (block: Block): string | undefined => (block.kind === "tool" ? `tool:${block.toolCallId}` : block.kind === "permission" ? `permission:${block.requestId}` : undefined);
+
+/** One block of the flow. A block that did not change, in a conversation whose actions did not change, is not drawn again: a new piece of the answer redraws only its message. */
+const BlockRow = memo(function BlockRow({ block, itemId, running, open, actions, toggle }: { block: Block; itemId: string; running: boolean; open: boolean; actions: ConversationActions; toggle: (key: string) => void }) {
+  switch (block.kind) {
+    case "user":
+      return <UserMessage block={block} />;
+    case "agent":
+      return <AgentMessage block={block} openLink={actions.openLink} />;
+    case "thought":
+      return <Thought block={block} running={running} />;
+    case "tool":
+      return <ToolCall block={block} open={open} onToggle={() => toggle(`tool:${block.toolCallId}`)} />;
+    case "error":
+      return <ErrorMessage message={block.message} />;
+    case "notice":
+      return <Notice text={block.text} />;
+    case "form":
+      return <Form form={block.form} answer={block.answer} onAnswer={(answer) => actions.answer(itemId, block.form.requestId, answer)} />;
+    case "permission":
+      return <Permission block={block} open={open} onToggle={() => toggle(`permission:${block.requestId}`)} onChoose={(optionId) => actions.choose(itemId, block.requestId, optionId)} />;
+  }
+});
+
+type ConversationProps = { item: ConversationItem; view: ConversationView; selected: boolean; actions: ConversationActions; sendMode: SendMode; usage: UsageView };
+
 /**
  * The conversation of a tab, under the tabs: the messages from top to bottom, the plan above the message field, the field always at the bottom. New text takes
  * the view down with it unless the developer scrolled up; then `Jump to latest` brings it back.
  */
-export function Conversation({ item, view, selected, actions, sendMode, usage }: { item: ConversationItem; view: ConversationView; selected: boolean; actions: ConversationActions; sendMode: SendMode; usage: UsageView }) {
+function ConversationPanel({ item, view, selected, actions, sendMode, usage }: ConversationProps) {
   const list = useRef<HTMLDivElement>(null);
   const [stuck, setStuck] = useState(true);
   const stuckRef = useRef(true);
   const running = item.state === "running";
   // Which calls are open: only here, per conversation, and gone with the window. A tool call is `tool:<toolCallId>` and a permission request `permission:<requestId>`.
   const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
-  const toggleOpen = (key: string) =>
-    setOpened((before) => {
-      const next = new Set(before);
-      if (!next.delete(key)) next.add(key);
-      return next;
-    });
+  const toggleOpen = useCallback(
+    (key: string) =>
+      setOpened((before) => {
+        const next = new Set(before);
+        if (!next.delete(key)) next.add(key);
+        return next;
+      }),
+    [],
+  );
   const { transcript } = view;
+  // Where the developer scrolled to, kept while the tab is hidden (a box that is not displayed loses its scroll) and given back when it is shown.
+  const scrolledTo = useRef(0);
   useLayoutEffect(() => {
     const element = list.current;
-    if (element !== null && stuckRef.current && selected) element.scrollTop = element.scrollHeight;
+    if (element === null || !selected) return;
+    if (stuckRef.current) element.scrollTop = element.scrollHeight;
+    else element.scrollTop = scrolledTo.current;
   }, [transcript, selected]);
   const jump = () => {
     const element = list.current;
@@ -227,31 +261,18 @@ export function Conversation({ item, view, selected, actions, sendMode, usage }:
         className="absolute inset-0 flex flex-col gap-3 overflow-y-auto p-3"
         onScroll={(event) => {
           const element = event.currentTarget;
+          if (element.clientHeight === 0) return;
           const near = element.scrollHeight - element.scrollTop - element.clientHeight <= STICK_PX;
+          scrolledTo.current = element.scrollTop;
           stuckRef.current = near;
           setStuck(near);
         }}
       >
         {transcript.blocks.map((block) => {
-          switch (block.kind) {
-            case "user":
-              return <UserMessage key={block.id} block={block} />;
-            case "agent":
-              return <AgentMessage key={block.id} block={block} openLink={actions.openLink} />;
-            case "thought":
-              return <Thought key={block.id} block={block} running={running} />;
-            case "tool":
-              return <ToolCall key={block.id} block={block} open={opened.has(`tool:${block.toolCallId}`)} onToggle={() => toggleOpen(`tool:${block.toolCallId}`)} />;
-            case "error":
-              return <ErrorMessage key={block.id} message={block.message} />;
-            case "notice":
-              return <Notice key={block.id} text={block.text} />;
-            case "form":
-              return <Form key={block.id} form={block.form} answer={block.answer} onAnswer={(answer) => actions.answer(item.id, block.form.requestId, answer)} />;
-            case "permission":
-              return <Permission key={block.id} block={block} open={opened.has(`permission:${block.requestId}`)} onToggle={() => toggleOpen(`permission:${block.requestId}`)} onChoose={(optionId) => actions.choose(item.id, block.requestId, optionId)} />;
-          }
+          const key = openKey(block);
+          return <BlockRow key={block.id} block={block} itemId={item.id} running={block.kind === "thought" && running} open={key !== undefined && opened.has(key)} actions={actions} toggle={toggleOpen} />;
         })}
+        {item.starting === true && item.placeholder === undefined && item.general !== true && transcript.blocks.length === 0 ? <p className="m-auto text-center text-muted-foreground">Starting omp…</p> : null}
         {item.general === true && transcript.blocks.length === 0 ? <p className="m-auto text-center text-muted-foreground">Chat with omp in this folder. Trama&apos;s jobs open in their own tabs.</p> : null}
         {item.general === true && view.status !== undefined ? <GeneralStatusRows status={view.status} onInstall={actions.installOmp} /> : null}
         <div aria-live="polite" className="sr-only">
@@ -276,3 +297,12 @@ export function Conversation({ item, view, selected, actions, sendMode, usage }:
     </div>
   );
 }
+
+/**
+ * A conversation of a hidden tab is not drawn: it keeps what it showed (its open calls, its scroll, its message field stay as they are, since it stays mounted) and draws
+ * what changed once it is shown. A conversation in view is drawn again only when what it shows changed.
+ */
+export const Conversation = memo(ConversationPanel, (before, after) => {
+  if (!before.selected && !after.selected) return true;
+  return before.item === after.item && before.view === after.view && before.selected === after.selected && before.actions === after.actions && before.sendMode === after.sendMode && before.usage === after.usage;
+});

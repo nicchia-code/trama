@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { MergeMenuState } from "../extension/src/menu-protocol";
 
 // A minimal editor: what the flow shows is recorded, and the answers of the developer are set by each test.
 const infos: string[] = [];
@@ -17,6 +18,7 @@ let pick: string | undefined;
 let answer: ((message: string, options: unknown, buttons: string[]) => string | undefined) | undefined;
 let commands: string[] = [];
 const watchers: { pattern: unknown; listeners: (() => void)[] }[] = [];
+let saveSubscriptions = 0;
 
 mock.module("vscode", () => ({
   window: {
@@ -45,7 +47,7 @@ mock.module("vscode", () => ({
     getWorkspaceFolder: () => undefined,
     getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback, inspect: () => undefined }),
     onDidChangeWorkspaceFolders: () => ({ dispose() {} }),
-    onDidSaveTextDocument: () => ({ dispose() {} }),
+    onDidSaveTextDocument: () => (saveSubscriptions++, { dispose() {} }),
     onDidChangeConfiguration: () => ({ dispose() {} }),
     createFileSystemWatcher: (pattern: unknown) => {
       const entry = { pattern, listeners: [] as (() => void)[] };
@@ -86,6 +88,7 @@ mock.module("vscode", () => ({
 
 // The modules load after mock.module replaced "vscode".
 const { SoloMerge } = await import("../extension/src/host/solo-merge");
+const { GitDirectories } = await import("../extension/src/host/git-directories");
 const { setSoloMode } = await import("../src/core/solo-mode");
 const { projectAt } = await import("../src/core/store");
 const { mergeFile, readOpenMerge } = await import("../src/core/solo-merge");
@@ -97,6 +100,7 @@ let work: string;
 let other: string;
 let launched: unknown[];
 let flow: InstanceType<typeof SoloMerge>;
+let gitDirectories: InstanceType<typeof GitDirectories>;
 
 function git(cwd: string, ...args: string[]): string {
   const r = spawnSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "-c", "core.editor=true", ...args], {
@@ -138,17 +142,42 @@ beforeEach(() => {
   setSoloMode(project, "folders");
   workspaceFolders = [{ uri: { fsPath: work, scheme: "file" } }];
   infos.length = warnings.length = errors.length = quickPicks.length = progress.length = executed.length = shown.length = watchers.length = 0;
+  saveSubscriptions = 0;
   pick = undefined;
   answer = undefined;
   commands = [];
   launched = [];
-  flow = new SoloMerge(async (action) => void launched.push(action));
+  // The window's git directories: the real ones, read with git; the watcher of `config` is not the subject here.
+  gitDirectories = new GitDirectories({ watch: () => ({ dispose() {} }) });
+  gitDirectories.follow();
+  flow = new SoloMerge(async (action) => void launched.push(action), gitDirectories);
 });
 
 afterEach(() => {
   flow.dispose();
+  gitDirectories.dispose();
   rmSync(base, { recursive: true, force: true });
 });
+
+/** Resolves at the next time `flow` tells that its state may have changed. */
+function changed(): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  flow.onDidChange(() => resolve());
+  return promise;
+}
+
+/** The state of Merge once it is worked out in the background: the menu becomes visible and the test waits for the answer. */
+async function menuState(): Promise<MergeMenuState | undefined> {
+  const done = changed();
+  flow.setMenuVisible(true);
+  await done;
+  return flow.state();
+}
+
+/** Tells the flow, as the editor's watcher would, that something in git's directory changed. */
+function gitChanged(): void {
+  for (const watcher of watchers) for (const listener of watcher.listeners) listener();
+}
 
 /** Lets the promises the flow leaves running (the notice's choice, the scan's launch) finish. */
 const settled = async (): Promise<void> => {
@@ -162,15 +191,101 @@ const push = (files: Record<string, string>): string => {
   return hash;
 };
 
-test("state is absent with Solo mode off and carries the availability, the reason and the tracked files of Trama with it on", () => {
-  expect(flow.state()).toEqual({ available: true, trackedTrama: false });
+/** The flow follows git's directory, whose location the window's `GitDirectories` read: its watchers exist once that is done. */
+async function ready(): Promise<void> {
+  await gitDirectories.get();
+  await settled();
+}
+
+/** git's directory reports a change and the state is worked out again after the pause of the watcher. */
+async function recomputed(): Promise<void> {
+  const done = changed();
+  gitChanged();
+  await done;
+}
+
+test("state is absent with Solo mode off and before it is worked out; with the menu visible it is worked out in the background with the availability, the reason and the tracked files of Trama", async () => {
+  const subscription = flow.start();
+  await ready();
+  expect(flow.state()).toBeUndefined();
+  expect(await menuState()).toEqual({ available: true, trackedTrama: false });
   writeFileSync(join(work, "a.txt"), "changed\n");
+  await recomputed();
   expect(flow.state()).toEqual({ available: false, reason: "changes", trackedTrama: false });
   git(work, "checkout", "--", "a.txt");
   git(work, "add", "-f", ".trama/solo/mode.json");
+  await recomputed();
   expect(flow.state()?.trackedTrama).toBe(true);
   setSoloMode(projectAt(work), "off");
   expect(flow.state()).toBeUndefined();
+  subscription.dispose();
+}, GIT_TEST_MS);
+
+test("a hidden menu never works the state out: a change in git's directory starts nothing", async () => {
+  const subscription = flow.start();
+  await ready();
+  let told = 0;
+  flow.onDidChange(() => told++);
+  gitChanged();
+  await Bun.sleep(500);
+  expect(told).toBe(0);
+  expect(flow.state()).toBeUndefined();
+  // Visible again, the state is worked out at once.
+  expect(await menuState()).toEqual({ available: true, trackedTrama: false });
+  flow.setMenuVisible(false);
+  gitChanged();
+  await Bun.sleep(500);
+  expect(told).toBe(1);
+  subscription.dispose();
+}, GIT_TEST_MS);
+
+test("saving or changing a file of the working copy never works the state out: nothing watches the files and nothing listens to saves", async () => {
+  const subscription = flow.start();
+  await ready();
+  expect(await menuState()).toEqual({ available: true, trackedTrama: false });
+  expect(saveSubscriptions).toBe(0);
+  expect(watchers.map((watcher) => watcher.pattern)).toMatchObject([{ pattern: "{HEAD,MERGE_HEAD,index}" }, { pattern: "{refs/**,packed-refs}" }]);
+  let told = 0;
+  flow.onDidChange(() => told++);
+  writeFileSync(join(work, "a.txt"), "changed\n");
+  await Bun.sleep(700);
+  expect(told).toBe(0);
+  expect(flow.state()).toEqual({ available: true, trackedTrama: false });
+  subscription.dispose();
+}, GIT_TEST_MS);
+
+test("a change of HEAD with the menu visible works the state out once, after the pause of 150 ms", async () => {
+  const subscription = flow.start();
+  await ready();
+  await menuState();
+  let told = 0;
+  flow.onDidChange(() => told++);
+  const started = Date.now();
+  const done = changed();
+  gitChanged();
+  gitChanged();
+  gitChanged();
+  await done;
+  expect(Date.now() - started).toBeGreaterThanOrEqual(140);
+  await Bun.sleep(500);
+  expect(told).toBe(1);
+  subscription.dispose();
+}, GIT_TEST_MS);
+
+test("requests made while a calculation goes on start one more calculation at the end, once; the menu keeps the last state meanwhile", async () => {
+  await menuState();
+  let told = 0;
+  flow.onDidChange(() => told++);
+  writeFileSync(join(work, "a.txt"), "changed\n");
+  // The first request starts a calculation; the next ones, made while it runs, are one request.
+  flow.setMenuVisible(false);
+  flow.setMenuVisible(true);
+  flow.setMenuVisible(true);
+  flow.setMenuVisible(true);
+  expect(flow.state()).toEqual({ available: true, trackedTrama: false });
+  await Bun.sleep(1500);
+  expect(told).toBe(2);
+  expect(flow.state()).toEqual({ available: false, reason: "changes", trackedTrama: false });
 }, GIT_TEST_MS);
 
 test("a merge without conflicts shows Fetching…, the list with the upstream first, merges and starts the scan of the commits it brought in", async () => {
@@ -278,7 +393,7 @@ test("a merge with conflicts is remembered and offers the three ways to go on; c
   expect(warnings).toEqual([{ message: "Trama: merging origin/main left conflicts in 1 file.", options: undefined, buttons: ["Open Merge Editor", "Reconcile with Agent", "Abort"] }]);
   const merge = readOpenMerge(projectAt(work));
   expect(merge?.branch).toBe("origin/main");
-  expect(flow.state()).toEqual({ available: false, reason: "inProgress", trackedTrama: false, open: { branch: "origin/main", conflict: true } });
+  expect(await menuState()).toEqual({ available: false, reason: "inProgress", trackedTrama: false, open: { branch: "origin/main", conflict: true } });
   expect(launched).toEqual([]);
 }, GIT_TEST_MS);
 
@@ -310,7 +425,7 @@ test("Abort asks the modal confirmation, then aborts, forgets the merge and scan
   expect(readOpenMerge(projectAt(work))).toBeNull();
   expect(git(work, "status", "--porcelain", "--untracked-files=no")).toBe("");
   expect(launched).toEqual([]);
-  expect(flow.state()?.open).toBeUndefined();
+  expect((await menuState())?.open).toBeUndefined();
 }, GIT_TEST_MS);
 
 test("a failed abort says why and the merge stays open", async () => {
@@ -329,8 +444,8 @@ test("a merge committed by the developer starts the scan of its base and incomin
   writeFileSync(join(work, "c.txt"), "both\n");
   git(work, "add", "c.txt");
   git(work, "commit", "-q", "--no-edit");
-  flow.check();
-  flow.check();
+  await flow.check();
+  await flow.check();
   await settled();
   expect(launched).toEqual([{ kind: "mergeScan", base: merge?.base, incoming: merge?.incoming }]);
   expect(readOpenMerge(projectAt(work))).toBeNull();
@@ -338,17 +453,17 @@ test("a merge committed by the developer starts the scan of its base and incomin
 
 test("a merge aborted outside Trama is forgotten with no scan, and an open merge is left alone", async () => {
   await conflicted();
-  flow.check();
+  await flow.check();
   expect(readOpenMerge(projectAt(work))).not.toBeNull();
   git(work, "merge", "--abort");
-  flow.check();
+  await flow.check();
   expect(readOpenMerge(projectAt(work))).toBeNull();
   expect(launched).toEqual([]);
 }, GIT_TEST_MS);
 
-test("a remembered merge that is not valid is deleted at the check, with no scan", () => {
+test("a remembered merge that is not valid is deleted at the check, with no scan", async () => {
   writeFileSync(mergeFile(projectAt(work)), "not json");
-  flow.check();
+  await flow.check();
   expect(existsSync(mergeFile(projectAt(work)))).toBe(false);
   expect(launched).toEqual([]);
 }, GIT_TEST_MS);
@@ -359,7 +474,7 @@ test("a scan that cannot start is reported like any launch and not tried again",
   flow = new SoloMerge(async () => {
     attempts += 1;
     throw new Error("omp is missing");
-  });
+  }, gitDirectories);
   push({ "a.txt": "two\n" });
   pick = "origin/main";
   await flow.merge();
@@ -376,7 +491,9 @@ test("start watches HEAD, MERGE_HEAD and the index of the git directory and the 
   writeFileSync(mergeFile(projectAt(work)), `${JSON.stringify({ ...merge, started: new Date().toISOString() })}\n`);
   git(work, "merge", "-q", "--no-edit", "origin/main", "-X", "ours");
   const subscription = flow.start();
-  await settled();
+  await ready();
+  // The check looks at the remembered merge with git, in the background: the scan starts when it has.
+  while (launched.length === 0) await Bun.sleep(10);
   expect(launched).toEqual([{ kind: "mergeScan", base: merge?.base, incoming: merge?.incoming }]);
   const patterns = watchers.map((watcher) => watcher.pattern as { base?: { fsPath: string }; pattern?: string }).filter((pattern) => pattern.pattern !== undefined);
   expect(patterns.map((pattern) => pattern.pattern)).toEqual(["{HEAD,MERGE_HEAD,index}", "{refs/**,packed-refs}"]);

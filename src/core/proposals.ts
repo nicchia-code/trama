@@ -40,6 +40,7 @@ import { removedElements, type RemovedKind, SCAN_REASONS, scanScope, type ScanSc
 import { linkedGithubProject } from "./github";
 import { fieldChange, type FieldRules, handoffIssueWarnings, handoffProblems, issuesDir, LINK_PROJECT_FIRST, listIssues, loadProposalIssues, type ManagerValue, planApprovalIssues, type ProposalIssue, type TeamRoster, writeApprovalIssues } from "./issues";
 import { requireTeam, teamUnavailableReason } from "./manager-mode";
+import { noteRemoved } from "./written";
 
 /**
  * `draft`: the agent is still writing it; only the agent hands it over and only the developer can discard it.
@@ -697,6 +698,7 @@ function deleteTaskInProposal(p: Project, id: string, path: string) {
   if (!existsSync(target)) throw new TramaError(`${path} is not a Task file of Proposal ${cardName(p, "proposal", proposal.id)}`);
   touch(proposal);
   rmSync(target);
+  noteRemoved(target);
   save(proposal);
   pruneImages(p);
 }
@@ -750,6 +752,7 @@ function deleteIssueInProposal(p: Project, id: string, path: string): void {
   if (!existsSync(target)) throw new TramaError(`${path} is not an issue file of Proposal ${cardName(p, "proposal", proposal.id)}`);
   touch(proposal);
   rmSync(target);
+  noteRemoved(target);
   save(proposal);
 }
 
@@ -1074,7 +1077,11 @@ export function proposalCoverage(p: Project, proposal: Proposal): { removals: Re
  */
 export function writeProposalFiles(p: Project, id: string, tramaDir: string): Proposal {
   const proposal = getProposal(p, id);
-  for (const path of proposal.data.delete) rmSync(trackedLocation(tramaDir, path));
+  for (const path of proposal.data.delete) {
+    const target = trackedLocation(tramaDir, path);
+    rmSync(target);
+    noteRemoved(target);
+  }
   for (const [path, content] of newFiles(proposal)) writeFileEnsuringDir(trackedLocation(tramaDir, path), content);
   return proposal;
 }

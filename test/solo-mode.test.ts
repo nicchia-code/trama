@@ -8,21 +8,25 @@ import { refreshProjectSkills } from "../src/cli/skill-refresh";
 import { TramaError } from "../src/core/errors";
 import {
   currentSolo,
-  expectedSoloBlock,
+  currentSoloAsync,
+  expectedSoloBlockAsync,
   findSoloBlock,
   projectSkillsFolder,
   readSoloMode,
   removeSoloBlock,
   repairSoloBlock,
+  repairSoloBlockAsync,
   replaceSoloBlock,
   SOLO_BEGIN,
   SOLO_END,
   SOLO_NEEDS_GIT,
   setSoloMode,
+  setSoloModeAsync,
   soloBlock,
   soloFile,
-  soloStatus,
+  soloStatusAsync,
   trackedSoloFiles,
+  trackedSoloFilesAsync,
 } from "../src/core/solo-mode";
 import { type Project, projectAt } from "../src/core/store";
 
@@ -178,7 +182,7 @@ describe("turning Solo mode on, changing it and turning it off", () => {
     expect(git(base, "status", "--porcelain", "--untracked-files=all").trim().split("\n")).toEqual(["?? .agents/skills/mine/SKILL.md", "?? .omp/agents/mine.md"]);
   }, GIT_TEST_MS);
 
-  test("a project in a subfolder gets its own prefix, and the exclusions work from the repository root", () => {
+  test("a project in a subfolder gets its own prefix, and the exclusions work from the repository root", async () => {
     const { p, exclude } = repoWithProject("packages/app");
     setSoloMode(p, "folders", "tools/skills");
     expect(readFileSync(exclude, "utf8")).toBe(`${soloBlock("folders", "packages/app/", "tools/skills").join("\n")}\n`);
@@ -187,10 +191,10 @@ describe("turning Solo mode on, changing it and turning it off", () => {
     write(join(p.root, ".omp", "WATCHDOG.yml"));
     write(join(p.root, "src", "code.ts"));
     expect(git(base, "status", "--porcelain", "--untracked-files=all")).toBe("?? packages/app/src/code.ts\n");
-    expect(expectedSoloBlock(p, "files")).toEqual(soloBlock("files", "packages/app/", ".agents/skills"));
+    expect(await expectedSoloBlockAsync(p, "files")).toEqual(soloBlock("files", "packages/app/", ".agents/skills"));
   }, GIT_TEST_MS);
 
-  test("files of Trama git already tracks do not prevent it and come back as tracked", () => {
+  test("files of Trama git already tracks do not prevent it and come back as tracked", async () => {
     const { p } = repoWithProject();
     write(join(p.dir, "model", "system.md"));
     write(join(base, ".agents", "skills", "trama-scan", "SKILL.md"));
@@ -202,6 +206,9 @@ describe("turning Solo mode on, changing it and turning it off", () => {
     expect(setSoloMode(p, "files")).toEqual({ solo: "files", tracked: [".agents/skills/trama-scan/SKILL.md", ".trama/model/system.md"] });
     expect(trackedSoloFiles(p, "files")).toEqual([".agents/skills/trama-scan/SKILL.md", ".trama/model/system.md"]);
     expect(currentSolo(p)).toEqual({ solo: "files", tracked: [".agents/skills/trama-scan/SKILL.md", ".trama/model/system.md"] });
+    // The asynchronous forms of the editor's host answer the same.
+    expect(await trackedSoloFilesAsync(p, "files")).toEqual(trackedSoloFiles(p, "files"));
+    expect(await currentSoloAsync(p)).toEqual(currentSolo(p));
     // The mode file is not tracked even though .trama/ is: it has a .gitignore of its own.
     expect(git(base, "ls-files", ".trama/solo")).toBe("");
     expect(git(base, "status", "--porcelain", "--untracked-files=all")).toBe("");
@@ -238,7 +245,7 @@ describe("turning Solo mode on, changing it and turning it off", () => {
     expect(setSoloMode(p, "off")).toEqual({ solo: "off", tracked: [] });
   }, GIT_TEST_MS);
 
-  test("outside git it refuses with the reason and writes nothing; off still removes the file", () => {
+  test("outside git it refuses with the reason and writes nothing; off still removes the file", async () => {
     const p = projectAt(base);
     expect(() => setSoloMode(p, "folders")).toThrow(new TramaError(SOLO_NEEDS_GIT));
     expect(() => setSoloMode(p, "files")).toThrow("Solo mode needs a git repository.");
@@ -246,14 +253,35 @@ describe("turning Solo mode on, changing it and turning it off", () => {
     write(soloFile(p), '{"exclusions":"files"}');
     expect(setSoloMode(p, "off")).toEqual({ solo: "off", tracked: [] });
     expect(existsSync(soloFile(p))).toBe(false);
-    expect(soloStatus(p)).toEqual({ available: false, solo: "off", tracked: [] });
+    expect(await soloStatusAsync(p)).toEqual({ available: false, solo: "off", tracked: [] });
+    await expect(setSoloModeAsync(p, "folders")).rejects.toThrow(new TramaError(SOLO_NEEDS_GIT));
   }, GIT_TEST_MS);
 
-  test("the status says whether git is there, the kind and the tracked files", () => {
+  test("the status says whether git is there, the kind and the tracked files", async () => {
     const { p } = repoWithProject();
-    expect(soloStatus(p)).toEqual({ available: true, solo: "off", tracked: [] });
+    expect(await soloStatusAsync(p)).toEqual({ available: true, solo: "off", tracked: [] });
     setSoloMode(p, "folders");
-    expect(soloStatus(p)).toEqual({ available: true, solo: "folders", tracked: [] });
+    expect(await soloStatusAsync(p)).toEqual({ available: true, solo: "folders", tracked: [] });
+  }, GIT_TEST_MS);
+
+  test("the asynchronous write gives the same files and the same result as the synchronous one", async () => {
+    const { p, exclude } = repoWithProject();
+    write(exclude, "*.log\n");
+    expect(await setSoloModeAsync(p, "folders")).toEqual(setSoloMode(p, "folders"));
+    const written = readFileSync(exclude, "utf8");
+    expect(findSoloBlock(written)).toEqual(soloBlock("folders", ""));
+    expect(await setSoloModeAsync(p, "off")).toEqual({ solo: "off", tracked: [] });
+    expect(readFileSync(exclude, "utf8")).toBe("*.log\n");
+    expect(existsSync(soloFile(p))).toBe(false);
+  }, GIT_TEST_MS);
+
+  test("the asynchronous repair writes the block again like the synchronous one", async () => {
+    const { p, exclude } = repoWithProject();
+    setSoloMode(p, "folders");
+    write(exclude, "");
+    expect(await repairSoloBlockAsync(p)).toBe(true);
+    expect(findSoloBlock(readFileSync(exclude, "utf8"))).toEqual(soloBlock("folders", ""));
+    expect(await repairSoloBlockAsync(p)).toBe(false);
   }, GIT_TEST_MS);
 
   (process.platform === "win32" ? test.skip : test)("a write that fails changes nothing and says why", () => {

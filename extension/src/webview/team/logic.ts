@@ -188,24 +188,17 @@ export function gateOf(github: GitHubMessage | null, picking: boolean): "loading
 
 // ---- the tabs of the view (`ui#panel/Team`) ----
 
-/** The tabs of the Team view, in the order Manager mode shows them. */
-export const TEAM_TABS = ["decisions", "issues", "pull-requests", "timeline", "people"] as const;
+/** The tabs of the Team view, in order. */
+export const TEAM_TABS = ["decisions", "issues", "timeline", "people"] as const;
 export type TeamTab = (typeof TEAM_TABS)[number];
 
 /** The text of each tab: English whatever `trama.language` says. */
-export const TEAM_TAB_LABELS: Record<TeamTab, string> = { decisions: "Decisions", issues: "Issues", "pull-requests": "Pull Requests", timeline: "Timeline", people: "People" };
+export const TEAM_TAB_LABELS: Record<TeamTab, string> = { decisions: "Decisions", issues: "Issues", timeline: "Timeline", people: "People" };
 
-/** The tabs the view has: with Manager mode on all of them (`Decisions`, `Issues`, `Pull Requests`, `Timeline`, `People`); with it off only `Pull Requests`. */
-export const teamTabs = (manager: boolean): TeamTab[] => (manager ? [...TEAM_TABS] : ["pull-requests"]);
-
-/** The tab the view shows: the one the developer chose while the view still has it, otherwise its first tab (`Decisions` with Manager mode on, `Pull Requests` with it off). */
-export function shownTab(chosen: string | null, manager: boolean): TeamTab {
-  const tabs = teamTabs(manager);
-  return tabs.find((tab) => tab === chosen) ?? tabs[0] ?? "pull-requests";
+/** The tab the view shows: the one the developer chose, otherwise its first tab, `Decisions`. */
+export function shownTab(chosen: string | null): TeamTab {
+  return TEAM_TABS.find((tab) => tab === chosen) ?? "decisions";
 }
-
-/** The title of the box of a failed read without Manager mode, when the view reads only the pull requests: English whatever `trama.language` says. */
-export const PULL_REQUESTS_READ_ERROR_TITLE = "Couldn't read the pull requests";
 
 // ---- Decisions and Issues (`ui#proposal/Open`, `ui#issue`) ----
 

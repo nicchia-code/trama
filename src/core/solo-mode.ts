@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, isAbsolute, join, posix, relative, resolve } from "node:path";
 import { writeFileAtomic } from "./atomic-write";
 import { TramaError } from "./errors";
-import { git } from "./git";
+import { git, gitAsync } from "./git";
 import { type Project, readTextLf, writeFileEnsuringDir } from "./store";
 
 /*
@@ -155,27 +155,48 @@ export interface GitPlace {
   exclude: string;
 }
 
-/** The place of the project root in git, or null when it is not inside a git working tree. */
-export function gitPlace(root: string): GitPlace | null {
-  if (git(root, ["rev-parse", "--is-inside-work-tree"])?.trim() !== "true") return null;
-  const prefix = git(root, ["rev-parse", "--show-prefix"]);
-  const exclude = git(root, ["rev-parse", "--git-path", "info/exclude"]);
+const INSIDE_WORK_TREE = ["rev-parse", "--is-inside-work-tree"];
+const SHOW_PREFIX = ["rev-parse", "--show-prefix"];
+const EXCLUDE_PATH = ["rev-parse", "--git-path", "info/exclude"];
+
+function placeOf(root: string, prefix: string | null, exclude: string | null): GitPlace | null {
   return prefix === null || exclude === null ? null : { prefix: stripEol(prefix), exclude: resolve(root, stripEol(exclude)) };
 }
 
-/** The block Solo mode needs for the project, or null when it is not in a git repository. */
-export function expectedSoloBlock(p: Project, kind: SoloExclusions, skillsDir?: string): string[] | null {
-  const place = gitPlace(p.root);
+/** The place of the project root in git, or null when it is not inside a git working tree. Synchronous: the command line's. */
+export function gitPlace(root: string): GitPlace | null {
+  if (git(root, INSIDE_WORK_TREE)?.trim() !== "true") return null;
+  return placeOf(root, git(root, SHOW_PREFIX), git(root, EXCLUDE_PATH));
+}
+
+/** The same place, asked without holding the process: the editor's host. */
+export async function gitPlaceAsync(root: string): Promise<GitPlace | null> {
+  if ((await gitAsync(root, INSIDE_WORK_TREE))?.trim() !== "true") return null;
+  const [prefix, exclude] = await Promise.all([gitAsync(root, SHOW_PREFIX), gitAsync(root, EXCLUDE_PATH)]);
+  return placeOf(root, prefix, exclude);
+}
+
+/** The block Solo mode needs for the project, or null when it is not in a git repository. Asynchronous: only the editor's Merge asks for it. */
+export async function expectedSoloBlockAsync(p: Project, kind: SoloExclusions, skillsDir?: string): Promise<string[] | null> {
+  const place = await gitPlaceAsync(p.root);
   return place === null ? null : soloBlock(kind, place.prefix, projectSkillsFolder(p.root, skillsDir));
 }
 
+const trackedArgs = (p: Project, kind: SoloExclusions, skillsDir: string | undefined): string[] => ["ls-files", "-z", "--", ...coveredPaths(kind, projectSkillsFolder(p.root, skillsDir))];
+
+const trackedOf = (out: string | null): string[] => (out === null ? [] : out.split("\0").filter((path) => path !== ""));
+
 /**
  * The files of Trama that git tracks under the paths of the block (`git ls-files -z`), relative to the project root and
- * in git's order. An exclusion cannot hide them, so their changes still enter commits. Empty outside git.
+ * in git's order. An exclusion cannot hide them, so their changes still enter commits. Empty outside git. Synchronous: the command line's.
  */
 export function trackedSoloFiles(p: Project, kind: SoloExclusions, skillsDir?: string): string[] {
-  const out = git(p.root, ["ls-files", "-z", "--", ...coveredPaths(kind, projectSkillsFolder(p.root, skillsDir))]);
-  return out === null ? [] : out.split("\0").filter((path) => path !== "");
+  return trackedOf(git(p.root, trackedArgs(p, kind, skillsDir)));
+}
+
+/** The same files, asked without holding the process: the editor's host. */
+export async function trackedSoloFilesAsync(p: Project, kind: SoloExclusions, skillsDir?: string): Promise<string[]> {
+  return trackedOf(await gitAsync(p.root, trackedArgs(p, kind, skillsDir)));
 }
 
 /** What Solo mode is now: the kind and the tracked files of Trama (none when off); also what a change of Solo mode returns. */
@@ -184,10 +205,16 @@ export interface SoloResult {
   tracked: string[];
 }
 
-/** Solo mode of the project now, with the tracked files of Trama. */
+/** Solo mode of the project now, with the tracked files of Trama. Synchronous: the command line's. */
 export function currentSolo(p: Project, skillsDir?: string): SoloResult {
   const solo = readSoloMode(p);
   return { solo, tracked: solo === "off" ? [] : trackedSoloFiles(p, solo, skillsDir) };
+}
+
+/** Solo mode of the project now, asked without holding the process: the editor's host. */
+export async function currentSoloAsync(p: Project, skillsDir?: string): Promise<SoloResult> {
+  const solo = readSoloMode(p);
+  return { solo, tracked: solo === "off" ? [] : await trackedSoloFilesAsync(p, solo, skillsDir) };
 }
 
 /** What the Settings tab and the wizard need: whether the folder is in a git repository, the kind, and the tracked files of Trama. */
@@ -195,8 +222,9 @@ export interface SoloStatus extends SoloResult {
   available: boolean;
 }
 
-export function soloStatus(p: Project, skillsDir?: string): SoloStatus {
-  return { available: gitPlace(p.root) !== null, ...currentSolo(p, skillsDir) };
+export async function soloStatusAsync(p: Project, skillsDir?: string): Promise<SoloStatus> {
+  const [place, current] = await Promise.all([gitPlaceAsync(p.root), currentSoloAsync(p, skillsDir)]);
+  return { available: place !== null, ...current };
 }
 
 const reasonOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -226,14 +254,11 @@ function restore(path: string, previous: string | null): void {
 }
 
 /**
- * Sets Solo mode of the project: `folders` or `files` write `.trama/solo/mode.json` and the block in `.git/info/exclude`
- * (only in a git repository, otherwise `Solo mode needs a git repository.` and nothing is written); `off` removes the
- * block, leaving every other line, and the file, which it does also outside git. `skillsDir` is the folder of the agent
- * skills the block covers (default `.agents/skills`). A failed write leaves both files as they were and says why.
+ * Writes Solo mode of the project in the place git gave for it: the block in the exclusion file and `.trama/solo/mode.json` (or none of them for `off`). A failed write leaves both
+ * files as they were and says why.
  */
-export function setSoloMode(p: Project, solo: SoloKind, skillsDir?: string): SoloResult {
+function writeSolo(p: Project, solo: SoloKind, skillsDir: string | undefined, place: GitPlace | null): void {
   const mode = soloFile(p);
-  const place = gitPlace(p.root);
   if (solo !== "off" && place === null) throw new TramaError(SOLO_NEEDS_GIT);
   const exclude = place?.exclude;
   // What both files hold now, read before anything is written, so a failed write can put them back.
@@ -260,7 +285,7 @@ export function setSoloMode(p: Project, solo: SoloKind, skillsDir?: string): Sol
       }
       failing = mode;
       rmSync(mode, { force: true });
-      return { solo, tracked: [] };
+      return;
     }
     const block = soloBlock(solo, (place as GitPlace).prefix, projectSkillsFolder(p.root, skillsDir));
     const next = replaceSoloBlock(previousExclude ?? "", block);
@@ -269,7 +294,6 @@ export function setSoloMode(p: Project, solo: SoloKind, skillsDir?: string): Sol
     const ignore = join(soloDir(p), ".gitignore");
     if (!existsSync(ignore)) writeFileEnsuringDir(ignore, "*\n");
     writeFileAtomic(mode, `${JSON.stringify({ exclusions: solo }, null, 2)}\n`);
-    return { solo, tracked: trackedSoloFiles(p, solo, skillsDir) };
   } catch (error) {
     if (exclude !== undefined) restore(exclude, previousExclude);
     restore(mode, previousMode);
@@ -278,15 +302,24 @@ export function setSoloMode(p: Project, solo: SoloKind, skillsDir?: string): Sol
 }
 
 /**
- * The repair at every ordinary opening of Trama: with Solo mode on in a git repository, writes the block again when the
- * exclusion file has none or a different one from what the kind and the skills folder need. Returns whether it wrote.
- * Throws when the write fails.
+ * Sets Solo mode of the project: `folders` or `files` write `.trama/solo/mode.json` and the block in `.git/info/exclude`
+ * (only in a git repository, otherwise `Solo mode needs a git repository.` and nothing is written); `off` removes the
+ * block, leaving every other line, and the file, which it does also outside git. `skillsDir` is the folder of the agent
+ * skills the block covers (default `.agents/skills`). A failed write leaves both files as they were and says why. Synchronous: the command line's.
  */
-export function repairSoloBlock(p: Project, skillsDir?: string): boolean {
-  const solo = readSoloMode(p);
-  if (solo === "off") return false;
-  const place = gitPlace(p.root);
-  if (place === null) return false;
+export function setSoloMode(p: Project, solo: SoloKind, skillsDir?: string): SoloResult {
+  writeSolo(p, solo, skillsDir, gitPlace(p.root));
+  return { solo, tracked: solo === "off" ? [] : trackedSoloFiles(p, solo, skillsDir) };
+}
+
+/** `setSoloMode` without holding the process while git answers: the editor's host. */
+export async function setSoloModeAsync(p: Project, solo: SoloKind, skillsDir?: string): Promise<SoloResult> {
+  writeSolo(p, solo, skillsDir, await gitPlaceAsync(p.root));
+  return { solo, tracked: solo === "off" ? [] : await trackedSoloFilesAsync(p, solo, skillsDir) };
+}
+
+/** Writes the block again in the exclusion file `place` names when it has none or a different one; returns whether it wrote. Throws when the write fails. */
+function repairBlock(p: Project, solo: SoloExclusions, place: GitPlace, skillsDir: string | undefined): boolean {
   try {
     const text = readIfExists(place.exclude);
     const next = replaceSoloBlock(text ?? "", soloBlock(solo, place.prefix, projectSkillsFolder(p.root, skillsDir)));
@@ -296,4 +329,24 @@ export function repairSoloBlock(p: Project, skillsDir?: string): boolean {
   } catch (error) {
     throw new TramaError(`Could not write ${place.exclude}: ${reasonOf(error)}`);
   }
+}
+
+/**
+ * The repair at every ordinary opening of Trama: with Solo mode on in a git repository, writes the block again when the
+ * exclusion file has none or a different one from what the kind and the skills folder need. Returns whether it wrote.
+ * Throws when the write fails. Synchronous: the command line's.
+ */
+export function repairSoloBlock(p: Project, skillsDir?: string): boolean {
+  const solo = readSoloMode(p);
+  if (solo === "off") return false;
+  const place = gitPlace(p.root);
+  return place === null ? false : repairBlock(p, solo, place, skillsDir);
+}
+
+/** `repairSoloBlock` without holding the process while git answers: the editor's host. */
+export async function repairSoloBlockAsync(p: Project, skillsDir?: string): Promise<boolean> {
+  const solo = readSoloMode(p);
+  if (solo === "off") return false;
+  const place = await gitPlaceAsync(p.root);
+  return place === null ? false : repairBlock(p, solo, place, skillsDir);
 }

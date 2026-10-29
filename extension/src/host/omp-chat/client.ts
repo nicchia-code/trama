@@ -9,6 +9,7 @@
 // `sessionCapabilities.close` (`session/close` when a process is stopped), `loadSession` (`session/load` reopens a saved session) and the select of category
 // `model` in the session's configuration options (`session/set_config_option`). The process leads its own group, so stopping it stops what it started.
 import { type ChildProcess, spawn } from "node:child_process";
+import { processStarted } from "../../../../src/core/performance";
 import { certificateReason } from "../../certificate-errors";
 import { cursorKeyEnv } from "../cursor-api-key";
 import { savedSystemCertificates, systemCertificatesEnv } from "../system-certificates";
@@ -534,6 +535,14 @@ class OmpSession implements OmpSessionPort, Client {
     return disposer(this.updateListeners, listener);
   }
 
+  history(): readonly SessionNotification[] {
+    return [...this.updates];
+  }
+
+  onLiveUpdate(listener: (notification: SessionNotification) => void): Disposable {
+    return disposer(this.updateListeners, listener);
+  }
+
   onTurn(listener: (inTurn: boolean) => void): Disposable {
     return disposer(this.turnListeners, listener);
   }
@@ -645,7 +654,11 @@ export class OmpClient implements OmpClientPort {
     // The folder of the omp program and the folder of bun go in front of the launch's PATH, so a script of omp finds its runtime.
     env["PATH"] = ompPathVariable(ompPath, env);
     // The process leads its own group on Linux and macOS, so that stopping it stops every command omp started (`OmpSession.stop`).
+    // The process lives as long as the conversation: only the time it takes to start counts for the diagnostics.
+    const startEnded = processStarted(ompPath === "" ? "omp" : ompPath);
     const child = spawn(ompPath === "" ? "omp" : ompPath, launch.args, { cwd: launch.cwd, env, shell: false, stdio: "pipe", detached: process.platform !== "win32" });
+    child.once("spawn", startEnded);
+    child.once("error", startEnded);
     // The process stands: its pid is known the moment `spawn` succeeds, and a spawn that failed has none.
     if (child.pid !== undefined) spawned?.(child.pid);
     const session = new OmpSession(child, this.deps, launch.cwd, launch.args.includes("--yolo"), launch.hook === true);

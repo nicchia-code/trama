@@ -3,11 +3,11 @@ import type { MenuSituation, MergeMenuState, ToMenuWebview } from "../extension/
 import type { ViewName } from "../extension/src/protocol";
 import { badgeTooltip, MenuModel, type MenuSurface, menuBadge, parseMenuMessage } from "../extension/src/host/menu/model";
 
-function setup(init: { situation?: MenuSituation; facts?: { decisions: number; tasksSinceScan: number; handoffs: number } | undefined; panel?: ViewName; merge?: MergeMenuState; team?: boolean; manager?: boolean } = {}) {
+function setup(init: { situation?: MenuSituation; facts?: { decisions: number; tasksSinceScan: number; handoffs: number } | undefined; panel?: ViewName; merge?: MergeMenuState; manager?: boolean } = {}) {
   const posted: ToMenuWebview[] = [];
   const badges: ({ value: number; tooltip: string } | undefined)[] = [];
   const calls: string[] = [];
-  const env = { situation: init.situation ?? "project", facts: "facts" in init ? init.facts : { decisions: 2, tasksSinceScan: 3, handoffs: 0 }, panel: init.panel, merge: init.merge, team: { team: init.team ?? false, manager: init.manager ?? false } };
+  const env = { situation: init.situation ?? "project", facts: "facts" in init ? init.facts : { decisions: 2, tasksSinceScan: 3, handoffs: 0 }, panel: init.panel, merge: init.merge, manager: init.manager ?? false };
   const surface: MenuSurface = {
     post: (message) => void posted.push(message),
     setBadge: (badge) => void badges.push(badge),
@@ -19,7 +19,7 @@ function setup(init: { situation?: MenuSituation; facts?: { decisions: number; t
     scan: () => void calls.push("scan"),
     openFolder: () => void calls.push("openFolder"),
     mergeState: () => env.merge,
-    manager: () => env.team,
+    manager: () => env.manager,
     startMerge: () => void calls.push("merge"),
     openMergeEditor: () => void calls.push("openMergeEditor"),
     reconcileMerge: () => void calls.push("reconcileMerge"),
@@ -100,42 +100,37 @@ describe("Merge of Solo mode in the state", () => {
 });
 
 describe("Team in the state", () => {
-  test("origin on GitHub in a project carries team: true, with Manager mode on or off; Team available adds manager: true; neither carries none", () => {
-    const off = setup({ team: true }).model.state();
-    expect(off.team).toBe(true);
-    expect("manager" in off).toBe(false);
-    const on = setup({ team: true, manager: true }).model.state();
-    expect(on).toMatchObject({ team: true, manager: true });
+  test("Team available in a project carries manager: true, and without it the state carries none", () => {
+    const on = setup({ manager: true }).model.state();
+    expect(on.manager).toBe(true);
+    expect("team" in on).toBe(false);
     const none = setup().model.state();
-    expect("team" in none).toBe(false);
     expect("manager" in none).toBe(false);
+    expect("team" in none).toBe(false);
   });
 
   test("outside a project there is no Team, whatever the working copy says", () => {
     for (const situation of ["notProject", "noFolder"] as const) {
-      const state = setup({ situation, team: true, manager: true, facts: { decisions: 2, tasksSinceScan: 3, handoffs: 3 } }).model.state();
-      expect("team" in state).toBe(false);
+      const state = setup({ situation, manager: true, facts: { decisions: 2, tasksSinceScan: 3, handoffs: 3 } }).model.state();
       expect("manager" in state).toBe(false);
       expect("handoffs" in state).toBe(false);
     }
   });
 
   test("the open handoffs show as handoffs, only with Team available and more than none, and never in the number of the Board or the badge of the icon", () => {
-    const { model, badges } = setup({ team: true, manager: true, facts: { decisions: 2, tasksSinceScan: 3, handoffs: 3 } });
-    expect(model.state()).toMatchObject({ decisions: 2, team: true, manager: true, handoffs: 3 });
+    const { model, badges } = setup({ manager: true, facts: { decisions: 2, tasksSinceScan: 3, handoffs: 3 } });
+    expect(model.state()).toMatchObject({ decisions: 2, manager: true, handoffs: 3 });
     model.refresh();
     expect(badges.at(-1)).toEqual({ value: 2, tooltip: "2 cards await a decision" });
-    expect("handoffs" in setup({ team: true, manager: true, facts: { decisions: 2, tasksSinceScan: 3, handoffs: 0 } }).model.state()).toBe(false);
-    // With Manager mode off the entry has no number, whatever handoffs wait.
-    expect("handoffs" in setup({ team: true, facts: { decisions: 2, tasksSinceScan: 3, handoffs: 3 } }).model.state()).toBe(false);
+    expect("handoffs" in setup({ manager: true, facts: { decisions: 2, tasksSinceScan: 3, handoffs: 0 } }).model.state()).toBe(false);
+    // Without Team available the entry does not exist, whatever handoffs wait.
+    expect("handoffs" in setup({ facts: { decisions: 2, tasksSinceScan: 3, handoffs: 3 } }).model.state()).toBe(false);
   });
 
-  test("show team is carried out with Manager mode on or off", () => {
-    for (const manager of [true, false]) {
-      const { model, calls } = setup({ team: true, manager });
-      model.receive({ type: "show", view: "team" });
-      expect(calls).toEqual(["show team"]);
-    }
+  test("show team is carried out", () => {
+    const { model, calls } = setup({ manager: true });
+    model.receive({ type: "show", view: "team" });
+    expect(calls).toEqual(["show team"]);
   });
 });
 

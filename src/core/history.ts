@@ -134,7 +134,6 @@ function readEntry(path: string, name: string): HistoryEntry {
 /** Every History entry that reads, newest first; the files that do not read are returned as faults. */
 export function readHistory(p: Project): HistoryRead {
   const dir = historyDir(p);
-  if (!existsSync(dir)) return { entries: [], faults: [] };
   const entries: HistoryEntry[] = [];
   const faults: HistoryFault[] = [];
   for (const name of listNames(dir).filter((n) => !n.startsWith(".")).sort()) {

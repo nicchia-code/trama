@@ -16,7 +16,7 @@ export interface ChatSurface {
   reveal(preserveFocus: boolean): void;
   /** The `trama.theme` setting. */
   theme(): ThemeSetting;
-  /** The project's GitHub repository (`owner/repo`) read from its `origin` remote; null when there is none or it is not on GitHub. */
+  /** The project's GitHub repository (`owner/repo`) the window keeps from its `origin` remote (`ProjectOrigin`, read once, never git here); null when there is none or it is not on GitHub. */
   githubRepo(): string | null;
   /** The text of a file the instruction carries, cut to a reasonable size; undefined when it cannot be read. */
   readText(path: string): string | undefined;
@@ -107,6 +107,11 @@ export class ChatViewModel implements ChatViewPort {
     this.surface.post({ type: "theme", setting: this.surface.theme() });
   }
 
+  /** The window's origin changed: a view that is there gets the GitHub repository again (none when origin is not on GitHub any more). */
+  githubRepoChanged(): void {
+    if (this.ready) this.surface.post({ type: "githubRepo", repo: this.surface.githubRepo() });
+  }
+
   /** The webview is there (it just loaded, or it is a new one): it gets everything again, and a conversation's history is replayed by its session. */
   webviewReady(): void {
     this.ready = true;
@@ -130,11 +135,8 @@ export class ChatViewModel implements ChatViewPort {
     for (const tab of this.tabs) this.unsubscribe(tab);
   }
 
-  open(tab: ConversationTab, session: OmpSessionPort | undefined, options: { focus: boolean; notice?: string; first?: OmpPrompt; instruction?: PendingInstruction }): void {
-    const start: Tab["start"] = {
-      ...(options.first === undefined ? {} : { first: promptOf(options.first, this.surface) }),
-      ...(options.notice === undefined ? {} : { notice: options.notice }),
-    };
+  open(tab: ConversationTab, session: OmpSessionPort | undefined, options: { focus: boolean; notice?: string; instruction?: PendingInstruction }): void {
+    const start: Tab["start"] = options.notice === undefined ? {} : { notice: options.notice };
     const created: Tab = {
       id: tab.id,
       name: tab.name,
@@ -159,12 +161,16 @@ export class ChatViewModel implements ChatViewPort {
     if (session !== undefined) this.subscribe(created);
   }
 
-  /** The session of the conversation `id`, once its process started: its tab stops showing the start and follows the session. */
-  setSession(id: string, session: OmpSessionPort): void {
+  /** The session of the conversation `id`, once it is open: its tab stops showing the start, shows the instruction it starts with (`first`) and follows the session. */
+  setSession(id: string, session: OmpSessionPort, options: { first?: OmpPrompt } = {}): void {
     const tab = this.find(id);
     if (tab === undefined) return;
     tab.session = session;
     tab.inTurn = session.inTurn;
+    if (options.first !== undefined) {
+      tab.start = { ...tab.start, first: promptOf(options.first, this.surface) };
+      if (this.ready) this.surface.post({ type: "conversationStart", id, focus: false, first: tab.start.first });
+    }
     this.postConversations();
     this.subscribe(tab);
   }
@@ -272,9 +278,9 @@ export class ChatViewModel implements ChatViewPort {
         this.webviewReady();
         return;
       case "selectConversation":
+        // The view already shows the tab it chose: the host only keeps the choice, and sends nothing back.
         if (this.find(message.id) === undefined) return;
         this.selected = message.id;
-        this.postConversations();
         return;
       case "sendMessage": {
         const tab = this.find(message.id);
@@ -424,7 +430,7 @@ export class ChatViewModel implements ChatViewPort {
     }
   }
 
-  /** Follows the session: its notifications (the history first), its turns, its forms and its models. */
+  /** Follows the session: its history as one message, then its notifications as they come, its turns, its forms and its models. */
   private subscribe(tab: Tab): void {
     this.unsubscribe(tab);
     // The session replays the requests still waiting; the ones cancelled while the webview was gone are not there.
@@ -432,8 +438,10 @@ export class ChatViewModel implements ChatViewPort {
     const { session } = tab;
     if (session === undefined) return;
     tab.inTurn = session.inTurn;
+    const history = session.history();
+    if (history.length > 0) this.surface.post({ type: "conversationHistory", id: tab.id, updates: [...history] });
     tab.subscriptions = [
-      session.onUpdate((update) => this.surface.post({ type: "conversationUpdate", id: tab.id, update })),
+      session.onLiveUpdate((update) => this.surface.post({ type: "conversationUpdate", id: tab.id, update })),
       session.onTurn((inTurn) => {
         tab.inTurn = inTurn;
         this.postConversations();

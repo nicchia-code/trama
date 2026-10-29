@@ -82,9 +82,8 @@ mock.module("vscode", () => ({
 
 const { Controller } = await import("../extension/src/host/controller");
 const { CURSOR_API_KEY_SECRET, cursorKeyEnv, startCursorApiKey } = await import("../extension/src/host/cursor-api-key");
-const { ensureOmpUpdated, forgetUpdateCheck } = await import("../extension/src/host/omp-update");
+const { ensureOmpUpdated, forgetUpdateCheck, ompStatus } = await import("../extension/src/host/omp-update");
 const { ompModels } = await import("../extension/src/host/model-lists");
-const { ompStatus } = await import("../extension/src/host/omp-status");
 const { ompUsageRunner } = await import("../extension/src/host/omp-chat/usage");
 
 /** The secret storage of the editor: values in memory, failures a test asks for, and `onDidChange` that also fires for the window's own changes, as the editor's does. */
@@ -215,7 +214,7 @@ test.skipIf(process.platform === "win32")("without a saved key the environment i
   expect(received("models --json")).toEqual(["stored", "editor-token"]);
 });
 
-test.skipIf(process.platform === "win32")("omp models, omp --version, the update check and omp usage all receive the key and never a key in their arguments", async () => {
+test.skipIf(process.platform === "win32")("omp models, omp --version (asked once, kept by the module), the update check and omp usage all receive the key and never a key in their arguments", async () => {
   secrets.values.set(CURSOR_API_KEY_SECRET, "secret-value");
   subscription.dispose();
   subscription = await startCursorApiKey(secrets as never, (message) => void errors.push(message));
@@ -225,7 +224,7 @@ test.skipIf(process.platform === "win32")("omp models, omp --version, the update
   await ensureOmpUpdated(program);
   await ompUsageRunner({ ompPath: () => program, findOmp: async () => program, folder: () => root })();
   const seen = calls();
-  expect(seen.map((line) => line.split("|")[0]).sort()).toEqual(["--version", "--version", "models --json", "update --check", "usage --json"]);
+  expect(seen.map((line) => line.split("|")[0]).sort()).toEqual(["--version", "models --json", "update --check", "usage --json"]);
   for (const line of seen) expect(line.split("|")[1]).toBe("secret-value");
   expect(seen.some((line) => line.split("|")[0]?.includes("secret-value"))).toBe(false);
 });

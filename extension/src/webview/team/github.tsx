@@ -20,7 +20,6 @@ import {
   LOADING_TEXT,
   NO_ITERATION_TEXT,
   ownerOf,
-  PULL_REQUESTS_READ_ERROR_TITLE,
   staleText,
   updatedText,
 } from "./logic";
@@ -130,14 +129,14 @@ function ProjectButton({ github, post, onPickAnother }: PopoverProps) {
   );
 }
 
-/** On the title's line of the Team view: with Manager mode on the Project's button and, at the right, when GitHub was read and `Refresh`; with it off only `Updated …` and `Refresh`. */
-export function GitHubHeader({ github, manager, post, onPickAnother }: { github: GitHubMessage | null; manager: boolean; post: Post; onPickAnother: () => void }) {
+/** On the title's line of the Team view: the Project's button and, at the right, when GitHub was read and `Refresh`. */
+export function GitHubHeader({ github, post, onPickAnother }: { github: GitHubMessage | null; post: Post; onPickAnother: () => void }) {
   const now = useNow();
   if (github === null) return null;
   const updated = github.state === "loading" ? LOADING_TEXT : updatedText(github.readAt, now);
   return (
     <>
-      {manager ? <ProjectButton github={github} post={post} onPickAnother={onPickAnother} /> : null}
+      <ProjectButton github={github} post={post} onPickAnother={onPickAnother} />
       <div className="ml-auto flex items-center gap-3">
         {updated === "" ? null : (
           <span className="text-xs text-muted-foreground" role="status">
@@ -184,14 +183,10 @@ const ReadsOf = ({ github }: { github: GitHubMessage }) =>
     </>
   );
 
-/**
- * The box of the state of `gh` at the top of the content (`ui#github-project`): nothing while it is `loading` or `ready`. Without Manager mode the view reads only the pull
- * requests: its texts say so, there is no missing access to Projects (`Give access` is the Manager's) and a failed read is the pull requests'.
- */
-export function GitHubBanner({ github, manager, post }: { github: GitHubMessage | null; manager: boolean; post: Post }) {
+/** The box of the state of `gh` at the top of the content (`ui#github-project`): nothing while it is `loading` or `ready`. */
+export function GitHubBanner({ github, post }: { github: GitHubMessage | null; post: Post }) {
   const now = useNow();
   if (github === null || github.state === "loading" || github.state === "ready") return null;
-  if (github.state === "no-project-access" && !manager) return null;
   const refresh = (
     <Button type="button" variant="ghost" disabled={github.reading} onClick={() => post({ type: "refreshTeam" })}>
       <RefreshCw aria-hidden="true" />
@@ -216,15 +211,7 @@ export function GitHubBanner({ github, manager, post }: { github: GitHubMessage 
           }
         >
           <p>
-            {manager ? (
-              <>
-                Team uses <Code>gh</Code> to read the Project and publish issues. Install it, then select Refresh.
-              </>
-            ) : (
-              <>
-                Team uses <Code>gh</Code> to read the pull requests. Install it, then select Refresh.
-              </>
-            )}
+            Team uses <Code>gh</Code> to read the Project and publish issues. Install it, then select Refresh.
           </p>
         </Box>
       );
@@ -242,15 +229,7 @@ export function GitHubBanner({ github, manager, post }: { github: GitHubMessage 
           }
         >
           <p>
-            {manager ? (
-              <>
-                Log in so Team can read <ReadsOf github={github} /> and publish approved issues. This runs <Code>gh auth login</Code> in a terminal.
-              </>
-            ) : (
-              <>
-                Log in so Trama can read the pull requests of {github.repository === null ? "the repository" : <Code>{github.repository}</Code>}. This runs <Code>gh auth login</Code> in a terminal.
-              </>
-            )}
+            Log in so Team can read <ReadsOf github={github} /> and publish approved issues. This runs <Code>gh auth login</Code> in a terminal.
           </p>
         </Box>
       );
@@ -278,7 +257,7 @@ export function GitHubBanner({ github, manager, post }: { github: GitHubMessage 
         <Box
           tone="destructive"
           icon={<CircleAlert aria-hidden="true" />}
-          title={manager ? "Couldn't read the GitHub Project" : PULL_REQUESTS_READ_ERROR_TITLE}
+          title="Couldn't read the GitHub Project"
           actions={
             <>
               <Button type="button" variant="outline" disabled={github.reading} onClick={() => post({ type: "refreshTeam" })}>

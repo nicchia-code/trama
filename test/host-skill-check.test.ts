@@ -23,6 +23,7 @@ mock.module("vscode", () => ({
 const { run } = await import("../src/cli/main");
 const { checkSkills } = await import("../extension/src/host/project");
 const { projectAt } = await import("../src/core/store");
+const { refreshProjectSkills } = await import("../src/cli/skill-refresh");
 
 const UPDATED = "Trama: updated the agent skills to this version.";
 let root: string;
@@ -108,4 +109,25 @@ test("a failure shows the error, and the next opening shows it again while the p
     expect(m.kind).toBe("error");
     expect(m.text).toStartWith("Trama: could not update the agent skills: ");
   }
+});
+
+test("the check gives the thread back while it reads and writes the files, and ends as the synchronous refresh does", async () => {
+  writeFileSync(join(root, ".agents/skills/trama-design/SKILL.md"), "edited by hand");
+  // The other work of the host, as a chain of turns of the event loop: each runs between two steps of the check.
+  let turns = 0;
+  let working = true;
+  const turn = () => {
+    if (!working) return;
+    turns++;
+    setImmediate(turn);
+  };
+  setImmediate(turn);
+  await checkSkills(projectAt(root));
+  working = false;
+  // Each skill file is a step of the three passes (conflicts, missing, install): far more turns than the one a check that ran in one go would leave.
+  expect(turns).toBeGreaterThan(20);
+  expect(messages).toEqual([{ kind: "info", text: UPDATED }]);
+  expect(readFileSync(join(root, ".agents/skills/trama-design/SKILL.md"), "utf8")).not.toBe("edited by hand");
+  // What the steps wrote is what the synchronous refresh (the command line's) finds in line.
+  expect(refreshProjectSkills(projectAt(root), undefined, false).updated).toBe(false);
 });

@@ -97,7 +97,7 @@ function Row({ item, message, narrow, now, post, onReport }: { item: PullRequest
 }
 
 /**
- * The `Pull Requests` tab of the Team view, the only one without Manager mode (`ui#pull-request-check`): a header with how many pull requests are ready for review and one row for each,
+ * The `Pull Requests` tab, not offered by the Team view while the PR Check is hidden (`ui#pull-request-check`): a header with how many pull requests are ready for review and one row for each,
  * the highest number first, with its status and what the developer can do (`Check`, `Stop`, `Report`, `Open on GitHub`). `Report` opens the window of the report of the pull request,
  * which follows what the host sends: it closes when the pull request or its report is gone.
  */

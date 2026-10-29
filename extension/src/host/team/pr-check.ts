@@ -18,7 +18,7 @@ export interface PrCheckPorts {
   /** Whether a Run launched from this window is in progress. */
   runInProgress(): boolean;
   /** Writes the agent skills, the agent definitions and the advisor instructions of this version into the worktree: the check at every opening, on the worktree. */
-  writeSkills(worktree: Project): void;
+  writeSkills(worktree: Project): void | Promise<void>;
   /**
    * Launches the scan in the worktree (`prepared`): the agent works in `prepared.root`, the job, the announcement `Checking PR #<n>` and the question channel stay on the open folder.
    * `onStarted` hears of the terminal or conversation when the launch is sure to go on, `onEnd` of the end of the job (hook idle, end of turn, end of the command, terminal closed, execution check).

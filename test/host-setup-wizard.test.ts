@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startCursorApiKey } from "../extension/src/host/cursor-api-key";
+import type { WindowOrigin } from "./window-origin";
 
 const NO_ORIGIN = { repository: null, reason: "No origin remote" };
 // A minimal editor: one webview panel that records what it is sent, user settings in memory, and the modal dialog answers.
@@ -104,12 +105,15 @@ mock.module("../extension/src/host/agent", () => ({
   loginOmp: (program: string, provider: { id: string; name: string }, finish: () => void) => void logins.push({ program, provider, finish }),
 }));
 const { Controller } = await import("../extension/src/host/controller");
+const { windowOrigin } = await import("./window-origin");
 
 let root: string;
 let controller: InstanceType<typeof Controller>;
+/** The window's git directories and origin, as the editor keeps them (the project is the folder once it has a `.trama`). */
+let window: WindowOrigin;
 let setups: number;
 
-beforeEach(() => {
+beforeEach(async () => {
   root = mkdtempSync(join(tmpdir(), "trama-wizard-host-"));
   workspaceFolders = [{ name: "app", uri: { fsPath: root, scheme: "file" } }];
   messages.length = 0;
@@ -126,11 +130,13 @@ beforeEach(() => {
   setups = 0;
   logins.length = 0;
   receive = undefined;
-  controller = new Controller({ fsPath: root } as never, undefined, undefined, { writeSetup: async () => void setups++ } as never);
+  window = await windowOrigin();
+  controller = new Controller({ fsPath: root } as never, undefined, undefined, { writeSetup: async () => void setups++ } as never, undefined, undefined, undefined, window.git, window.origin);
 });
 
 afterEach(() => {
   controller.dispose();
+  window.stop();
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -271,6 +277,35 @@ test.skipIf(process.platform === "win32")("a change of the omp path sends the st
     { type: "ompStatus", state: "done", missing: false, version: "18.12.6", models: 3, providers: ["anthropic", "xai-oauth"] },
   ]);
   expect(messages.filter((m) => m["type"] === "modelSuggestions")).toEqual([{ type: "modelSuggestions", models: [{ value: "a/b" }, { value: "c/d" }, { value: "c/e" }] }]);
+});
+
+test.skipIf(process.platform === "win32")("omp is prepared once per window: the first Settings appearance runs it once, every other one answers with the last result and starts nothing, and refreshOmp(true) prepares it again", async () => {
+  const { forgetOmp } = await import("../extension/src/host/omp-update");
+  forgetOmp();
+  const { program, calls } = fakeOmp();
+  userSettings.set("ompPath", program);
+  // The Settings tab asks for the model names and the status together: one `omp models --json` serves both.
+  await controller.open();
+  messages.length = 0;
+  await Promise.all([send({ type: "modelSuggestionsWanted" }), send({ type: "ompStatusWanted" })]);
+  await controller.refreshOmp();
+  expect(calls()).toBe(1);
+  const done = { type: "ompStatus", state: "done", missing: false, version: "18.12.6", models: 3, providers: ["anthropic", "xai-oauth"] };
+  expect(messages.filter((m) => m["type"] === "ompStatus")).toEqual([{ type: "ompStatus", state: "checking" }, done]);
+
+  // Another appearance of Settings, and the Board asking for models: the last result at once, no `checking`, no process.
+  messages.length = 0;
+  await Promise.all([send({ type: "modelSuggestionsWanted" }), send({ type: "ompStatusWanted" })]);
+  await send({ type: "modelSuggestionsWanted" });
+  expect(calls()).toBe(1);
+  expect(messages.filter((m) => m["type"] === "ompStatus")).toEqual([done, done, done]);
+  expect(messages.filter((m) => m["type"] === "modelSuggestions")).toEqual(Array(3).fill({ type: "modelSuggestions", models: [{ value: "a/b" }, { value: "c/d" }, { value: "c/e" }] }));
+
+  // A change that can alter them prepares them again.
+  messages.length = 0;
+  await controller.refreshOmp(true);
+  expect(calls()).toBe(2);
+  expect(messages.filter((m) => m["type"] === "ompStatus")).toEqual([{ type: "ompStatus", state: "checking" }, done]);
 });
 
 /** An omp of version `version` that is up to date and lists one model. */
@@ -672,6 +707,21 @@ test("without a project no soloMode is sent; in a project it is sent at ready an
   expect(soloMessages()).toEqual([{ type: "soloMode", available: true, solo: "off", tracked: [] }]);
 });
 
+test("Settings becoming visible sends the last Solo mode without asking git: only a write works it out again", async () => {
+  gitRepo(true);
+  await send({ type: "ready" });
+  expect(soloMessages()).toEqual([{ type: "soloMode", available: true, solo: "off", tracked: [] }]);
+  // The files of the project change outside the panel: what the panel is sent is the last value, whatever git would say now.
+  rmSync(join(root, ".git"), { recursive: true, force: true });
+  messages.length = 0;
+  await send({ type: "ready" });
+  await send({ type: "ompStatusWanted" });
+  expect(soloMessages()).toEqual([
+    { type: "soloMode", available: true, solo: "off", tracked: [] },
+    { type: "soloMode", available: true, solo: "off", tracked: [] },
+  ]);
+});
+
 test("setSoloMode writes the project's Solo mode and answers with it, with the tracked files of Trama; off removes it again", async () => {
   gitRepo(true);
   spawnSync("git", ["add", "-f", ".trama/model/system.md"], { cwd: root });
@@ -769,24 +819,27 @@ const managerMessages = () => messages.filter((m) => m["type"] === "managerMode"
 const managerFile = () => join(root, ".trama", "manager", "mode.json");
 const GITHUB_ORIGIN = "git@github.com:Acme/Web.git";
 
-/** A git repository with the given origin, and a Trama project with an empty Model when asked. */
-function repoWithOrigin(origin: string | null, project = true): void {
+/** A git repository with the given origin, and a Trama project with an empty Model when asked; the window opens it, so origin is read. */
+async function repoWithOrigin(origin: string | null, project = true): Promise<void> {
   gitRepo(project);
   if (origin !== null) spawnSync("git", ["remote", "add", "origin", origin], { cwd: root });
+  await window.open();
 }
 
 test("the folders of the first setup carry what their origin says", async () => {
-  repoWithOrigin(GITHUB_ORIGIN, false);
+  await repoWithOrigin(GITHUB_ORIGIN, false);
   await send({ type: "ready" });
   expect(messages).toContainEqual({ type: "workspaceFolders", folders: [{ name: "app", root, hasFiles: false, inGit: true, origin: { repository: "acme/web", reason: null } }] });
 });
 
 test("without a project no managerMode is sent; in a project it is sent at ready, with every picture and each time the Settings view asks for the omp status", async () => {
-  repoWithOrigin(GITHUB_ORIGIN, false);
+  await repoWithOrigin(GITHUB_ORIGIN, false);
   await send({ type: "ready" });
   expect(managerMessages()).toEqual([]);
   mkdirSync(join(root, ".trama", "model"), { recursive: true });
   writeFileSync(join(root, ".trama", "model", "system.md"), "# App\n\nx\n");
+  // The project appears: the window opens it and reads its origin.
+  await window.open();
   messages.length = 0;
   await send({ type: "ready" });
   expect(managerMessages()).toEqual([{ type: "managerMode", available: false, recorded: false, repository: "acme/web", reason: null }]);
@@ -795,21 +848,27 @@ test("without a project no managerMode is sent; in a project it is sent at ready
   expect(managerMessages()).toEqual([{ type: "managerMode", available: false, recorded: false, repository: "acme/web", reason: null }]);
 });
 
-test("the origin is read again with every picture: a change of origin reaches the panel without reloading", async () => {
-  repoWithOrigin(GITHUB_ORIGIN);
+test("a change of git's config reaches the panel without reloading, and a picture never reads origin again", async () => {
+  await repoWithOrigin(GITHUB_ORIGIN);
   await send({ type: "setManagerMode", on: true });
   spawnSync("git", ["remote", "set-url", "origin", "https://gitlab.com/acme/web"], { cwd: root });
   messages.length = 0;
+  // Nothing told the window that git's config changed: a picture and the panel's `ready` show what it last read.
   await send({ type: "ready" });
+  expect(managerMessages().at(-1)).toEqual({ type: "managerMode", available: true, recorded: true, repository: "acme/web", reason: null });
+  messages.length = 0;
+  await window.changed();
+  await settled();
   expect(managerMessages().at(-1)).toEqual({ type: "managerMode", available: false, recorded: true, repository: null, reason: "Origin is not on GitHub" });
   spawnSync("git", ["remote", "remove", "origin"], { cwd: root });
   messages.length = 0;
-  await send({ type: "ready" });
+  await window.changed();
+  await settled();
   expect(managerMessages().at(-1)).toEqual({ type: "managerMode", available: false, recorded: true, repository: null, reason: "No origin remote" });
 });
 
 test("setManagerMode writes only the Manager mode file and answers with the status; off deletes only the file", async () => {
-  repoWithOrigin(GITHUB_ORIGIN);
+  await repoWithOrigin(GITHUB_ORIGIN);
   await send({ type: "setManagerMode", on: true });
   expect(managerMessages()).toEqual([{ type: "managerMode", available: true, recorded: true, repository: "acme/web", reason: null }]);
   expect(readFileSync(managerFile(), "utf8")).toBe("{}\n");
@@ -823,7 +882,7 @@ test("setManagerMode writes only the Manager mode file and answers with the stat
 });
 
 test("turning Manager mode on without origin on GitHub is an editor error with the reason, and the row is told the recorded value", async () => {
-  repoWithOrigin(null);
+  await repoWithOrigin(null);
   await send({ type: "setManagerMode", on: true });
   expect(errors).toEqual(["Trama: could not save Manager Mode: Manager Mode needs a repository on GitHub (the origin remote)."]);
   expect(managerMessages()).toEqual([{ type: "managerMode", available: false, recorded: false, repository: null, reason: "No origin remote" }]);
@@ -831,7 +890,7 @@ test("turning Manager mode on without origin on GitHub is an editor error with t
 });
 
 test("Manager mode is not a setting: setSetting refuses it, and a value that is not a boolean is refused", async () => {
-  repoWithOrigin(GITHUB_ORIGIN);
+  await repoWithOrigin(GITHUB_ORIGIN);
   await send({ type: "setSetting", key: "trama.managerMode", value: true });
   await send({ type: "setManagerMode", on: "yes" });
   expect(messages.filter((m) => m["type"] === "error")).toHaveLength(2);
@@ -839,7 +898,7 @@ test("Manager mode is not a setting: setSetting refuses it, and a value that is 
 });
 
 test("the first setup with Manager mode passes it to project new: written after the project's files, with the project told", async () => {
-  repoWithOrigin(GITHUB_ORIGIN, false);
+  await repoWithOrigin(GITHUB_ORIGIN, false);
   await send(confirm({ choice: "scratch", manager: true }));
   expect(existsSync(join(root, ".trama", "model", "system.md"))).toBe(true);
   expect(readFileSync(managerFile(), "utf8")).toBe("{}\n");
@@ -849,14 +908,14 @@ test("the first setup with Manager mode passes it to project new: written after 
 });
 
 test("the first setup with Manager mode off writes nothing of Manager mode", async () => {
-  repoWithOrigin(GITHUB_ORIGIN, false);
+  await repoWithOrigin(GITHUB_ORIGIN, false);
   await send(confirm({ choice: "scratch", manager: false }));
   expect(existsSync(join(root, ".trama", "model", "system.md"))).toBe(true);
   expect(existsSync(join(root, ".trama", "manager"))).toBe(false);
 });
 
 test("the first setup whose Manager mode cannot be written still creates the project and goes on, with the reason shown", async () => {
-  repoWithOrigin(null, false);
+  await repoWithOrigin(null, false);
   await send(confirm({ choice: "scratch", manager: true }));
   expect(existsSync(join(root, ".trama", "model", "system.md"))).toBe(true);
   expect(existsSync(join(root, ".trama", "manager"))).toBe(false);
@@ -866,7 +925,7 @@ test("the first setup whose Manager mode cannot be written still creates the pro
 });
 
 test("the Guided setup writes Manager mode after the settings, only when it differs from the project's value", async () => {
-  repoWithOrigin(GITHUB_ORIGIN);
+  await repoWithOrigin(GITHUB_ORIGIN);
   await send(confirm({ mode: "settings", choice: undefined, root: undefined, manager: true, values: [{ key: "trama.scan", value: "m" }] }));
   expect(readFileSync(managerFile(), "utf8")).toBe("{}\n");
   expect(userSettings.get("scan")).toBe("m");
@@ -881,7 +940,7 @@ test("the Guided setup writes Manager mode after the settings, only when it diff
 });
 
 test("the Empty Model mode writes Manager mode before going on with the path", async () => {
-  repoWithOrigin(GITHUB_ORIGIN);
+  await repoWithOrigin(GITHUB_ORIGIN);
   await send(confirm({ mode: "empty-model", root: undefined, manager: true }));
   expect(existsSync(managerFile())).toBe(true);
   expect(results()).toEqual([{ type: "guidedSetupResult", ok: true, error: null }]);
@@ -889,7 +948,7 @@ test("the Empty Model mode writes Manager mode before going on with the path", a
 });
 
 test("a failed write of Manager mode in the other modes counts as a failed save: the wizard stays on the summary and nothing starts", async () => {
-  repoWithOrigin(null);
+  await repoWithOrigin(null);
   await send(confirm({ mode: "empty-model", root: undefined, manager: true, values: [{ key: "trama.scan", value: "m" }] }));
   expect(results()).toEqual([{ type: "guidedSetupResult", ok: false, error: "Could not save Manager Mode: Manager Mode needs a repository on GitHub (the origin remote)." }]);
   expect(userSettings.get("scan")).toBe("m");
@@ -898,7 +957,7 @@ test("a failed write of Manager mode in the other modes counts as a failed save:
 });
 
 test("a Manager mode left on whose origin moved away stays recorded when the wizard writes nothing for it", async () => {
-  repoWithOrigin(GITHUB_ORIGIN);
+  await repoWithOrigin(GITHUB_ORIGIN);
   await send({ type: "setManagerMode", on: true });
   spawnSync("git", ["remote", "remove", "origin"], { cwd: root });
   await send(confirm({ mode: "settings", choice: undefined, root: undefined, values: [{ key: "trama.scan", value: "m" }] }));

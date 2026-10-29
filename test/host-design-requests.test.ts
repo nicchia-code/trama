@@ -30,6 +30,7 @@ const listeners = {
   active: [] as Listener<unknown>[],
   change: [] as Listener<{ document: FakeDocument; contentChanges: unknown[] }>[],
   tabs: [] as Listener<{ opened: unknown[]; closed: unknown[] }>[],
+  created: [] as Listener<FakeUri>[],
   deleted: [] as Listener<FakeUri>[],
   visible: [] as Listener<unknown>[],
 };
@@ -75,8 +76,12 @@ const contexts: Array<[string, unknown]> = [];
 const warnings: string[] = [];
 let active: FakeDocument | undefined;
 let command: ((id: string) => Promise<void>) | undefined;
-/** The extension's watcher of `.trama/`; the panel is closed, so it alone reports the deletion. */
-const tramaFiles = { onDidDelete: subscribe(listeners.deleted) };
+/** The extension's watcher of `.trama/`; the panel is closed, so it alone reports the creation and the deletion of files. */
+const tramaFiles = { onDidCreate: subscribe(listeners.created), onDidDelete: subscribe(listeners.deleted) };
+/** A request file another process wrote: the watcher reports it. */
+function createFile(fsPath: string) {
+  for (const fn of listeners.created) fn(fileUri(fsPath));
+}
 function deleteFile(document: FakeDocument) {
   rmSync(document.uri.fsPath);
   for (const fn of listeners.deleted) fn(document.uri);
@@ -331,6 +336,59 @@ describe("Trama saves a request by itself", () => {
   });
 });
 
+describe("the editor's events do not read the disk", () => {
+  const keyed = (key: string) => contexts.filter(([name]) => name === key);
+
+  test("the context keys are sent only when their value changes", async () => {
+    await requests.write();
+    const request = active as FakeDocument;
+    const other = openDocument(join(dir, "notes.md"));
+    contexts.length = 0;
+    // The same tab focused again, or a change of tab that leaves the value where it is, sends nothing.
+    focus(request);
+    focus(request);
+    expect(contexts).toEqual([]);
+    focus(other);
+    expect(keyed("trama.designRequest")).toEqual([["trama.designRequest", false]]);
+    expect(keyed("trama.designRequestResources")).toEqual([["trama.designRequestResources", {}]]);
+    contexts.length = 0;
+    focus(other);
+    focus(undefined);
+    expect(contexts).toEqual([]);
+    focus(request);
+    expect(keyed("trama.designRequest")).toEqual([["trama.designRequest", true]]);
+    expect(keyed("trama.designRequestResources")).toEqual([["trama.designRequestResources", { [request.uri.fsPath]: true }]]);
+  });
+
+  test("a request file is known from the watcher of `.trama/`, not from the disk", async () => {
+    await sleep(20); // The request files are listed once when the window starts; after that the watcher alone says which exist.
+    await requests.write();
+    const known = active as FakeDocument;
+    focus(undefined);
+    // A file written behind the editor's back and not reported by the watcher is not looked for on the disk when its tab is focused...
+    const quiet = join(requestsDir(p), "2026-01-02T03-04-05.md");
+    writeFileSync(quiet, "# Quiet\n");
+    focus(openDocument(quiet));
+    expect(lastContext()).toBe(false);
+    // ...and it is a request to send as soon as the watcher reports it.
+    createFile(quiet);
+    focus(known);
+    focus(openDocument(quiet));
+    expect(lastContext()).toBe(true);
+  });
+
+  test("a document outside `.trama/requests/` is passed over before the project is asked for", () => {
+    const asked: string[] = [];
+    const watching = new DesignRequests(state as never, tramaFiles as never, () => (asked.push("project"), p), launch);
+    asked.length = 0;
+    const outside = openDocument(join(dir, "src", "notes.md"));
+    focus(outside);
+    type(outside, "typing");
+    watching.dispose();
+    expect(asked).toEqual([]);
+  });
+});
+
 describe("Send to agent", () => {
   test("shows only on requests never sent", async () => {
     const document = await writeRequest("# Returns\n");
@@ -439,10 +497,13 @@ describe("the list of sent requests", () => {
     await requests.send();
     rmSync(gone.uri.fsPath);
     const restarted = new DesignRequests(state as never, tramaFiles as never, () => p, launch);
+    // The files are listed once at the start, asynchronously: the lists of requests settle when the listing is back.
+    await sleep(20);
     restarted.dispose();
     expect(state.get<string[]>(SENT_KEY, [])).toEqual([idOf(kept)]);
     focus(openDocument(kept.uri.fsPath));
     const again = new DesignRequests(state as never, tramaFiles as never, () => p, launch);
+    await sleep(20);
     again.dispose();
     expect(lastContext()).toBe(false);
   });

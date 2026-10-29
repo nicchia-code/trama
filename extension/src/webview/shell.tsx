@@ -18,7 +18,7 @@ export interface ShellState {
   questions: ReactNode;
   /** The project's GitHub repository (`owner/repo`) the host sent with the picture; null without one. */
   githubRepo: string | null;
-  /** Whether origin is on GitHub (Manager mode on or off): only then the panel has the Team view. */
+  /** Whether Team is available (Manager mode on, origin on GitHub): only then the panel has the Team view. */
   team: boolean;
 }
 

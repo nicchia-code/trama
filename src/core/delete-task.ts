@@ -6,6 +6,7 @@ import type { Project } from "./store";
 import { taskImagesDir } from "./task-images";
 import { openExtent } from "./blocking";
 import { type Drift, getTaskOrNull, indexDrifts, listDrifts, type Task } from "./work";
+import { noteRemoved } from "./written";
 
 /** Why a Drift holds a Task in To do: the Task is an origin of an open Drift (of one of its open differences, for a unified Drift with differences), or the Task that fixes the code of a Drift in Code to be fixed or of one of its differences. */
 export interface TaskHold {
@@ -37,8 +38,10 @@ export function tasksHeldByDrifts(drifts: readonly Drift[]): Map<string, TaskHol
 /** Deletes the file of a Task, its percentage and its images folder; each is skipped when it does not exist. The one place where the files of a Task are deleted: Clear and Delete both use it. */
 export function removeTaskFiles(p: Project, task: Task): void {
   rmSync(task.path, { force: true });
+  noteRemoved(task.path);
   clearProgress(p, task.id);
   rmSync(taskImagesDir(p, task.id), { recursive: true, force: true });
+  noteRemoved(taskImagesDir(p, task.id));
 }
 
 /**

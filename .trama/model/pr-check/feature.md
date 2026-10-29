@@ -1,5 +1,7 @@
 # PR Check
 
+Hidden for now: no surface of Trama offers the PR Check. The Team view has no Pull Requests tab and exists only with Manager mode on, Trama reads no pull request from GitHub and starts no PR Check, and the Events of the developer that start or stop one cannot happen. What follows describes the PR Check as it works when it is offered; its code stays in the project. The reports already written stay in the working copy as they are, neither read nor deleted, and a worktree left behind by an earlier PR Check is still removed when a window opens the project.
+
 How a developer checks a pull request of someone else against the Model before it is merged, without touching the folder he works in. Anyone can do it, with or without Manager mode, in a project whose repository is on GitHub: the Pull Requests tab of the Team view lists the open pull requests that are ready for review, and Check on one of them starts the PR Check (see the Panel).
 
 Trama takes the head of the pull request as it is, with no merge, into a git worktree of its own, kept in the editor's private folder for the workspace and never in the project: the open folder, its Board, its last scan and everything it keeps locally stay as they are. In that worktree the agent scans the whole System, like Scan System, and the cards it files stay there. When the agent has finished, Trama gathers what the scan found and what Trama itself checked into a report, then removes the worktree. The scan is always of the whole System: it costs, and that is wanted.

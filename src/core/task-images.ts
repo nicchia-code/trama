@@ -1,6 +1,7 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
-import type { Project } from "./store";
+import { dirEntries, fileModified, type Project } from "./store";
+import { noteWritten } from "./written";
 
 /**
  * The images a Task carries for the model that implements it: copies of the local images of a written request,
@@ -56,6 +57,7 @@ export function copyTaskImages(p: Project, id: string, sources: string[]): TaskI
     const name = freeName(basename(source), (candidate) => existsSync(join(dir, candidate)));
     const path = join(dir, name);
     copyFileSync(source, path);
+    noteWritten(path);
     copies.push({ name, path });
   }
   return copies;
@@ -67,20 +69,13 @@ export function copyTaskImages(p: Project, id: string, sources: string[]): TaskI
  */
 export function readTaskImages(p: Project, id: string): TaskImage[] {
   const dir = taskImagesDir(p, id);
-  let names: string[];
-  try {
-    names = readdirSync(dir);
-  } catch {
-    return [];
-  }
   const found: { name: string; path: string; mtime: number }[] = [];
-  for (const name of names) {
-    if (name.startsWith(".")) continue;
-    const path = join(dir, name);
-    try {
-      const stat = statSync(path);
-      if (stat.isFile()) found.push({ name, path, mtime: stat.mtimeMs });
-    } catch { /* Gone between the listing and the stat: it does not appear. */ }
+  for (const entry of dirEntries(dir)) {
+    if (entry.name.startsWith(".") || entry.directory) continue;
+    const path = join(dir, entry.name);
+    // An image that is gone between the listing and the look does not appear.
+    const mtime = fileModified(path);
+    if (mtime !== undefined) found.push({ name: entry.name, path, mtime });
   }
   found.sort((a, b) => a.mtime - b.mtime || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   return found.map(({ name, path }) => ({ name, path }));

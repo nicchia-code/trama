@@ -38,20 +38,22 @@ const store = createShellStore({ view: "board", hasProject: null, error: null, d
 const slotOf = (view: ViewName) => (node: ReactNode) => store.set({ views: { ...store.get().views, [view]: node } });
 let snapshot: Snapshot | null = null;
 
-/** Without a project only Get Started and Settings exist; with one, every view but Get Started, and Team only while origin is on GitHub, with Manager mode on or off. Before the host says, any view but Team goes (the panel starts on the Board). */
+/** Without a project only Get Started and Settings exist; with one, every view but Get Started, and Team only while it is available (Manager mode on, origin on GitHub). Before the host says, any view but Team goes (the panel starts on the Board). */
 const exists = (view: ViewName): boolean => {
   const { hasProject, team: teamView } = store.get();
   if (view === "team") return teamView && hasProject !== false;
   return hasProject === null || (hasProject ? view !== "getstarted" : view === "getstarted" || view === "settings");
 };
 
+/** Moves to `view`; Team without Team available opens the Board. */
 function navigate(view: ViewName, options: NavigateOptions = {}) {
-  if (!exists(view)) return;
+  const target = view === "team" && !exists("team") ? "board" : view;
+  if (!exists(target)) return;
   const previous = store.get().view;
-  if (previous !== view) mounted[previous].hide?.();
-  store.set({ view });
-  post({ type: "viewChanged", view });
-  mounted[view].show(options);
+  if (previous !== target) mounted[previous].hide?.();
+  store.set({ view: target });
+  post({ type: "viewChanged", view: target });
+  mounted[target].show(options);
 }
 
 /** The panel moves to Get Started when the project is missing and to the Board when it appears. */
@@ -141,13 +143,11 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
   else if (message.type === "ntfyToken") settings.receiveNtfyToken(message);
   else if (message.type === "soloMode") settings.receiveSoloMode(message);
   else if (message.type === "managerMode") {
-    store.set({ team: message.repository !== null });
-    team.receiveManager(message.available);
+    store.set({ team: message.available });
     settings.receiveManagerMode(message);
   } else if (message.type === "team") team.receive(message);
   else if (message.type === "personRejected") team.receiveRejected(message.errors);
   else if (message.type === "teamGitHub") team.receiveGitHub(message);
-  else if (message.type === "pullRequests") team.receivePullRequests(message);
   else if (message.type === "issueFieldRejected") team.receiveFieldRejected(message.handoff, message.issue, message.key, message.message);
   else if (message.type === "testNotification") settings.receiveTestNotification(message);
   else if (message.type === "systemCertificates") {

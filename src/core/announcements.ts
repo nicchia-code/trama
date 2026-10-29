@@ -3,10 +3,11 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomic } from "./atomic-write";
 import { TramaError, UsageError } from "./errors";
-import { withFileLock } from "./file-lock";
+import { withFileLock, withFileLockAsync } from "./file-lock";
 import { enumField, idField, type Raw } from "./schema";
 import { cardName } from "./short-numbers";
 import { documentText, listNames, type Project, readDocument, writeFileEnsuringDir } from "./store";
+import { noteRemoved } from "./written";
 
 /**
  * An announcement is a card the agent is about to create, kept in a temporary file so the Board can show a ghost of
@@ -220,6 +221,16 @@ function lockedIfAny<T>(p: Project, none: T, fn: () => T): T {
   return existsSync(announcementsDir(p)) ? withAnnouncementsLock(p, fn) : none;
 }
 
+/** `withAnnouncementsLock` for the editor's host: the wait for a lock another process holds gives the thread back. */
+export function withAnnouncementsLockAsync<T>(p: Project, fn: () => Promise<T> | T): Promise<T> {
+  return withFileLockAsync(announcementsDir(p), ANNOUNCEMENTS_LOCK, fn);
+}
+
+/** As `lockedIfAny`, for the editor's host. */
+async function lockedIfAnyAsync<T>(p: Project, none: T, fn: () => Promise<T> | T): Promise<T> {
+  return existsSync(announcementsDir(p)) ? withAnnouncementsLockAsync(p, fn) : none;
+}
+
 /** The announcement `id` as it is on disk now, or null when its file no longer exists (or cannot be read). */
 function readOne(p: Project, id: string): Announcement | null {
   if (!ID_PATTERN.test(id)) return null;
@@ -245,6 +256,7 @@ function write(p: Project, a: Announcement) {
 
 function remove(p: Project, id: string) {
   rmSync(fileOf(p, id), { force: true });
+  noteRemoved(fileOf(p, id));
 }
 
 /**
@@ -253,7 +265,6 @@ function remove(p: Project, id: string) {
  */
 export function listAnnouncements(p: Project): Announcement[] {
   const dir = announcementsDir(p);
-  if (!existsSync(dir)) return [];
   const out: Announcement[] = [];
   for (const name of listNames(dir)) {
     if (!FILE_PATTERN.test(name)) continue;
@@ -280,51 +291,66 @@ function nextAnnouncedStamp(p: Project): string {
 export const getAnnouncement = (p: Project, id: string): Announcement | null => listAnnouncements(p).find((a) => a.id === id) ?? null;
 
 /** Announces a card as soon as it is known it will be created. */
-export function announce(
-  p: Project,
-  input: { kind: AnnouncementKind; title: string; source?: AnnouncementSource; proposal?: string; phase?: CheckPhase; drifts?: string[]; machine?: string; refs?: string[]; code?: string | null; texts?: Record<string, string> } & AgentOrigin,
-  now = new Date(),
-): Announcement {
+export function announce(p: Project, input: AnnounceInput, now = new Date()): Announcement {
+  const title = checkedAnnouncement(input);
+  return withAnnouncementsLock(p, () => announced(p, input, title, now));
+}
+
+/**
+ * `announce` for the editor's host: the wait for a lock another process holds gives the thread back. The announcement is written while the lock is held, in one go, so no
+ * other call of this process (a synchronous one included) ever finds the lock held by it.
+ */
+export async function announceAsync(p: Project, input: AnnounceInput, now = new Date()): Promise<Announcement> {
+  const title = checkedAnnouncement(input);
+  return withAnnouncementsLockAsync(p, () => announced(p, input, title, now));
+}
+
+type AnnounceInput = { kind: AnnouncementKind; title: string; source?: AnnouncementSource; proposal?: string; phase?: CheckPhase; drifts?: string[]; machine?: string; refs?: string[]; code?: string | null; texts?: Record<string, string> } & AgentOrigin;
+
+/** The title of the announcement `input` asks for, or the error that refuses it. */
+function checkedAnnouncement(input: AnnounceInput): string {
   const title = input.title.trim().replace(/\s+/g, " ");
   if (!title) throw new TramaError("An announcement needs a title");
   if ((input.kind === "check") !== (input.phase !== undefined)) throw new TramaError(input.kind === "check" ? "A check needs a phase" : "Only a check has a phase");
   if (input.drifts !== undefined && input.drifts.length > 0 && input.kind !== "proposal") throw new TramaError("Only a Proposal names Drifts");
   if ((input.kind === "comparison") !== (input.machine !== undefined)) throw new TramaError(input.kind === "comparison" ? "A comparison needs a machine" : "Only a comparison has a machine");
   if (input.kind !== "comparison" && (input.refs !== undefined || input.code !== undefined || input.texts !== undefined)) throw new TramaError("Only a comparison has references and a code fingerprint");
+  return title;
+}
+
+function announced(p: Project, input: AnnounceInput, title: string, now: Date): Announcement {
   // A scan the agent announces is the check of a scan Trama announced at launch, if one still waits in the same terminal: it takes that one over. So is a Drift of Unify Drifts, announced by Trama at launch, and it keeps its title.
   // Under the lock the oldest waiting one is read again, so two agents of a terminal never take the same file at once and a ghost withdrawn meanwhile is not brought back.
-  return withAnnouncementsLock(p, () => {
-    if (((input.kind === "check" && input.phase === "scanning") || input.kind === "drift") && input.source === undefined && input.terminal !== undefined) {
-      // The oldest one of the same terminal wins.
-      const waiting = listAnnouncements(p).find((a) => a.kind === input.kind && a.source === "request" && a.terminal === input.terminal);
-      if (waiting) {
-        const taken: Announcement = { ...waiting, ...(input.kind === "check" ? { phase: "scanning" as const } : {}), touched: now.toISOString() };
-        write(p, taken);
-        return taken;
-      }
+  if (((input.kind === "check" && input.phase === "scanning") || input.kind === "drift") && input.source === undefined && input.terminal !== undefined) {
+    // The oldest one of the same terminal wins.
+    const waiting = listAnnouncements(p).find((a) => a.kind === input.kind && a.source === "request" && a.terminal === input.terminal);
+    if (waiting) {
+      const taken: Announcement = { ...waiting, ...(input.kind === "check" ? { phase: "scanning" as const } : {}), touched: now.toISOString() };
+      write(p, taken);
+      return taken;
     }
-    const stamp = now.toISOString();
-    const announcement: Announcement = {
-      id: newId(announcementsDir(p)),
-      kind: input.kind,
-      source: input.source ?? "agent",
-      proposal: input.proposal ?? null,
-      announced: nextAnnouncedStamp(p),
-      touched: stamp,
-      terminal: input.terminal ?? null,
-      phase: input.phase ?? null,
-      drifts: input.drifts ?? [],
-      machine: input.machine ?? null,
-      refs: input.refs ?? [],
-      code: input.code ?? null,
-      texts: input.texts ?? {},
-      proposals: [],
-      notes: [],
-      title,
-    };
-    write(p, announcement);
-    return announcement;
-  });
+  }
+  const stamp = now.toISOString();
+  const announcement: Announcement = {
+    id: newId(announcementsDir(p)),
+    kind: input.kind,
+    source: input.source ?? "agent",
+    proposal: input.proposal ?? null,
+    announced: nextAnnouncedStamp(p),
+    touched: stamp,
+    terminal: input.terminal ?? null,
+    phase: input.phase ?? null,
+    drifts: input.drifts ?? [],
+    machine: input.machine ?? null,
+    refs: input.refs ?? [],
+    code: input.code ?? null,
+    texts: input.texts ?? {},
+    proposals: [],
+    notes: [],
+    title,
+  };
+  write(p, announcement);
+  return announcement;
 }
 
 /** What a comparison briefed outside a Trama terminal keeps: the code fingerprint and the texts it compared, for the registry. */
@@ -548,19 +574,33 @@ export function deliverCheck(p: Project, id: string): Announcement | null {
  * announcement, identity and `touched` included, stays. Returns whether a title was written.
  */
 export function retitleBoundAnnouncement(p: Project, id: string, proposalId: string, title: string): boolean {
-  return lockedIfAny(p, false, () => {
-    const current = readOne(p, id);
-    if (!current || current.kind !== "proposal" || current.proposal !== proposalId || current.drifts.length > 0 || current.title === title) return false;
-    write(p, { ...current, title });
-    return true;
-  });
+  return lockedIfAny(p, false, () => retitled(p, id, proposalId, title));
+}
+
+/** `retitleBoundAnnouncement` for the editor's host: the wait for the lock gives the thread back. */
+export function retitleBoundAnnouncementAsync(p: Project, id: string, proposalId: string, title: string): Promise<boolean> {
+  return lockedIfAnyAsync(p, false, () => retitled(p, id, proposalId, title));
+}
+
+function retitled(p: Project, id: string, proposalId: string, title: string): boolean {
+  const current = readOne(p, id);
+  if (!current || current.kind !== "proposal" || current.proposal !== proposalId || current.drifts.length > 0 || current.title === title) return false;
+  write(p, { ...current, title });
+  return true;
 }
 
 /** Withdraws every announcement still waiting, or only `ids`; returns what was withdrawn so the developer can be told. */
 export function withdrawAll(p: Project, ids?: readonly string[]): Announcement[] {
-  return lockedIfAny<Announcement[]>(p, [], () => {
-    const gone = listAnnouncements(p).filter((a) => !ids || ids.includes(a.id));
-    for (const a of gone) remove(p, a.id);
-    return gone;
-  });
+  return lockedIfAny<Announcement[]>(p, [], () => withdrawn(p, ids));
+}
+
+/** `withdrawAll` for the editor's host: the wait for the lock gives the thread back. */
+export function withdrawAllAsync(p: Project, ids?: readonly string[]): Promise<Announcement[]> {
+  return lockedIfAnyAsync<Announcement[]>(p, [], () => withdrawn(p, ids));
+}
+
+function withdrawn(p: Project, ids?: readonly string[]): Announcement[] {
+  const gone = listAnnouncements(p).filter((a) => !ids || ids.includes(a.id));
+  for (const a of gone) remove(p, a.id);
+  return gone;
 }

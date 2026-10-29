@@ -5,9 +5,9 @@ description: "Use when writing or changing the pages of the website's guide or t
 
 ## website
 - The guide explains how to use Trama to a developer who has never seen it, in English, in four sections:
-  - **Getting started**: the requirements (VS Code, the platforms, omp, `gh` only for the PR Check and Team), installing the extension, the first run of omp, and putting Trama into a project with Get Started, through Import from Code or Start from Scratch.
+  - **Getting started**: the requirements (VS Code, the platforms, omp, `gh` only for Team), installing the extension, the first run of omp, and putting Trama into a project with Get Started, through Import from Code or Start from Scratch.
   - **Concepts**: the System, Features, Machines, States, Transitions, Events and Actors; the Requirements, their Areas and fragments and the skills made from them; the Specs; Proposals, Tasks, Drifts and ghosts; the Board and the History.
-  - **Workflows**: design and its rounds of questions, reviewing and approving or rejecting a Proposal, Rework with feedback, Run and Run all, Scan, Drifts and their Fix options, resolving and unifying Drifts, import, Start from Scratch, refining stale Proposals, Solo mode, the PR Check, and Manager mode with Team.
+  - **Workflows**: design and its rounds of questions, reviewing and approving or rejecting a Proposal, Rework with feedback, Run and Run all, Scan, Drifts and their Fix options, resolving and unifying Drifts, import, Start from Scratch, refining stale Proposals, Solo mode, and Manager mode with Team. The guide does not mention the PR Check while it is hidden (`rules#pr-check`).
   - **Panel & settings**: every view of the panel and the side menu, the Diagram and its focus, omp Chat and General, away notifications, and every setting of the extension with what it does and its default.
 - The settings page is generated at build time from the `contributes.configuration` of `extension/package.json` (title, description, type and default of each setting), so it never disagrees with the editor.
 - Pages describe what the developer sees and does, never the implementation (components, modules, messages, Requirement references), as the READMEs do.

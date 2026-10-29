@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { ompTooOldText } from "../../../src/core/omp-version";
-import { ensureOmpUpdated, findOmp, type OmpUpdateOutcome } from "./omp-update";
+import { ompProgram, prepareOmpLaunch, type OmpUpdateOutcome } from "./omp-update";
 
 export const OMP_MISSING_NOTICE = "Trama: omp is not installed. Trama runs every agent with omp.";
 export const INSTALL_OMP_BUTTON = "Install omp";
@@ -13,15 +13,15 @@ export const updateFailedNotice = (reason: string, version?: string): string =>
 /** The omp program a launch runs, or undefined when there is none. The check and update that come first are part of it. */
 export type OmpLauncher = (ompPath: string) => Promise<string | undefined>;
 
-/** The outcomes whose failure was already told: one notice per check, however many launches joined it. */
+/** The outcomes whose failure was already told: one notice per update, however many launches joined it. */
 const told = new WeakSet<OmpUpdateOutcome>();
 /** Whether the progress notification of an update is showing in this window. */
 let updating = false;
 
-function showUpdating(version: string, until: Promise<unknown>): void {
+function showUpdating(version: string | undefined, until: Promise<unknown>): void {
   if (updating) return;
   updating = true;
-  void Promise.resolve(vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Updating omp to ${version}…`, cancellable: false }, () => until.then(() => undefined, () => undefined))).finally(() => {
+  void Promise.resolve(vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: version === undefined ? "Updating omp…" : `Updating omp to ${version}…`, cancellable: false }, () => until.then(() => undefined, () => undefined))).finally(() => {
     updating = false;
   });
 }
@@ -35,13 +35,17 @@ function noticeStopped(message: string): void {
 }
 
 /**
- * The check of the version and of updates, and the update of omp, for `program`, behind the progress notification of an update. Launches add their notices to it.
- * The outcome says whether omp is missing, or older than the minimum (or of a version that cannot be read) after the update that could be done.
+ * What a launch of `program` does with omp (`prepareOmpLaunch`), behind the progress notification of an update: it waits for an update that the last check found, or that an
+ * omp older than the minimum needs, and never for a check, which runs in the background and tells its failure once. The outcome says whether omp is missing, or older than the
+ * minimum (or of a version that cannot be read) after the update that could be done.
  */
-export async function checkedOmp(program: string): Promise<OmpUpdateOutcome> {
+async function preparedOmp(program: string): Promise<OmpUpdateOutcome> {
   const settled = Promise.withResolvers<void>();
   try {
-    return await ensureOmpUpdated(program, (version) => showUpdating(version, settled.promise));
+    return await prepareOmpLaunch(program, {
+      updating: (version) => showUpdating(version, settled.promise),
+      checkFailed: (reason, version) => void vscode.window.showInformationMessage(updateFailedNotice(reason, version)),
+    });
   } finally {
     settled.resolve();
   }
@@ -49,17 +53,19 @@ export async function checkedOmp(program: string): Promise<OmpUpdateOutcome> {
 
 /**
  * Before every launch of omp (a terminal, an omp Chat conversation, Ask more), before anything is created: finds the program for `ompPath`
- * (the user's `trama.ompPath`, trimmed), checks its version and for a newer one, and updates it. With no program the missing-omp notice shows and the result is undefined:
- * the launch does not start. An omp older than the minimum, or whose version cannot be read, that the update did not fix stops the launch the same way, with its own notice.
- * A failed check or update does not stop a launch of an omp that is recent enough: the program of before is returned and the failure is told once per check.
+ * (the user's `trama.ompPath`, trimmed) as the module keeps it, one search per window. With no program the missing-omp notice shows and the result is undefined:
+ * the launch does not start. A newer version that the last check found, or an omp older than the minimum, is installed first, behind the progress notification; an omp older than
+ * the minimum, or whose version cannot be read, that the update did not fix stops the launch the same way, with its own notice. Otherwise the launch goes at once and, when
+ * the last check no longer holds, one runs in the background. A failed update does not stop a launch of an omp that is recent enough: the program of before is returned and
+ * the failure is told once per update; a failed background check is told once per check.
  */
 const realLauncher: OmpLauncher = async (ompPath) => {
-  const program = await findOmp(ompPath);
+  const program = await ompProgram(ompPath);
   if (program === undefined) {
     noticeStopped(OMP_MISSING_NOTICE);
     return undefined;
   }
-  const outcome = await checkedOmp(program);
+  const outcome = await preparedOmp(program);
   if (outcome.missing === true) {
     noticeStopped(OMP_MISSING_NOTICE);
     return undefined;

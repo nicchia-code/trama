@@ -8,7 +8,6 @@ import { cn } from "../lib/utils";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { SplitButton } from "../split-button";
-import { Progress } from "../ui/progress";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { roleLabel } from "../settings/logic";
 import { type AnnouncedCard, blockedReason, differencesOpenLabel, historyWhen, namesList, type Badge as BadgeData, type Card as BoardCard, type DriftBlocker, type DriftCard, type FixWait, type ProposalCard, type ResolvedRow, type TaskCard } from "./logic";
@@ -391,7 +390,6 @@ function TaskCardView({ card }: { card: TaskCard }) {
         {card.waitingFor.map((fix) => (
           <WaitingBadge key={fix.id} fix={fix} />
         ))}
-        {card.progress !== null ? <span className="text-[11px] font-medium text-cyan-700 tabular-nums dark:text-cyan-400">{card.progress}%</span> : null}
       </Head>
       <h3 className="font-semibold break-words">
         <button type="button" className="rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => env.openTask(card.id)}>
@@ -410,15 +408,6 @@ function TaskCardView({ card }: { card: TaskCard }) {
           <BoardButton icon={Play} label="Run" aria={`Run task ${card.name.text}`} variant="default" disabled={runReason !== null} tooltip={runReason} onClick={() => env.context.post({ type: "launch", action: { kind: "implement", task: card.id } })} />
         ) : null}
       </Actions>
-      {card.progress !== null ? (
-        <Progress
-          value={card.progress}
-          aria-label="Agent progress"
-          aria-valuetext={`${card.progress}%`}
-          className="-mx-2.5 -mb-2.5 mt-1 w-[calc(100%+1.25rem)] rounded-b-md bg-cyan-500/20"
-          indicatorClassName="bg-cyan-500"
-        />
-      ) : null}
     </Shell>
   );
 }

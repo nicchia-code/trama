@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { processStarted } from "./performance";
 
 /** How long the operating system may take to tell the start of a process: the longest wait of the execution check. */
 const READ_TIMEOUT_MS = 5000;
@@ -38,21 +39,27 @@ export function windowsStartTime(output: string): number | undefined {
 function run(program: string, args: string[]): Promise<string | undefined> {
   const { promise, resolve } = Promise.withResolvers<string | undefined>();
   // No shell, fixed arguments (the process number is an integer), and the C locale so the day and month names of `ps` are English.
-  execFile(program, args, { timeout: READ_TIMEOUT_MS, windowsHide: true, env: { ...process.env, LC_ALL: "C" } }, (error, stdout) => resolve(error === null ? stdout : undefined));
+  const ended = processStarted(program);
+  execFile(program, args, { timeout: READ_TIMEOUT_MS, windowsHide: true, env: { ...process.env, LC_ALL: "C" } }, (error, stdout) => {
+    ended();
+    resolve(error === null ? stdout : undefined);
+  });
   return promise;
 }
 
 /**
  * The instant the process `pid` started, in milliseconds since the epoch, as the operating system tells it, or `undefined`
  * when it cannot be read (the process does not exist, or the system did not answer in time). Linux reads `/proc`; macOS runs
- * `ps -o lstart= -p <pid>`; Windows runs PowerShell on `(Get-Process -Id <pid>).StartTime`. Only the execution check calls
- * it, for the agent of a holder no window follows.
+ * `ps -o lstart= -p <pid>`; Windows runs PowerShell on `(Get-Process -Id <pid>).StartTime`. Always asynchronous: the editor
+ * host calls it after it has registered a process and the execution check for the agent of a holder no window follows, and
+ * nothing waits for it.
  */
 export async function processStartTime(pid: number, platform: NodeJS.Platform = process.platform): Promise<number | undefined> {
   if (!Number.isSafeInteger(pid) || pid <= 0) return undefined;
   if (platform === "linux") {
     try {
-      return linuxStartTime(readFileSync(`/proc/${pid}/stat`, "utf8"), readFileSync("/proc/stat", "utf8"));
+      const [stat, procStat] = await Promise.all([readFile(`/proc/${pid}/stat`, "utf8"), readFile("/proc/stat", "utf8")]);
+      return linuxStartTime(stat, procStat);
     } catch {
       return undefined;
     }

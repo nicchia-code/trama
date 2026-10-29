@@ -519,13 +519,14 @@ test("the rows keep their last states while omp is checked again, and take the n
   expect(screen.queryByText("Connected")).toBeNull();
 });
 
-test("the section waits for the first outcome after the tab is shown again", () => {
+test("the section keeps the last state of the providers when the tab is shown again: it waits only for the first outcome of the window", () => {
   const { status, view } = mounted();
+  expect(providersList()).toBeNull();
   status({ state: "done", missing: false, version: "18.12.6", models: 2, providers: ["anthropic"] });
   expect(providersList()).not.toBeNull();
   view.show({});
-  status({ state: "checking" });
-  expect(providersList()).toBeNull();
+  expect(providersList()).not.toBeNull();
+  // The host answers at once with the last result it holds, `done`, never `checking`.
   status({ state: "done", missing: false, version: "18.12.6", models: 2, providers: ["anthropic"] });
   expect(providersList()).not.toBeNull();
 });

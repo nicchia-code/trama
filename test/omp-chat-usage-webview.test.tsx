@@ -86,13 +86,15 @@ test("the bar sits in the row of the model selector of every conversation, right
   host({ type: "models", id: "ask", available: [{ id: "google/gemini-3", name: "y" }], current: "google/gemini-3" });
   const base = report();
   host({ type: "usage", fetching: false, report: { ...base, providers: [...base.providers, { id: "google", name: "google", windows: [{ short: "1d", label: "Gemini 1 Day", usedFraction: 0.3 }] }] } });
-  expect(document.querySelectorAll("[data-usage-bar]")).toHaveLength(3);
+  const items = [general, job, ask];
   const expected: [string, string][] = [
     [GENERAL_ID, "anthropic usage: 5h 9%, 7d 50%, 7d Fable 2%"],
     ["job", "openai usage: 5h 40%"],
     ["ask", "google usage: 1d 30%"],
   ];
   for (const [id, name] of expected) {
+    // A conversation of a hidden tab draws what changed when its tab is shown.
+    host({ type: "conversations", items, selected: id });
     const panel = document.getElementById(panelId(id)) as HTMLElement;
     const own = panel.querySelector("[data-usage-bar]");
     expect(own).not.toBeNull();
@@ -122,7 +124,11 @@ test("changing the model of one conversation changes only its bar", () => {
   host(models("anthropic/claude-opus-5-5"));
   host({ type: "models", id: "job", available: [{ id: "anthropic/claude-opus-5-5", name: "x" }], current: "anthropic/claude-opus-5-5" });
   host({ type: "usage", fetching: false, report: report() });
-  const barOf = (id: string) => document.getElementById(panelId(id))?.querySelector("[data-usage-bar]")?.textContent;
+  const barOf = (id: string) => {
+    // A conversation of a hidden tab draws what changed when its tab is shown.
+    host({ type: "conversations", items: [general, { id: "job", name: "T3", state: "idle" }], selected: id });
+    return document.getElementById(panelId(id))?.querySelector("[data-usage-bar]")?.textContent;
+  };
   expect(barOf("job")).toBe("5h9%7d50%7d Fable2%");
   host({ type: "models", id: "job", available: [{ id: "openai/gpt-5", name: "x" }], current: "openai/gpt-5" });
   expect(barOf("job")).toBe("5h40%");

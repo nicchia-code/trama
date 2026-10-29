@@ -3,7 +3,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync,
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { writeFileAtomic } from "./atomic-write";
+import { writeFileAtomicAsync } from "./atomic-write";
 import { TramaError, UsageError } from "./errors";
 import { terminalFromEnv, type AgentOrigin } from "./announcements";
 import { parseQuestionRequest, questionAborted, questionFailure, QuestionInterruptedError, unavailableQuestions, type QuestionContext, type QuestionHandler, type QuestionRequest, type QuestionResult } from "./questions";
@@ -758,7 +758,13 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
   let closed = false;
   let closing: Promise<void> | undefined;
 
-  const publish = () => writeFileAtomic(recordPath, JSON.stringify(record), { mode: 0o600 });
+  // The writes of the record take turns, so a focus written late never covers a newer one, and each writes the record as it is when its turn comes.
+  let writing: Promise<void> = Promise.resolve();
+  const publish = (): Promise<void> => {
+    const written = writing.then(() => writeFileAtomicAsync(recordPath, JSON.stringify(record), { mode: 0o600 }));
+    writing = written.catch(() => {});
+    return written;
+  };
   const dispose = (): Promise<void> => {
     if (closed) return closing ?? Promise.resolve();
     closed = true;
@@ -769,7 +775,10 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
         connections.clear();
         try {
           if (native?.listening) await new Promise<void>((done, fail) => native!.close((error) => error ? fail(error) : done()));
-        } finally { rmSync(recordPath, { force: true }); }
+        } finally {
+          await writing; // A write still on its way must not bring the record back once it is removed.
+          rmSync(recordPath, { force: true });
+        }
       }
     })();
     return closing;
@@ -906,7 +915,8 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
     // A Windows named pipe has no file mode to set: its access is the window's secret, checked on every request.
     if (process.platform !== "win32") chmodSync(endpoint, 0o600);
     if (closed) throw new TramaError("The editor question listener closed during startup");
-    publish();
+    await publish();
+    if (closed) throw new TramaError("The editor question listener closed during startup");
     published = true;
   } catch (error) { await dispose(); throw error; }
 
@@ -916,7 +926,7 @@ export async function createQuestionServer(options: ServerOptions): Promise<Ques
       if (closed) return;
       if (!Number.isFinite(focusedAt)) throw new UsageError("Editor focus recency must be finite");
       record.focusedAt = focusedAt;
-      publish();
+      await publish();
     },
     dispose,
   };

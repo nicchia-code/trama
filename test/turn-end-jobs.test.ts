@@ -180,7 +180,7 @@ describe("the turn end of a job conversation ends its work, with no hook", () =>
     expect(driftsFinishing(dir)).toEqual(["drift001"]);
     expect(driftWork(dir).running).toBe(true);
     expect(listAnnouncements(p).map((a) => a.terminal)).toEqual([id]);
-    // Real wait, on purpose: the process is registered after reading its start from the system with a child process, which no microtask flush can wait for.
+    // Real wait, on purpose: the process is registered as soon as the conversation's process is known (its start time is added later, in the background), which no microtask flush may reach.
     for (let waited = 0; readAgentProcess(questionProjectId(p), id) === undefined && waited < 4000; waited += 25) await new Promise((done) => setTimeout(done, 25));
     expect(readAgentProcess(questionProjectId(p), id)).toBeDefined();
 

@@ -8,7 +8,7 @@
 // and pipe tables. Images and raw HTML are not interpreted: they show as written. Anything that cannot be read as
 // Markdown (an unclosed `*`, a stray backtick) also shows as written.
 
-import { createContext, type ReactNode, useContext } from "react";
+import { createContext, memo, type ReactNode, useContext, useMemo } from "react";
 import { safeLink } from "../../../src/core/links";
 import { MermaidDiagram } from "./mermaid-diagram";
 
@@ -664,11 +664,12 @@ function blockNodes(blocks: Block[], env: Env): ReactNode[] {
   });
 }
 
-/** Markdown text as a `div.md`. `openLink` receives the address of a followed http or https link. */
-export function Markdown({ source, openLink }: { source: string; openLink: OpenLink }) {
+/** Markdown text as a `div.md`. `openLink` receives the address of a followed http or https link. The text is analysed once per text, and drawn again only when the text, the link handler or the repository changes. */
+export const Markdown = memo(function Markdown({ source, openLink }: { source: string; openLink: OpenLink }) {
   const repo = useContext(GithubRepoContext);
-  return <div className="md">{blockNodes(parseMarkdown(source), { openLink, repo })}</div>;
-}
+  const blocks = useMemo(() => parseMarkdown(source), [source]);
+  return <div className="md">{blockNodes(blocks, { openLink, repo })}</div>;
+});
 
 /** Only inline formatting, for one-line list entries: block syntax shows as written. A `span.md-inline`. */
 export function InlineMarkdown({ source, openLink }: { source: string; openLink: OpenLink }) {

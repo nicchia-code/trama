@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { processStarted } from "../../../src/core/performance";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { FolderEntry } from "../protocol";
 
@@ -44,7 +45,9 @@ export function gitIgnored(cwd: string, paths: readonly string[], timeoutMs = 10
     done(new Set());
     return promise;
   }
+  const ended = processStarted("git");
   const child = execFile("git", ["check-ignore", "--stdin", "-z"], { cwd, timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, encoding: "utf8" }, (_error, stdout) => {
+    ended();
     // Exit 1 means nothing is ignored, and any other failure means git cannot tell: both leave every entry in.
     done(new Set(typeof stdout === "string" ? stdout.split("\0").filter((p) => p !== "") : []));
   });

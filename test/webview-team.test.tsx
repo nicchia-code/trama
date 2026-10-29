@@ -39,9 +39,9 @@ const team = (members: PersonView[], others: PersonView[] = [], extra: Partial<T
 function setup(initial: TeamMessage | null, rejection: Rejection | null = null) {
   const posted: ToHost[] = [];
   const post = (message: ToHost) => void posted.push(message);
-  const utils = render(<TeamPage manager team={initial} rejection={rejection} post={post} />);
+  const utils = render(<TeamPage team={initial} rejection={rejection} post={post} />);
   fireEvent.mouseDown(screen.getByRole("tab", { name: "People" }));
-  const again = (next: TeamMessage | null, nextRejection: Rejection | null = rejection) => utils.rerender(<TeamPage manager team={next} rejection={nextRejection} post={post} />);
+  const again = (next: TeamMessage | null, nextRejection: Rejection | null = rejection) => utils.rerender(<TeamPage team={next} rejection={nextRejection} post={post} />);
   return { posted, again, ...utils };
 }
 
@@ -75,35 +75,31 @@ test("the tag input adds each comma-separated part once, without case, and Save 
 
 // ---- The view ----
 
-test("with Manager mode on the view has the title Team and the tabs Decisions, Issues, Pull Requests, Timeline and People, in this order, and opens on Decisions", () => {
-  render(<TeamPage manager team={null} rejection={null} post={() => {}} />);
+test("the view has the title Team and the tabs Decisions, Issues, Timeline and People, in this order, and opens on Decisions", () => {
+  render(<TeamPage team={null} rejection={null} post={() => {}} />);
   expect(screen.getByRole("heading", { name: "Team" })).not.toBeNull();
   const tabs = screen.getAllByRole("tab");
-  expect(tabs.map((tab) => tab.textContent)).toEqual(["Decisions", "Issues", "Pull Requests", "Timeline", "People"]);
-  expect(tabs.map((tab) => tab.getAttribute("aria-selected"))).toEqual(["true", "false", "false", "false", "false"]);
+  expect(tabs.map((tab) => tab.textContent)).toEqual(["Decisions", "Issues", "Timeline", "People"]);
+  expect(tabs.map((tab) => tab.getAttribute("aria-selected"))).toEqual(["true", "false", "false", "false"]);
   expect(screen.getByRole("tablist", { name: "Team" })).not.toBeNull();
+  expect(screen.queryByRole("tab", { name: "Pull Requests" })).toBeNull();
 });
 
-test("with Manager mode off the bar holds only Pull Requests, the view opens there and the title line has no GitHub Project button", () => {
+test("the title line has the time of the last read and Refresh, and no button of a Project while none is linked", () => {
   const github: TeamGitHubMessage = { type: "teamGitHub", state: "ready", reading: false, repository: "acme/web", linked: null, readAt: new Date(Date.now() - 120_000).toISOString(), project: null, issues: [], loads: [], signals: {}, actions: {}, projects: [], error: null };
-  render(<TeamPage manager={false} team={null} rejection={null} github={github} post={() => {}} />);
-  const tabs = screen.getAllByRole("tab");
-  expect(tabs.map((tab) => tab.textContent)).toEqual(["Pull Requests"]);
-  expect(tabs[0]?.getAttribute("aria-selected")).toBe("true");
-  expect(screen.getByRole("heading", { name: "Team" }).parentElement?.textContent).toBe("TeamUpdated 2 min agoRefresh");
+  render(<TeamPage team={null} rejection={null} github={github} post={() => {}} />);
   expect(screen.queryByRole("button", { name: /GitHub Project/ })).toBeNull();
-  expect(screen.queryByText("Link a GitHub Project")).toBeNull();
 });
 
-test("when Manager mode goes off the view keeps only Pull Requests and shows it, and when it comes back the view opens on Decisions again", () => {
+test("the tab chosen stays while the view updates, and a view drawn again opens on Decisions", () => {
   const props = { team: null, rejection: null, post: () => {} };
-  const { rerender } = render(<TeamPage manager {...props} />);
+  const { rerender, unmount } = render(<TeamPage {...props} />);
   fireEvent.mouseDown(screen.getByRole("tab", { name: "Issues" }));
   expect(screen.getByRole("tab", { name: "Issues" }).getAttribute("aria-selected")).toBe("true");
-  rerender(<TeamPage manager={false} {...props} />);
-  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Pull Requests"]);
-  expect(screen.getByRole("tab", { name: "Pull Requests" }).getAttribute("aria-selected")).toBe("true");
-  rerender(<TeamPage manager {...props} />);
+  rerender(<TeamPage {...props} />);
+  expect(screen.getByRole("tab", { name: "Issues" }).getAttribute("aria-selected")).toBe("true");
+  unmount();
+  render(<TeamPage {...props} />);
   expect(screen.getByRole("tab", { name: "Decisions" }).getAttribute("aria-selected")).toBe("true");
 });
 
@@ -115,14 +111,12 @@ test("the tab chosen stays while the page updates", () => {
   expect(screen.getByText("Grace Hopper")).not.toBeNull();
 });
 
-test("mountTeam draws the page with only Pull Requests until the host says Team is available, then takes the people and GitHub", () => {
+test("mountTeam draws the page with the four tabs, then takes the people and GitHub", () => {
   const posted: ToHost[] = [];
   let node: ReactNode = null;
   const view = mountTeam((next) => void (node = next), { post: (message) => void posted.push(message), navigate: () => {}, openLink: () => {} });
   const shown = render(<>{node}</>);
-  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Pull Requests"]);
-  act(() => view.receiveManager(true));
-  shown.rerender(<>{node}</>);
+  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Decisions", "Issues", "Timeline", "People"]);
   fireEvent.mouseDown(screen.getByRole("tab", { name: "People" }));
   expect(screen.queryByText("Ada Lovelace")).toBeNull();
   act(() => view.receive(team([ADA])));

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, rmSync, statSync } from "node:fs";
 import { join, win32 } from "node:path";
 import { writeFileAtomic } from "./atomic-write";
+import { processStarted } from "./performance";
 import { TramaError } from "./errors";
 import { type Project, readTextLf, writeFileEnsuringDir } from "./store";
 
@@ -109,6 +110,7 @@ export type GhRunner = (program: string, args: readonly string[]) => Promise<GhO
 /** The default runner: `spawn` without a shell, nothing on standard input, `SIGKILL` at the timeout. gh never prompts and talks only to github.com. */
 export const runGh: GhRunner = (program, args) => {
   const { promise, resolve } = Promise.withResolvers<GhOutcome>();
+  const ended = processStarted(program);
   const child = spawn(program, [...args], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true, env: { ...process.env, GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1", GH_SPINNER_DISABLED: "1", NO_COLOR: "1" } });
   const out: Buffer[] = [];
   const err: Buffer[] = [];
@@ -123,11 +125,13 @@ export const runGh: GhRunner = (program, args) => {
   child.on("error", (error: NodeJS.ErrnoException) => {
     failed = error.code === "ENOENT" ? GH_NOT_INSTALLED : `Could not run gh: ${error.message}`;
     clearTimeout(timer);
+    ended();
     resolve({ status: null, stdout: "", stderr: "", failed });
   });
   child.on("close", (status) => {
     clearTimeout(timer);
     if (failed !== null) return;
+    ended();
     resolve({ status, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8"), failed: timedOut ? `gh did not finish within ${GH_TIMEOUT_MS / 1000} seconds` : null });
   });
   return promise;
@@ -526,19 +530,6 @@ export async function readGitHub(repository: string, linked: LinkedProject | nul
     project = { ...read, items };
   }
   return { ok: true, readAt: (deps.now?.() ?? new Date()).toISOString(), projects, project };
-}
-
-/** What one read of the state of `gh` alone found. */
-export type GhStateReading = { ok: true; readAt: string } | ({ ok: false } & GhProblem);
-
-/**
- * One read of the state of `gh` alone, for the Team view without Manager mode (`rules#github-project`): `gh --version` and `gh auth status --hostname github.com`, no Project and no
- * query of Projects, so the missing scope of Projects is never a problem there. Stops at the first problem: not installed, then not logged in.
- */
-export async function readGhState(deps: GhDeps = {}): Promise<GhStateReading> {
-  const reached = await reachGh(deps);
-  if ("problem" in reached) return { ok: false, ...reached.problem };
-  return { ok: true, readAt: (deps.now?.() ?? new Date()).toISOString() };
 }
 
 /** An open pull request that is ready for review, as the last read found it (`data#pull-request-check`). */

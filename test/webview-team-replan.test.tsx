@@ -30,7 +30,7 @@ const available: ReplanView = { block: null, running: false, open: 2, stale: 0 }
 
 function page(snapshot: Snapshot | null, replan: ReplanView | null) {
   const posted: ToHost[] = [];
-  const utils = render(<TeamPage manager team={null} rejection={null} github={null} snapshot={snapshot} replan={replan} post={(message) => void posted.push(message)} />);
+  const utils = render(<TeamPage team={null} rejection={null} github={null} snapshot={snapshot} replan={replan} post={(message) => void posted.push(message)} />);
   return { posted, ...utils };
 }
 const two = () => snapshotWith([handoff("hhhhhhh1", "Guest checkout"), handoff("hhhhhhh2", "Saved carts")]);
@@ -112,7 +112,6 @@ test("mountTeam takes the state of Replan with the snapshot and forgets it with 
   const posted: ToHost[] = [];
   let node: ReactNode = null;
   const view = mountTeam((next) => void (node = next), { post: (message) => void posted.push(message), navigate: () => {}, openLink: () => {} });
-  view.receiveManager(true);
   const shown = render(<>{node}</>);
   act(() => view.update(two(), available));
   shown.rerender(<>{node}</>);

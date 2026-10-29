@@ -602,7 +602,7 @@ export interface PrepareOptions {
   /** The folder of the agent skills (`trama.skillsDir`). */
   skillsDir: string;
   /** Writes the skills, agent definitions and advisor instructions of this version into the worktree: the same code as the check at every opening. */
-  writeSkills: (worktree: Project) => void;
+  writeSkills: (worktree: Project) => void | Promise<void>;
 }
 
 /**
@@ -621,7 +621,7 @@ export async function prepareCheck(p: Project, pr: Pick<PullRequest, "number" | 
     let rows: ReportRow[] = [];
     if (variant === "solo") copyOwnFiles(p, root, options.skillsDir);
     else rows = await collaborativeRows({ place, baseBranch: pr.baseRefName, base: fetched.base, head: fetched.head, mergeBase });
-    options.writeSkills(projectAt(root));
+    await options.writeSkills(projectAt(root));
     return { number: pr.number, folder, root, variant, base: { branch: pr.baseRefName, commit: fetched.base }, head: { branch: pr.headRefName, commit: fetched.head }, mergeBase, place, rows };
   } catch (error) {
     await removeWorktree(place.top, folder);

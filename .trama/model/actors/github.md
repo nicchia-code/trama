@@ -26,4 +26,4 @@ The issue was closed as not planned.
 A closed issue was reopened.
 
 ### PULL_REQUEST_GONE
-A pull request with a report of the PR Check is no longer among the open pull requests that are ready for review: it was merged, closed or turned back into a draft.
+A pull request with a report of the PR Check is no longer among the open pull requests that are ready for review: it was merged, closed or turned back into a draft. It cannot happen while the PR Check is hidden, since Trama reads no pull request.

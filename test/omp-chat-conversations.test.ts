@@ -54,6 +54,13 @@ class FakeSession implements OmpSessionPort {
     this.updateListeners.push(listener);
     return { dispose: () => undefined };
   }
+  history(): readonly SessionNotification[] {
+    return [];
+  }
+  onLiveUpdate(listener: (notification: SessionNotification) => void): Disposable {
+    this.updateListeners.push(listener);
+    return { dispose: () => undefined };
+  }
   /** omp sends a `session/update`. */
   update(): void {
     for (const listener of this.updateListeners) listener({ sessionId: "s", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "x" } } });
@@ -113,10 +120,19 @@ class FakeClient implements OmpClientPort {
   lateSession: FakeSession | undefined;
   /** Lets the late resume answer. */
   releaseLate: (() => void) | undefined;
+  /** Holds every start until it is opened: the process is spawned, the session is not open. */
+  startGate: Promise<void> | undefined;
+  /** Holds every resume until `releaseResume` lets the oldest one answer. */
+  holdResumes = false;
+  private resumeReleases: (() => void)[] = [];
+  releaseResume(): void {
+    this.resumeReleases.shift()?.();
+  }
   async start(launch: OmpLaunch, first?: OmpPrompt, spawned?: (pid: number) => void): Promise<OmpSessionPort> {
     this.started.push({ launch, ...(first === undefined ? {} : { first }) });
     // The process stands the moment it is spawned, before the session opens.
     spawned?.(4242);
+    await this.startGate;
     if (this.failStart !== undefined) throw new OmpStartFailure(this.failStart, this.failDetails);
     const session = new FakeSession(`session-${this.sessions.length + 1}`);
     this.sessions.push(session);
@@ -125,6 +141,11 @@ class FakeClient implements OmpClientPort {
   async resume(launch: OmpLaunch, sessionId: string, spawned?: (pid: number) => void): Promise<OmpSessionPort> {
     this.resumed.push({ launch, sessionId });
     spawned?.(4343);
+    if (this.holdResumes) {
+      const gate = Promise.withResolvers<void>();
+      this.resumeReleases.push(gate.resolve);
+      await gate.promise;
+    }
     if (this.resumeWith === "fail") throw new OmpStartFailure("session not found", this.failDetails);
     if (this.resumeWith === "silent") return new Promise<never>(() => undefined);
     const session = new FakeSession(sessionId);
@@ -153,8 +174,11 @@ class FakeView implements ChatViewPort {
     if (options.instruction !== undefined) this.instructions.set(tab.id, options.instruction);
     if (session !== undefined) this.attached.set(tab.id, session);
   }
-  setSession(id: string, session: OmpSessionPort): void {
+  /** What the tabs got when their session opened: the instruction a job starts with. */
+  firsts = new Map<string, OmpPrompt | undefined>();
+  setSession(id: string, session: OmpSessionPort, options: { first?: OmpPrompt } = {}): void {
     this.attached.set(id, session);
+    this.firsts.set(id, options.first);
   }
   setWorking(id: string, working: boolean): void {
     this.working.set(id, working);
@@ -301,7 +325,8 @@ describe("opening", () => {
     client.failDetails = "boom: no credentials";
     const conversations = make();
     expect(await conversations.open(spec)).toEqual({ opened: false, reason: "omp exited with code 1", details: "boom: no credentials" });
-    expect(view.opened).toEqual([]);
+    expect(view.opened).toEqual([{ id: "abc123", name: "T3", focus: false }]);
+    expect(view.closed).toEqual(["abc123"]);
     expect(store.saved).toEqual([]);
     expect(calls.ended).toEqual([]);
     expect(conversations.has("abc123")).toBe(false);
@@ -314,6 +339,64 @@ describe("opening", () => {
     const pending = conversations.open(spec);
     expect(calls.registered).toEqual([{ id: "abc123", pid: 4242 }]);
     await pending;
+  });
+
+  test("the tab shows at once, with no session and no instruction, and omp's session and the instruction come when it is open; the dot only then", async () => {
+    const gate = Promise.withResolvers<void>();
+    client.startGate = gate.promise;
+    const conversations = make();
+    const opening = conversations.open(spec);
+    expect(view.opened).toEqual([{ id: "abc123", name: "T3", focus: false }]);
+    expect(view.attached.has("abc123")).toBe(false);
+    expect(view.working.has("abc123")).toBe(false);
+    expect(store.saved).toEqual([]);
+    gate.resolve();
+    expect(await opening).toEqual({ opened: true });
+    expect(view.attached.get("abc123")).toBe(client.sessions[0]);
+    expect(view.firsts.get("abc123")).toEqual({ text: "Do it" });
+    expect(view.working.get("abc123")).toBe(true);
+  });
+
+  test("a tab closed while omp starts ends the work without a dialog, sends the instruction nowhere, and the process that arrives is stopped", async () => {
+    const gate = Promise.withResolvers<void>();
+    client.startGate = gate.promise;
+    const conversations = make();
+    const opening = conversations.open(spec);
+    await conversations.closeRequested("abc123");
+    expect(calls.confirms).toEqual([]);
+    expect(calls.ended).toEqual([{ id: "abc123", abnormal: "its conversation was closed" }]);
+    expect(view.closed).toEqual(["abc123"]);
+    gate.resolve();
+    expect(await opening).toEqual({ opened: true });
+    expect(client.sessions[0]?.stops).toBe(1);
+    expect(calls.unregistered).toContain("abc123");
+    expect(view.attached.has("abc123")).toBe(false);
+    expect(store.saved).toEqual([]);
+  });
+
+  test("a tab closed while omp starts and then fails to start is not given back for a terminal", async () => {
+    const gate = Promise.withResolvers<void>();
+    client.startGate = gate.promise;
+    client.failStart = "omp exited with code 1";
+    const conversations = make();
+    const opening = conversations.open(spec);
+    await conversations.closeRequested("abc123");
+    gate.resolve();
+    expect(await opening).toEqual({ opened: true });
+    expect(calls.unregistered).toContain("abc123");
+  });
+
+  test("a window that closes while omp starts keeps the conversation to resume and stops the process that arrives", async () => {
+    const gate = Promise.withResolvers<void>();
+    client.startGate = gate.promise;
+    const conversations = make();
+    const opening = conversations.open(spec);
+    await conversations.windowClosed();
+    gate.resolve();
+    await opening;
+    expect(client.sessions[0]?.stopOptions).toEqual([{ deactivating: true }]);
+    expect(store.saved.map((saved) => [saved.id, saved.state, saved.job?.id])).toEqual([["abc123", "running", "job-1"]]);
+    expect(calls.ended).toEqual([]);
   });
 
   test("two conversations work together, each with its own process", async () => {
@@ -843,6 +926,74 @@ describe("the resume", () => {
     await conversations.resume();
     expect(client.resumed).toHaveLength(2);
     expect(view.opened.map((o) => o.name).sort()).toEqual(["Design", "T3"]);
+  });
+
+  test("the conversations that were working reopen all at once and first; the others one at a time, in the order saved, each after the previous one reopened or failed", async () => {
+    client.holdResumes = true;
+    saveEntries(
+      entry({ id: "idle01", name: "One", state: "idle", job: undefined }),
+      entry({ id: "runn01", name: "Run one", job: { ...job, id: "job-1" } }),
+      entry({ id: "idle02", name: "Two", state: "idle", job: undefined }),
+      entry({ id: "runn02", name: "Run two", job: { ...job, id: "job-2" } }),
+      entry({ id: "ask001", name: "Ask", hook: false, job: undefined }),
+    );
+    const conversations = make();
+    const resuming = conversations.resume();
+    await flush();
+    expect(client.resumed.map((r) => r.sessionId)).toEqual(["session-1", "session-1"]);
+    expect(calls.registered.map((r) => r.id)).toEqual(["runn01", "runn02"]);
+    client.releaseResume();
+    client.releaseResume();
+    await flush();
+    // The jobs are back; now the first of the others starts, and only it.
+    expect(client.resumed).toHaveLength(3);
+    expect(view.opened.map((o) => o.id).sort()).toEqual(["runn01", "runn02"]);
+    client.releaseResume();
+    await flush();
+    expect(client.resumed).toHaveLength(4);
+    client.releaseResume();
+    await flush();
+    expect(client.resumed).toHaveLength(5);
+    client.releaseResume();
+    await resuming;
+    expect(calls.registered.map((r) => r.id)).toEqual(["runn01", "runn02", "idle01", "idle02", "ask001"]);
+    expect(view.opened.map((o) => o.id)).toEqual(["runn01", "runn02", "idle01", "idle02", "ask001"]);
+  });
+
+  test("a failed resume lets the next one start", async () => {
+    client.resumeWith = "fail";
+    saveEntries(entry({ id: "idle01", name: "One", state: "idle", job: undefined }), entry({ id: "idle02", name: "Two", state: "idle", job: undefined }));
+    await make().resume();
+    expect(client.resumed).toHaveLength(2);
+    expect(store.saved).toEqual([]);
+  });
+
+  test("a window that closes empties the queue: what waits is not started and stays saved", async () => {
+    client.holdResumes = true;
+    saveEntries(entry({ id: "idle01", state: "idle", job: undefined }), entry({ id: "idle02", name: "Two", state: "idle", job: undefined }));
+    const conversations = make();
+    const resuming = conversations.resume();
+    await flush();
+    expect(client.resumed).toHaveLength(1);
+    await conversations.windowClosed();
+    client.releaseResume();
+    await resuming;
+    expect(client.resumed).toHaveLength(1);
+    expect(store.saved.map((saved) => saved.id)).toEqual(["idle01", "idle02"]);
+  });
+
+  test("omp Chat turned off empties the queue: what waits is not started, forgotten by the window, and stays saved", async () => {
+    client.holdResumes = true;
+    saveEntries(entry({ id: "idle01", state: "idle", job: undefined }), entry({ id: "idle02", name: "Two", state: "idle", job: undefined }));
+    const conversations = make();
+    const resuming = conversations.resume();
+    await flush();
+    conversations.stopResuming();
+    client.releaseResume();
+    await resuming;
+    expect(client.resumed).toHaveLength(1);
+    expect(conversations.has("idle02")).toBe(false);
+    expect(store.saved.map((saved) => saved.id)).toEqual(["idle01", "idle02"]);
   });
 });
 

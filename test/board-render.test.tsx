@@ -90,7 +90,7 @@ const proposal: ProposalCard = {
 };
 const task: TaskCard = {
   kind: "task", key: "task:liveTask", id: "liveTask", name: { text: "T3", isNumber: true }, title: "A task", technical: false,
-  refs: [], drift: "liveDrift", driftName: "D4", proposal: null, proposalTag: null, proposalName: null, agent: false, progress: null, blockedByDrifts: [{ id: "liveDrift", key: "drift:liveDrift", name: { text: "D4", isNumber: true }, title: "Code refunds late" }], waitingFor: [],
+  refs: [], drift: "liveDrift", driftName: "D4", proposal: null, proposalTag: null, proposalName: null, agent: false, blockedByDrifts: [{ id: "liveDrift", key: "drift:liveDrift", name: { text: "D4", isNumber: true }, title: "Code refunds late" }], waitingFor: [],
   blockedBy: [], body: "", images: [], file: "task.md", column: "todo", finishing: null, heldByDrift: false, views: { diagram: false, requirements: false }, finished: null, unchanged: null, keptBy: [],
 };
 const resolved = (over: Partial<ProposalCard["resolves"][number]> = {}): ProposalCard["resolves"][number] => ({
@@ -439,16 +439,11 @@ describe("A Task the agent has taken", () => {
     expect(screen.queryByRole("button", { name: "Run task T3" })).toBeNull();
   });
 
-  test("a declared percentage shows as 40% after the badges and as an Agent progress bar; a Task without one shows neither", () => {
-    draw(<CardView card={{ ...task, column: "doing", agent: true, progress: 40, drift: null, blockedByDrifts: [], waitingFor: [], blockedBy: [] }} />);
-    const bar = screen.getByRole("progressbar", { name: "Agent progress" });
-    expect(bar.getAttribute("aria-valuetext")).toBe("40%");
-    expect(bar.getAttribute("aria-valuenow")).toBe("40");
-    expect(screen.getByText("40%")).not.toBeNull();
-    cleanup();
-    draw(<CardView card={{ ...task, column: "doing", agent: true, progress: null, drift: null, blockedByDrifts: [], waitingFor: [], blockedBy: [] }} />);
+  test("the card of a taken Task shows no progress: no bar and no percentage, only the working border", () => {
+    draw(<CardView card={{ ...task, column: "doing", agent: true, drift: null, blockedByDrifts: [], waitingFor: [], blockedBy: [] }} />);
+    expect(screen.getByRole("article").className).toContain("board-working");
     expect(screen.queryByRole("progressbar")).toBeNull();
-    expect(screen.queryByText(/%$/)).toBeNull();
+    expect(screen.queryByText(/%/)).toBeNull();
   });
 });
 
@@ -609,7 +604,7 @@ const proposalView = (over: Partial<ProposalView> = {}): ProposalView => ({
   id: "live", created: "2026-10-01T10:00:00.000Z", title: "A proposal", body: "Testo **lungo** della Proposal.", kind: "change", prepared: false, refining: false, writer: null, resolves: [], requires: [], base: null, stale: [], unbased: [], errors: [], unfixable: [], creates: 1,
   tasks: [{ id: "t1", title: "Do it", refs: [], technical: true, body: "", images: [] }], removals: [], changes: [], machines: [], actors: [], areas: [], specs: EMPTY_SPECS, specsChange: { entries: [], notesBefore: null }, scope: [], ...over,
 });
-const taskView = (over: Partial<TaskView> = {}): TaskView => ({ id: "liveTask", created: "2026-10-01T10:00:00.000Z", title: "A task", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTag: null, agent: false, progress: null, finished: null, unchanged: null, blockedBy: [], heldByDrift: false, file: "tasks/liveTask.md", images: [], ...over });
+const taskView = (over: Partial<TaskView> = {}): TaskView => ({ id: "liveTask", created: "2026-10-01T10:00:00.000Z", title: "A task", body: "", column: "todo", technical: false, refs: [], drift: null, proposal: null, proposalTag: null, agent: false, finished: null, unchanged: null, blockedBy: [], heldByDrift: false, file: "tasks/liveTask.md", images: [], ...over });
 const driftView = (over: Partial<DriftView> = {}): DriftView => ({ id: "liveDrift", created: "2026-10-01T10:00:00.000Z", job: null, prepared: null, title: "Code refunds late", body: "", previous: [], origin: [], task: null, unifies: [], unifiedInto: null, differences: [], refs: [], proposal: null, sides: { happens: "A", should: "B", where: "" }, options: [], option: null, note: null, requirementsOnly: false, proposalBlock: null, proposalTitle: null, proposalChanges: null, closedUnchanged: null, merge: false, ...over });
 const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({ system: { name: "s", description: "" }, actors: [], features: [], machines: [], diagnostics: [], areas: [], proposals: [], resolutionDrifts: [], drifts: [], unifiedDrifts: [], finishingDrifts: [], finishingProposals: [], finishingTasks: [], tasks: [], tasksSinceScan: 0, announcements: [], handoffs: [], issues: [], numbers, specs: EMPTY_SPECS, specsPresent: false, history: [], historyFaults: [], ...over });
 

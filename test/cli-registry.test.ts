@@ -119,6 +119,8 @@ test("the commands that count as the agent's activity are the ones declared with
 test("a hook answers whatever happens and exits with 0, and a hook that fails prints what its agent expects", async () => {
   const nothing = { env: {}, stdin: async () => "" };
   expect(await execute(["hook", "idle"], dir, nothing)).toEqual({ out: "", exit: 0 });
+  // `hook start` only sends the pid: with no terminal, or a pid that is not a positive integer, it sends nothing and still exits with 0.
+  for (const pid of ["123", "abc", "0", "1.5"]) expect(await execute(["hook", "start", pid], dir, nothing)).toEqual({ out: "", exit: 0 });
   // Cursor's, Copilot's and Claude Code's hooks no longer exist: unknown commands are a usage error.
   for (const gone of ["cursor", "copilot", "claude-question-tool"]) await expect(execute(["hook", gone], dir, nothing)).rejects.toThrow(/Unknown command/);
 });

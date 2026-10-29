@@ -14,7 +14,7 @@ import {
   readTeam,
   removeRepository,
 } from "../../../../src/core/people";
-import { MANAGER_NEEDS_GITHUB, readOrigin, teamUnavailableReason } from "../../../../src/core/manager-mode";
+import { MANAGER_NEEDS_GITHUB, managerStatus, teamUnavailableReason } from "../../../../src/core/manager-mode";
 import { type Project, randomCardId } from "../../../../src/core/store";
 import type { ToWebview } from "../../protocol";
 
@@ -195,7 +195,8 @@ export class People {
 export function teamAnswer(project: Project, people: People): TeamAnswer {
   const reason = teamUnavailableReason(project);
   if (reason !== null) return { error: reason };
-  const repository = readOrigin(project.root).repository;
+  // Origin is the window's value (`ProjectOrigin`), read once and again when git's configuration changes: `trama team show` starts no process.
+  const { repository } = managerStatus(project);
   if (repository === null) return { error: MANAGER_NEEDS_GITHUB };
   return people.members(repository);
 }

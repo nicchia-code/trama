@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import type { ConversationItem, ToChatHost, ToChatWebview } from "../extension/src/omp-chat-protocol";
 import { ChatApp, createChatController } from "../extension/src/webview/omp-chat/app";
 import { fieldsOf } from "../extension/src/webview/omp-chat/forms";
-import { createChatStore } from "../extension/src/webview/omp-chat/state";
+import { createChatStore, reduce } from "../extension/src/webview/omp-chat/state";
 import { announcement, applyUpdate, type Block, emptyTranscript, errorLine, MAX_ERROR_CHARS, start, type Transcript } from "../extension/src/webview/omp-chat/transcript";
 
 afterEach(cleanup);
@@ -519,6 +519,83 @@ test("an Ask more conversation that is starting shows its placeholder and no Sen
   expect(screen.queryByText("Starting omp…")).toBeNull();
   expect(screen.getByPlaceholderText("Message omp…")).not.toBeNull();
   expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+test("a job's conversation that is starting shows only Starting omp… in the middle, with the field, Send disabled and no Stop; nothing else", () => {
+  const { host, posted } = setup();
+  host({ type: "conversations", items: [{ ...item("a", "T3"), starting: true }], selected: "a" });
+  const text = screen.getByText("Starting omp…");
+  expect(text.className).toContain("text-muted-foreground");
+  expect(text.className).toContain("m-auto");
+  // In the flow, not under the field.
+  expect(text.closest('[role="tabpanel"]')?.querySelector("textarea")?.contains(text)).toBe(false);
+  expect(screen.getByRole("tab", { name: "T3" }).querySelector("[data-dot]")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Stop the agent" })).toBeNull();
+  const field = screen.getByPlaceholderText("Message omp…");
+  expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(field, { target: { value: "hello" } });
+  fireEvent.keyDown(field, { key: "Enter" });
+  expect(posted).toEqual([]);
+  // The session opens: the instruction shows as Trama's message and the start text goes.
+  host({ type: "conversationStart", id: "a", first: { text: "Do it" }, focus: false });
+  host({ type: "conversations", items: [item("a", "T3")], selected: "a" });
+  expect(screen.queryByText("Starting omp…")).toBeNull();
+  expect(screen.getByText("Do it")).not.toBeNull();
+  expect(screen.getByText("Trama")).not.toBeNull();
+});
+
+test("the history of a conversation arrives as one message and draws all its text", () => {
+  const { host } = setup();
+  host({ type: "conversations", items: [item("a", "T3")], selected: "a" });
+  host({ type: "conversationHistory", id: "a", updates: [chunk("Hello ", "user_message_chunk", "m1"), chunk("first ", "agent_message_chunk", "m2"), chunk("answer", "agent_message_chunk", "m2")] });
+  expect(screen.getByText("Hello")).not.toBeNull();
+  expect(document.querySelector('[data-message="agent"]')?.textContent).toBe("first answer");
+});
+
+test("a conversation of a tab that is hidden is not drawn again: it shows what changed when its tab is shown, with its message field as it was", () => {
+  const { host } = setup();
+  host({ type: "conversations", items: [item("a", "T3"), item("b", "Quick")], selected: "a" });
+  host({ type: "conversationUpdate", id: "b", update: chunk("old text") });
+  fireEvent.click(screen.getByRole("tab", { name: "Quick" }));
+  const fieldOfB = screen.getAllByPlaceholderText("Message omp…")[1] as HTMLTextAreaElement;
+  fireEvent.change(fieldOfB, { target: { value: "draft for b" } });
+  fireEvent.click(screen.getByRole("tab", { name: "T3" }));
+  host({ type: "conversationUpdate", id: "b", update: chunk(" and more") });
+  // Hidden: the new piece has not been drawn.
+  expect(document.body.textContent).not.toContain("old text and more");
+  fireEvent.click(screen.getByRole("tab", { name: "Quick" }));
+  expect(document.querySelector('#omp-chat-panel-b [data-message="agent"]')?.textContent).toBe("old text and more");
+  expect((screen.getAllByPlaceholderText("Message omp…")[1] as HTMLTextAreaElement).value).toBe("draft for b");
+});
+
+test("a new piece of the answer changes only its message and its conversation: the other messages, the other conversations and the tabs are the same objects", () => {
+  const store = createChatStore();
+  let state = store.get();
+  const apply = (message: ToChatWebview) => (state = reduce(state, message, 1000));
+  apply({ type: "conversations", items: [item("a", "T3"), item("b", "Quick")], selected: "a" });
+  apply({ type: "conversationUpdate", id: "a", update: chunk("first", "agent_message_chunk", "m1") });
+  apply({ type: "conversationUpdate", id: "a", update: { sessionId: "s", update: { sessionUpdate: "tool_call", toolCallId: "t", title: "Read a.ts", kind: "read", status: "completed" } } });
+  apply({ type: "conversationUpdate", id: "a", update: chunk("second", "agent_message_chunk", "m2") });
+  const before = state;
+  apply({ type: "conversationUpdate", id: "a", update: chunk(" piece", "agent_message_chunk", "m2") });
+  expect(state.items).toBe(before.items);
+  expect(state.conversations["b"]).toBe(before.conversations["b"]);
+  const [firstBlock, toolBlock, lastBlock] = before.conversations["a"]?.transcript.blocks ?? [];
+  const after = state.conversations["a"]?.transcript.blocks ?? [];
+  expect(after[0]).toBe(firstBlock);
+  expect(after[1]).toBe(toolBlock);
+  expect(after[2]).not.toBe(lastBlock);
+});
+
+test("the host sending the list again unchanged changes nothing, and a change of one tab keeps the others' items", () => {
+  let state = createChatStore().get();
+  state = reduce(state, { type: "conversations", items: [item("a", "T3"), item("b", "Quick")], selected: "a" }, 1);
+  const same = reduce(state, { type: "conversations", items: [item("a", "T3"), item("b", "Quick")], selected: "a" }, 2);
+  expect(same).toBe(state);
+  const changed = reduce(state, { type: "conversations", items: [item("a", "T3", "running"), item("b", "Quick")], selected: "a" }, 3);
+  expect(changed).not.toBe(state);
+  expect(changed.items[1]).toBe(state.items[1]);
+  expect(changed.conversations["b"]).toBe(state.conversations["b"]);
 });
 
 // Opening a call: the widths of the rows are the ones of a layout that happy-dom does not have, so a title is clipped when it is in `clippedTitles`.

@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { listAnnouncements, retitleBoundAnnouncement, withdrawAll } from "../../../src/core/announcements";
+import { listAnnouncements, retitleBoundAnnouncement, withdrawAllAsync } from "../../../src/core/announcements";
 import type { Announcement } from "../../../src/core/announcements";
 import { TramaError } from "../../../src/core/errors";
 import { getProposal, listProposals } from "../../../src/core/proposals";
@@ -24,9 +24,9 @@ function describe(p: Project, withdrawn: Announcement[]): AnnouncementView[] {
   return withdrawn.map((a) => announcementView(p, a, a.proposal === null ? undefined : titles.get(a.proposal)));
 }
 
-function guarded(action: () => void, failure = "announcements could not be withdrawn"): void {
+async function guarded(action: () => Promise<void>, failure = "announcements could not be withdrawn"): Promise<void> {
   try {
-    action();
+    await action();
   } catch (err) {
     if (err instanceof TramaError) void vscode.window.showErrorMessage(`Trama: ${failure}: ${err.message}`);
     else throw err;
@@ -35,15 +35,15 @@ function guarded(action: () => void, failure = "announcements could not be withd
 
 /**
  * The agent terminal's idle hook, the command Trama typed into it ending, or the terminal closing withdraws its waiting
- * announcements. Elapsed time never withdraws one.
+ * announcements. Elapsed time never withdraws one. The wait for the announcements' lock gives the thread back.
  * The panel is told when `notify` is true, so the developer learns that the agent finished without delivering. `which`
  * selects only matching announcements; without it, all waiting announcements are withdrawn.
  */
-export function withdrawWaiting(root: string, which?: (a: Announcement) => boolean, notify = true): void {
-  guarded(() => {
+export function withdrawWaiting(root: string, which?: (a: Announcement) => boolean, notify = true): Promise<void> {
+  return guarded(async () => {
     const p = projectAt(root);
     const ids = which === undefined ? undefined : listAnnouncements(p).filter(which).map((a) => a.id);
-    const withdrawn = withdrawAll(p, ids);
+    const withdrawn = await withdrawAllAsync(p, ids);
     // An import ends with its agent and gives no notice: only a card the agent did not deliver, or a check it did not finish, is reported.
     const views = describe(p, withdrawn.filter((a) => a.kind !== "work"));
     if (views.length === 0 || !notify) return;
@@ -51,12 +51,9 @@ export function withdrawWaiting(root: string, which?: (a: Announcement) => boole
   });
 }
 
-/**
- * Gives the ghost of a Draft the Draft's current title. The title is written by the core under the announcements lock,
- * through a temporary file renamed over the announcement, and only while the file still exists: a ghost delivered or
- * withdrawn is never brought back, and nothing is written when the title already matches.
- */
-export function synchronizeAnnouncementTitles(p: Project): void {
+/** The ghosts whose title is not their Draft's now: the announcement, its Draft's identity and the Draft's title. Reads only. */
+function staleTitles(p: Project): { id: string; proposal: string; title: string }[] {
+  const stale: { id: string; proposal: string; title: string }[] = [];
   for (const a of listAnnouncements(p)) {
     // A Resolve Drifts announcement keeps its title: it is named by its Drifts, not by a Draft. A Drift's ghost keeps the Drift's title.
     if (a.kind !== "proposal" || a.proposal === null || a.drifts.length > 0) continue;
@@ -69,11 +66,23 @@ export function synchronizeAnnouncementTitles(p: Project): void {
       // An unreadable Draft leaves its announcement unchanged.
       continue;
     }
-    if (title === a.title) continue;
+    if (title !== a.title) stale.push({ id: a.id, proposal: a.proposal, title });
+  }
+  return stale;
+}
+
+/**
+ * Gives the ghost of a Draft the Draft's current title. The title is written by the core under the announcements lock,
+ * through a temporary file renamed over the announcement, and only while the file still exists: a ghost delivered or
+ * withdrawn is never brought back, and nothing is written when the title already matches. `read` runs the reads that find the
+ * titles to change (a picture's reads, which take the files from the window's cache); the writes read the announcement from the disk.
+ */
+export function synchronizeAnnouncementTitles(p: Project, read: <T>(fn: () => T) => T = (fn) => fn()): void {
+  for (const { id, proposal, title } of read(() => staleTitles(p))) {
     try {
-      retitleBoundAnnouncement(p, a.id, a.proposal, title);
+      retitleBoundAnnouncement(p, id, proposal, title);
     } catch (err) {
-      throw new TramaError(`Could not synchronize announcement ${a.id}: ${(err as Error).message}`);
+      throw new TramaError(`Could not synchronize announcement ${id}: ${(err as Error).message}`);
     }
   }
 }
@@ -97,7 +106,7 @@ export async function withdrawOrphans(root: string): Promise<void> {
     else throw err;
     return;
   }
-  if (gone.size > 0) withdrawWaiting(root, (announcement) => gone.has(announcement.id));
+  if (gone.size > 0) await withdrawWaiting(root, (announcement) => gone.has(announcement.id));
 }
 
 /**

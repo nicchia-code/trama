@@ -2,14 +2,14 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { z } from "zod";
 import { TramaError } from "../../core/errors";
-import { MANAGER_NEEDS_GITHUB, type Origin, readManagerMode, readOrigin, setManagerMode } from "../../core/manager-mode";
+import { currentOrigin, MANAGER_NEEDS_GITHUB, type Origin, readManagerMode, setManagerMode } from "../../core/manager-mode";
 import { createDefaultAreas } from "../../core/requirements";
 import { describeRequirementSkillSync, syncRequirementSkills } from "../../core/requirement-skills";
 import { currentSolo, type SoloResult, setSoloMode } from "../../core/solo-mode";
-import { projectAt, requirementsDir, writeFileEnsuringDir } from "../../core/store";
+import { type Project, projectAt, requirementsDir, writeFileEnsuringDir } from "../../core/store";
 import { defineCommand } from "../registry";
 import { text } from "../result";
-import { refreshProjectSkills } from "../skill-refresh";
+import { refreshProjectSkills, type SkillRefresh } from "../skill-refresh";
 import { installOmpAgents, installSkills, ompAgentConflicts, skillConflicts } from "../skills";
 import { boardView } from "../work";
 
@@ -97,11 +97,26 @@ const create = defineCommand({
       }
     }
     const recorded = readManagerMode(project);
-    const origin = readOrigin(project.root);
+    const origin = currentOrigin(project.root);
     const managerLine = managerError === null ? managerLines(recorded, origin, false) : [`Manager mode was not turned on: ${managerError}`];
     return text([`Created ${project.dir} with ${areas.length} Requirement Areas`, `Installed ${installed.length} skill files in ${skills}`, `Installed omp's sub-agent definitions: ${agents.join(", ")}`, ...soloLines(soloResult, false), ...managerLine].join("\n"), { path: project.dir, skillsDir: skills, skills: installed, agents, areas, ...soloResult, manager: recorded, managerRepository: origin.repository, managerError });
   },
 });
+
+/** The lines that tell what bringing the installed skills in line did (`project edit` with a skills folder, and Update skills in the editor). */
+export function skillsReportLines(project: Project, refresh: SkillRefresh): string[] {
+  const { skillsDir: skills, changed, removed, removedAgents, agents, areas, conversion, generated } = refresh;
+  return [
+    changed.length === 0 ? `Skills in ${skills} are already up to date.` : `Updated ${changed.length} skill file(s) in ${skills}:\n${changed.map((c) => `- ${c}`).join("\n")}`,
+    removed.length > 0 ? `Deleted the retired trama-fix skill: ${removed.join(", ")}` : "",
+    removedAgents.length > 0 ? `Deleted the retired omp sub-agent definition: ${removedAgents.join(", ")}` : "",
+    `Installed omp's sub-agent definitions: ${agents.join(", ")}`,
+    areas.length > 0 ? `Created ${areas.length} Requirement Areas in ${requirementsDir(project)}: ${areas.join(", ")}` : "",
+    conversion.converted.length > 0 ? `Converted ${conversion.converted.length} single-file Requirement Area(s) to Area folders (area.md, and main.md with the sections): ${conversion.converted.join(", ")}` : "",
+    conversion.skipped.length > 0 ? `Left ${conversion.skipped.length} single-file Requirement Area(s) as they were: ${conversion.skipped.map((s) => `${s.id} (${s.reason})`).join(", ")}` : "",
+    describeRequirementSkillSync(generated),
+  ];
+}
 
 const edit = defineCommand({
   object: "project",
@@ -129,7 +144,7 @@ const edit = defineCommand({
   run(ctx, input) {
     const project = ctx.project();
     // A refusal comes before any write, so `solo` and `manager` together never leave one of them done.
-    if (input.manager === true && readOrigin(project.root).repository === null) throw new TramaError(MANAGER_NEEDS_GITHUB);
+    if (input.manager === true && currentOrigin(project.root).repository === null) throw new TramaError(MANAGER_NEEDS_GITHUB);
     let soloOnly: SoloResult | undefined;
     if (input.solo !== undefined) {
       const result = setSoloMode(project, input.solo, input.skillsDir);
@@ -137,27 +152,17 @@ const edit = defineCommand({
     }
     if (input.manager !== undefined) setManagerMode(project, input.manager);
     const recorded = readManagerMode(project);
-    const origin = readOrigin(project.root);
+    const origin = currentOrigin(project.root);
     const managerResult = { manager: recorded, managerRepository: origin.repository };
     // `solo` and `manager` without `skillsDir` change only themselves and install nothing.
     if (input.skillsDir === undefined && (input.solo !== undefined || input.manager !== undefined)) {
       const lines = [...(soloOnly === undefined ? [] : soloLines(soloOnly, true)), ...(input.manager === undefined ? [] : managerLines(recorded, origin, true))];
       return text(lines.join("\n"), { ...(soloOnly ?? {}), ...(input.manager === undefined ? {} : managerResult) });
     }
-    const { skillsDir: skills, changed, removed, removedAgents, agents, agentsChanged, areas, conversion, generated } = refreshProjectSkills(project, input.skillsDir, true);
+    const refreshed = refreshProjectSkills(project, input.skillsDir, true);
+    const { skillsDir: skills, changed, removed, removedAgents, agents, agentsChanged, areas, conversion, generated } = refreshed;
     const soloResult = currentSolo(project, input.skillsDir);
-    const lines = [
-      changed.length === 0 ? `Skills in ${skills} are already up to date.` : `Updated ${changed.length} skill file(s) in ${skills}:\n${changed.map((c) => `- ${c}`).join("\n")}`,
-      removed.length > 0 ? `Deleted the retired trama-fix skill: ${removed.join(", ")}` : "",
-      removedAgents.length > 0 ? `Deleted the retired omp sub-agent definition: ${removedAgents.join(", ")}` : "",
-      `Installed omp's sub-agent definitions: ${agents.join(", ")}`,
-      areas.length > 0 ? `Created ${areas.length} Requirement Areas in ${requirementsDir(project)}: ${areas.join(", ")}` : "",
-      conversion.converted.length > 0 ? `Converted ${conversion.converted.length} single-file Requirement Area(s) to Area folders (area.md, and main.md with the sections): ${conversion.converted.join(", ")}` : "",
-      conversion.skipped.length > 0 ? `Left ${conversion.skipped.length} single-file Requirement Area(s) as they were: ${conversion.skipped.map((s) => `${s.id} (${s.reason})`).join(", ")}` : "",
-      describeRequirementSkillSync(generated),
-      ...soloLines(soloResult, input.solo !== undefined),
-      ...managerLines(recorded, origin, input.manager !== undefined),
-    ];
+    const lines = [...skillsReportLines(project, refreshed), ...soloLines(soloResult, input.solo !== undefined), ...managerLines(recorded, origin, input.manager !== undefined)];
     return text(lines.filter(Boolean).join("\n"), { skillsDir: skills, changed, removed, removedAgents, agents, agentsChanged, areas, conversion, generated, ...soloResult, ...managerResult });
   },
 });
@@ -183,7 +188,7 @@ const show = defineCommand({
     const project = ctx.project();
     const board = boardView(project);
     const recorded = readManagerMode(project);
-    const { repository } = readOrigin(project.root);
+    const { repository } = currentOrigin(project.root);
     const line = !recorded ? "Manager mode: off" : repository === null ? "Manager mode: on, but origin is not on GitHub" : `Manager mode: on (${repository})`;
     return { ...board, md: `${board.md}\n\n${line}`, json: { ...(board.json as object), manager: recorded, managerRepository: repository } };
   },

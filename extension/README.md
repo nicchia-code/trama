@@ -47,7 +47,7 @@ When the code and the map stop telling the same story, Trama raises a Drift. Fix
 - VS Code 1.106 or later, the only editor Trama supports.
 - Linux (x64), macOS (Apple silicon) or Windows (x64, experimental).
 - omp, the only agent Trama supports.
-- The GitHub CLI (`gh`), only for the PR Check and Team.
+- The GitHub CLI (`gh`), only for Team.
 
 ## Install
 

@@ -11,7 +11,6 @@ import {
   pullRequestsSummary,
   pullRequestStatus,
 } from "../extension/src/webview/team/logic";
-import { TeamPage } from "../extension/src/webview/team";
 import { TooltipProvider } from "../extension/src/webview/ui/tooltip";
 import { PullRequestsTab } from "../extension/src/webview/team/pull-requests-tab";
 
@@ -203,13 +202,5 @@ describe("the tab", () => {
     expect(screen.getByRole("dialog")).not.toBeNull();
     rerender(view([pr(2)]));
     expect(screen.queryByRole("dialog")).toBeNull();
-  });
-});
-
-describe("the view", () => {
-  test("the tab takes the message of the host with Manager mode off", () => {
-    render(<TeamPage manager={false} team={null} rejection={null} pullRequests={message([pr(5)])} post={() => {}} />);
-    expect(screen.getByText("1 open pull request ready for review")).not.toBeNull();
-    expect(screen.getByText("Title 5")).not.toBeNull();
   });
 });

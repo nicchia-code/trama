@@ -59,6 +59,12 @@ class FakeSession implements OmpSessionPort {
   onUpdate(): Disposable {
     return { dispose: () => undefined };
   }
+  history(): readonly never[] {
+    return [];
+  }
+  onLiveUpdate(): Disposable {
+    return { dispose: () => undefined };
+  }
   onTurn(): Disposable {
     return { dispose: () => undefined };
   }

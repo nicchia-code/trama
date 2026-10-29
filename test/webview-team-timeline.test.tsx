@@ -362,7 +362,6 @@ const snapshotOf = (rows: IssueRowData[]): Snapshot => ({ ...shopSnapshot(), han
 function page(over: { github?: GitHubMessage | null; snapshot?: Snapshot | null } = {}) {
   const posted: ToHost[] = [];
   const props = {
-    manager: true,
     team: TEAM,
     rejection: null,
     github: github([gh(), gh({ number: 129, assignee: "sara", sprint: "Sprint 14", status: "Closed", estimate: 2 })]),
@@ -375,9 +374,9 @@ function page(over: { github?: GitHubMessage | null; snapshot?: Snapshot | null 
   return { posted, open, ...utils };
 }
 
-test("the tabs are Decisions, Issues, Pull Requests, Timeline and People, in this order", () => {
+test("the tabs are Decisions, Issues, Timeline and People, in this order", () => {
   page();
-  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Decisions", "Issues", "Pull Requests", "Timeline", "People"]);
+  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Decisions", "Issues", "Timeline", "People"]);
 });
 
 test("the Timeline tab shows By person, selected, and the scale note at the right", () => {

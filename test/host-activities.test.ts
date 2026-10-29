@@ -3,7 +3,7 @@ import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { announce, withdrawAll } from "../src/core/announcements";
-import type { AnnouncementView } from "../src/core/snapshot";
+import { type AnnouncementView, buildSnapshot } from "../src/core/snapshot";
 import { projectAt } from "../src/core/store";
 import { activitiesOf, activityOptions, summarize } from "../extension/src/host/activities";
 
@@ -139,11 +139,22 @@ describe("the status bar item", () => {
     // Dynamic: the module must load after mock.module replaced "vscode".
     const { ActivitiesItem } = await import("../extension/src/host/activities-item");
     const p = projectAt(dir);
-    const files = { onDidCreate: subscribe(fileEvents.create), onDidChange: subscribe(fileEvents.change), onDidDelete: subscribe(fileEvents.delete) };
+    // The window's picture: the item takes the ghosts of each picture built, and reads no file itself.
+    const listeners: ((outcome: unknown, cause: string) => void)[] = [];
+    const picture = { onDidBuild: (fn: (outcome: unknown, cause: string) => void) => (listeners.push(fn), { dispose() {} }), peek: () => undefined };
     const opened: string[] = [];
-    const activities = new ActivitiesItem(() => dir, files as never, (id) => void opened.push(id));
+    const activities = new ActivitiesItem(picture as never, (id) => void opened.push(id));
     const item = items.at(-1) as FakeItem;
-    const changed = () => fileEvents.change.forEach((fn) => fn());
+    const changed = () => {
+      const outcome = { kind: "built", project: p, snapshot: buildSnapshot(p) };
+      listeners.forEach((fn) => fn(outcome, "files"));
+    };
+
+    // A raw event of the watcher reads nothing: only a picture moves the item.
+    announce(p, { kind: "check", title: "Not in a picture yet", phase: "scanning" });
+    fileEvents.change.forEach((fn) => fn());
+    expect(items.at(-1)?.visible).toBe(false);
+    withdrawAll(p);
 
     expect(item).toMatchObject({ id: "trama.activities", alignment: 1, name: "Trama Activities", command: "trama.showActivities", visible: false, backgroundColor: undefined });
     expect(item.priority).toBeLessThan(100);

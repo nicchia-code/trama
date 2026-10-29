@@ -1,4 +1,5 @@
 import { execFile, type ExecFileException } from "node:child_process";
+import { processStarted } from "../../../../src/core/performance";
 import { certificateErrorText, isCertificateError } from "../../certificate-errors";
 import { cursorKeyEnv } from "../cursor-api-key";
 import { savedSystemCertificates, systemCertificatesEnv } from "../system-certificates";
@@ -42,7 +43,7 @@ function failureReason(error: ExecFileException, program: string, timeoutMs: num
 export interface UsageRunnerDeps {
   /** `trama.ompPath`, trimmed. */
   ompPath(): string;
-  /** The program omp runs as, undefined when omp is not installed (`tech#agent-launching`). */
+  /** The program omp runs as, undefined when omp is not installed: the one the window's omp module keeps (`tech#omp-acp`). */
   findOmp(ompPath: string): Promise<string | undefined>;
   /** The folder of the panel, the one General works in. */
   folder(): string | undefined;
@@ -62,7 +63,11 @@ export function ompUsageRunner(deps: UsageRunnerDeps, timeoutMs = USAGE_TIMEOUT_
     const { promise, resolve, reject } = Promise.withResolvers<string>();
     const systemCertificates = savedSystemCertificates();
     const options = { timeout: timeoutMs, maxBuffer: USAGE_MAX_BUFFER, env: { ...env, ...cursorKeyEnv(), ...systemCertificatesEnv(systemCertificates), PATH: ompPathVariable(program, env) }, ...(cwd === undefined ? {} : { cwd }) };
-    execFile(program, ["usage", "--json"], options, (error, stdout, stderr) => (error === null ? resolve(stdout) : reject(new Error(failureReason(error, program, timeoutMs, String(stderr), systemCertificates)))));
+    const ended = processStarted(program);
+    execFile(program, ["usage", "--json"], options, (error, stdout, stderr) => {
+      ended();
+      return error === null ? resolve(stdout) : reject(new Error(failureReason(error, program, timeoutMs, String(stderr), systemCertificates)));
+    });
     return promise;
   };
 }

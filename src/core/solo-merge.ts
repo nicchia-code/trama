@@ -2,14 +2,14 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { writeFileAtomic } from "./atomic-write";
 import { TramaError } from "./errors";
-import { git, type GitResult, gitRun, gitRunAsync } from "./git";
-import { expectedSoloBlock, readSoloMode, SOLO_BEGIN, SOLO_END, soloDir } from "./solo-mode";
+import { gitAsync, type GitResult, gitRunAsync } from "./git";
+import { expectedSoloBlockAsync, readSoloMode, SOLO_BEGIN, SOLO_END, soloDir } from "./solo-mode";
 import { type Project, readTextLf } from "./store";
 
 /*
  * Merge of Solo mode: brings a branch chosen by the developer into the current one with git, and remembers a merge Trama started until
  * it ends. The side menu and the editor's flow (`extension/src/host/solo-merge.ts`) stand on this module; every git call goes through
- * `./git` with fixed arguments and no shell.
+ * `./git`, in its asynchronous form (only the editor's host merges, and it never holds its thread for git), with fixed arguments and no shell.
  */
 
 /** How long `git fetch --all --prune` may take: the remotes can be slow. */
@@ -60,8 +60,8 @@ function checkBranchName(name: string): void {
 }
 
 /** Where git keeps `name` in the git directory of the working copy, or null when git cannot say. */
-function gitPaths(root: string, names: string[]): string[] | null {
-  const out = git(root, ["rev-parse", ...names.flatMap((name) => ["--git-path", name])]);
+async function gitPaths(root: string, names: string[]): Promise<string[] | null> {
+  const out = await gitAsync(root, ["rev-parse", ...names.flatMap((name) => ["--git-path", name])]);
   const lines = out === null ? [] : out.split(/\r?\n/).filter((line) => line !== "");
   return lines.length === names.length ? lines.map((line) => resolve(root, line)) : null;
 }
@@ -69,27 +69,27 @@ function gitPaths(root: string, names: string[]): string[] | null {
 const IN_PROGRESS = ["MERGE_HEAD", "REBASE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply"];
 
 /** Whether a merge, rebase, cherry-pick or revert is in progress in the working copy at `root`. */
-export function operationInProgress(root: string): boolean {
-  return (gitPaths(root, IN_PROGRESS) ?? []).some((path) => existsSync(path));
+export async function operationInProgress(root: string): Promise<boolean> {
+  return ((await gitPaths(root, IN_PROGRESS)) ?? []).some((path) => existsSync(path));
 }
 
 /** The current branch, or null when HEAD is on no branch. */
-export function currentBranch(root: string): string | null {
-  const out = git(root, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+export async function currentBranch(root: string): Promise<string | null> {
+  const out = await gitAsync(root, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
   const name = out === null ? "" : firstLine(out);
   return name === "" ? null : name;
 }
 
 /** The pathspecs that leave out the paths of the Solo mode block: `:(top,exclude)` and the pattern of each line, anchored to the repository root. */
-function blockExclusions(p: Project, skillsDir: string | undefined): string[] {
+async function blockExclusions(p: Project, skillsDir: string | undefined): Promise<string[]> {
   const kind = readSoloMode(p);
-  const block = kind === "off" ? null : expectedSoloBlock(p, kind, skillsDir);
+  const block = kind === "off" ? null : await expectedSoloBlockAsync(p, kind, skillsDir);
   return (block ?? []).filter((line) => line !== SOLO_BEGIN && line !== SOLO_END).map((line) => `:(top,exclude)${line.replace(/^\//, "").replace(/\/$/, "")}`);
 }
 
 /** Whether a tracked file has changes, staged or not, outside the paths of the Solo mode block; untracked files do not count. A git that cannot say counts as changes. */
-export function hasTrackedChanges(p: Project, skillsDir?: string): boolean {
-  const result = gitRun(p.root, ["status", "--porcelain=v1", "-z", "--untracked-files=no", "--", ":(top)", ...blockExclusions(p, skillsDir)]);
+export async function hasTrackedChanges(p: Project, skillsDir?: string): Promise<boolean> {
+  const result = await gitRunAsync(p.root, ["status", "--porcelain=v1", "-z", "--untracked-files=no", "--", ":(top)", ...(await blockExclusions(p, skillsDir))]);
   return !result.ok || result.stdout !== "";
 }
 
@@ -97,14 +97,14 @@ export function hasTrackedChanges(p: Project, skillsDir?: string): boolean {
  * Whether Merge is available, and if not why (the first reason that holds): nothing in progress, HEAD on a branch, no change to tracked files outside the Solo mode block, and
  * no job of the agent launched from this window (`agentRunning`, which only the host knows).
  */
-export function mergeAvailability(p: Project, agentRunning: boolean, skillsDir?: string): MergeAvailability {
-  const reason: MergeBlock | undefined = operationInProgress(p.root) ? "inProgress" : currentBranch(p.root) === null ? "detached" : hasTrackedChanges(p, skillsDir) ? "changes" : agentRunning ? "agent" : undefined;
+export async function mergeAvailability(p: Project, agentRunning: boolean, skillsDir?: string): Promise<MergeAvailability> {
+  const reason: MergeBlock | undefined = (await operationInProgress(p.root)) ? "inProgress" : (await currentBranch(p.root)) === null ? "detached" : (await hasTrackedChanges(p, skillsDir)) ? "changes" : agentRunning ? "agent" : undefined;
   return reason === undefined ? { available: true } : { available: false, reason };
 }
 
 /** The upstream of the current branch as git names it (`origin/main`), or null when it has none. */
-export function upstreamBranch(root: string): string | null {
-  const out = git(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]);
+export async function upstreamBranch(root: string): Promise<string | null> {
+  const out = await gitAsync(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]);
   const name = out === null ? "" : firstLine(out);
   return name === "" ? null : name;
 }
@@ -115,12 +115,10 @@ const alphabetical = (a: string, b: string): number => a.localeCompare(b);
  * The branches to offer: the upstream of the current branch first, then the other remote-tracking branches, then the local ones, each group in alphabetical
  * order, without the current branch and without `<remote>/HEAD`. Empty when git cannot list them.
  */
-export function mergeBranches(root: string): MergeBranch[] {
-  const refs = git(root, ["for-each-ref", "--format=%(refname)", "refs/remotes", "refs/heads"]);
+export async function mergeBranches(root: string): Promise<MergeBranch[]> {
+  const [refs, current, upstream, remoteList] = await Promise.all([gitAsync(root, ["for-each-ref", "--format=%(refname)", "refs/remotes", "refs/heads"]), currentBranch(root), upstreamBranch(root), gitAsync(root, ["remote"])]);
   if (refs === null) return [];
-  const current = currentBranch(root);
-  const upstream = upstreamBranch(root);
-  const remotes = (git(root, ["remote"]) ?? "").split(/\r?\n/).filter((name) => name !== "");
+  const remotes = (remoteList ?? "").split(/\r?\n/).filter((name) => name !== "");
   const names = refs.split(/\r?\n/).filter((name) => name !== "");
   const remote = names.filter((name) => name.startsWith("refs/remotes/")).map((name) => name.slice("refs/remotes/".length)).filter((name) => !name.endsWith("/HEAD")).sort(alphabetical);
   const local = names.filter((name) => name.startsWith("refs/heads/")).map((name) => name.slice("refs/heads/".length)).filter((name) => name !== current).sort(alphabetical);
@@ -136,32 +134,31 @@ export async function fetchRemotes(root: string): Promise<void> {
 }
 
 /** The full hash of the commit `name` stands for, or null when it names none. */
-function commitOf(root: string, name: string): string | null {
-  const out = git(root, ["rev-parse", "--verify", "--quiet", `${name}^{commit}`]);
+async function commitOf(root: string, name: string): Promise<string | null> {
+  const out = await gitAsync(root, ["rev-parse", "--verify", "--quiet", `${name}^{commit}`]);
   const hash = out === null ? "" : firstLine(out);
   return hash === "" ? null : hash;
 }
 
 /** Whether `commit` is an ancestor of HEAD (or HEAD itself). Throws with git's reason when git cannot tell. */
-function headContains(root: string, commit: string): boolean {
-  const result = gitRun(root, ["merge-base", "--is-ancestor", commit, "HEAD"]);
+async function headContains(root: string, commit: string): Promise<boolean> {
+  const result = await gitRunAsync(root, ["merge-base", "--is-ancestor", commit, "HEAD"]);
   if (result.ok) return true;
   if (result.status === 1) return false;
   throw new TramaError(gitReason(result));
 }
 
 /** Whether the current branch already contains `branch`: nothing would be merged. Throws when `branch` names no commit. */
-export function isUpToDate(root: string, branch: string): boolean {
+export async function isUpToDate(root: string, branch: string): Promise<boolean> {
   checkBranchName(branch);
-  const incoming = commitOf(root, branch);
+  const incoming = await commitOf(root, branch);
   if (incoming === null) throw new TramaError(`"${branch}" is not a branch.`);
   return headContains(root, incoming);
 }
 
 /** The files with conflicts of the merge in progress, as absolute paths in git's order. */
-export function conflictedFiles(root: string): string[] {
-  const top = git(root, ["rev-parse", "--show-toplevel"]);
-  const out = git(root, ["diff", "--name-only", "--diff-filter=U", "-z"]);
+export async function conflictedFiles(root: string): Promise<string[]> {
+  const [top, out] = await Promise.all([gitAsync(root, ["rev-parse", "--show-toplevel"]), gitAsync(root, ["diff", "--name-only", "--diff-filter=U", "-z"])]);
   if (top === null || out === null) return [];
   const base = firstLine(top);
   return out.split("\0").filter((path) => path !== "").map((path) => resolve(base, path));
@@ -188,35 +185,35 @@ function forgetMerge(p: Project): void {
  * Without conflicts, a fast-forward included, the merge is over and nothing is remembered. With conflicts it stays remembered, open in git. When git refuses or fails
  * for another reason nothing is remembered. Never makes the merge commit of a merge with conflicts.
  */
-export function startMerge(p: Project, branch: string): MergeOutcome {
+export async function startMerge(p: Project, branch: string): Promise<MergeOutcome> {
   checkBranchName(branch);
-  const base = commitOf(p.root, "HEAD");
-  const incoming = commitOf(p.root, branch);
+  const base = await commitOf(p.root, "HEAD");
+  const incoming = await commitOf(p.root, branch);
   if (base === null) return { kind: "failed", reason: "HEAD has no commit." };
   if (incoming === null) return { kind: "failed", reason: `"${branch}" is not a branch.` };
   mkdirSync(soloDir(p), { recursive: true });
   const merge: OpenMerge = { branch, base, incoming, started: new Date().toISOString() };
   writeFileAtomic(mergeFile(p), `${JSON.stringify(merge, null, 2)}\n`);
-  const result = gitRun(p.root, ["merge", "--no-edit", branch]);
+  const result = await gitRunAsync(p.root, ["merge", "--no-edit", branch]);
   if (result.ok) {
     forgetMerge(p);
     return { kind: "merged", base, incoming };
   }
-  if ((gitPaths(p.root, ["MERGE_HEAD"]) ?? []).some((path) => existsSync(path))) return { kind: "conflicts", base, incoming, files: conflictedFiles(p.root) };
+  if (((await gitPaths(p.root, ["MERGE_HEAD"])) ?? []).some((path) => existsSync(path))) return { kind: "conflicts", base, incoming, files: await conflictedFiles(p.root) };
   forgetMerge(p);
   return { kind: "failed", reason: gitReason(result) };
 }
 
 /** Aborts the merge in progress with `git merge --abort` and forgets it. Throws with git's reason when git cannot abort: the merge then stays remembered. */
-export function abortMerge(p: Project): void {
-  const result = gitRun(p.root, ["merge", "--abort"]);
+export async function abortMerge(p: Project): Promise<void> {
+  const result = await gitRunAsync(p.root, ["merge", "--abort"]);
   if (!result.ok) throw new TramaError(gitReason(result));
   forgetMerge(p);
 }
 
 /** The commit `MERGE_HEAD` points at, or null when no merge is in progress. */
-function mergeHead(root: string): string | null {
-  const path = gitPaths(root, ["MERGE_HEAD"])?.[0];
+async function mergeHead(root: string): Promise<string | null> {
+  const path = (await gitPaths(root, ["MERGE_HEAD"]))?.[0];
   if (path === undefined || !existsSync(path)) return null;
   try {
     return firstLine(readFileSync(path, "utf8"));
@@ -230,14 +227,14 @@ function mergeHead(root: string): string | null {
  * HEAD contains `incoming`, abandoned otherwise (a `MERGE_HEAD` that points at another commit counts as abandoned too). A committed or abandoned merge is forgotten,
  * and so is a file that is not valid. Call it only when no `startMerge` is running.
  */
-export function settleMerge(p: Project): MergeEnd {
+export async function settleMerge(p: Project): Promise<MergeEnd> {
   if (!existsSync(mergeFile(p))) return { kind: "none" };
   const merge = readOpenMerge(p);
   if (merge === null) {
     forgetMerge(p);
     return { kind: "abandoned" };
   }
-  const head = mergeHead(p.root);
+  const head = await mergeHead(p.root);
   if (head !== null) {
     if (head === merge.incoming) return { kind: "open", merge };
     forgetMerge(p);
@@ -245,7 +242,7 @@ export function settleMerge(p: Project): MergeEnd {
   }
   let committed = false;
   try {
-    committed = headContains(p.root, merge.incoming);
+    committed = await headContains(p.root, merge.incoming);
   } catch {
     // git cannot say: the merge is not taken for committed, and no scan starts for it.
   }

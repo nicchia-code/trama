@@ -21,7 +21,7 @@ class FakeSession implements OmpSessionPort {
   private cancelledListeners: ((requestId: string) => void)[] = [];
   permissionAnswers: { requestId: string; optionId: string }[] = [];
   waiting: PermissionRequest[] = [];
-  history: SessionNotification[] = [];
+  past: SessionNotification[] = [];
   constructor(readonly sessionId = "s1") {}
   async sendPrompt(prompt: OmpPrompt): Promise<void> {
     this.prompts.push(prompt);
@@ -39,7 +39,14 @@ class FakeSession implements OmpSessionPort {
   }
   onUpdate(listener: (n: SessionNotification) => void): Disposable {
     this.updateListeners.push(listener);
-    for (const past of this.history) listener(past);
+    for (const past of this.past) listener(past);
+    return { dispose: () => void (this.updateListeners = this.updateListeners.filter((each) => each !== listener)) };
+  }
+  history(): readonly SessionNotification[] {
+    return this.past;
+  }
+  onLiveUpdate(listener: (n: SessionNotification) => void): Disposable {
+    this.updateListeners.push(listener);
     return { dispose: () => void (this.updateListeners = this.updateListeners.filter((each) => each !== listener)) };
   }
   onTurn(listener: (inTurn: boolean) => void): Disposable {
@@ -199,12 +206,36 @@ describe("opening, selecting and closing", () => {
     expect(fake.posted.filter((m) => m.type === "conversationStart").map((m) => (m as { focus: boolean }).focus)).toEqual([false, true]);
   });
 
-  test("the first message carries the instruction and its attachment", () => {
+  test("a job's tab shows at once as starting, with no instruction; the instruction and the session come together when the session is open", () => {
     const { model, fake } = setup();
     model.webviewReady();
-    model.open({ id: "a", name: "Unify" }, session, { focus: false, first: { text: "Do it", attachment: "/tmp/attached.md" }, notice: "The window reloaded; the agent continues its work." });
-    const start = fake.posted.find((message) => message.type === "conversationStart");
-    expect(start).toEqual({ type: "conversationStart", id: "a", focus: false, first: { text: "Do it", attachment: { name: "attached.md", text: "attached text" } }, notice: "The window reloaded; the agent continues its work." });
+    model.open({ id: "a", name: "Unify" }, undefined, { focus: false });
+    expect(lastConversations(fake)?.items[0]).toEqual({ id: "a", name: "Unify", state: "idle", starting: true });
+    expect(fake.posted.filter((message) => message.type === "conversationStart")).toEqual([{ type: "conversationStart", id: "a", focus: false }]);
+    fake.posted.length = 0;
+    model.setSession("a", session, { first: { text: "Do it", attachment: "/tmp/attached.md" } });
+    expect(fake.posted.find((message) => message.type === "conversationStart")).toEqual({ type: "conversationStart", id: "a", focus: false, first: { text: "Do it", attachment: { name: "attached.md", text: "attached text" } } });
+    expect(lastConversations(fake)?.items[0]).toEqual({ id: "a", name: "Unify", state: "idle" });
+    model.setWorking("a", true);
+    expect(lastConversations(fake)?.items[0]?.state).toBe("running");
+  });
+
+  test("a resumed conversation starts with its notice", () => {
+    const { model, fake } = setup();
+    model.webviewReady();
+    model.open({ id: "a", name: "Unify" }, session, { focus: false, notice: "The window reloaded; the agent continues its work." });
+    expect(fake.posted.find((message) => message.type === "conversationStart")).toEqual({ type: "conversationStart", id: "a", focus: false, notice: "The window reloaded; the agent continues its work." });
+  });
+
+  test("the tab the webview chose is kept without sending the list again", () => {
+    const { model, fake } = setup();
+    model.webviewReady();
+    for (const id of ["a", "b"]) model.open({ id, name: id.toUpperCase() }, new FakeSession(id), { focus: false });
+    fake.posted.length = 0;
+    model.receive({ type: "selectConversation", id: "a" });
+    expect(fake.posted).toEqual([]);
+    model.webviewReady();
+    expect(lastConversations(fake)?.selected).toBe("a");
   });
 
   test("closing the tab in view moves to its neighbour; closing another keeps the one in view", () => {
@@ -280,11 +311,16 @@ describe("opening, selecting and closing", () => {
 describe("the webview", () => {
   test("a conversation opened before the webview exists is sent, with its history replayed, when the webview is ready", () => {
     const { model, fake } = setup();
-    session.history = [{ sessionId: "s1", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hi" } } }];
+    session.past = [
+      { sessionId: "s1", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hi" } } },
+      { sessionId: "s1", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: " there" } } },
+    ];
     model.open({ id: "a", name: "T3" }, session, { focus: false });
     expect(fake.posted).toEqual([]);
     model.receive({ type: "ready" });
-    expect(fake.posted.map((message) => message.type)).toEqual(["reset", "theme", "sendMode", "conversations", "conversationStart", "conversationUpdate"]);
+    // The history is one message, however many updates it holds.
+    expect(fake.posted.map((message) => message.type)).toEqual(["reset", "theme", "sendMode", "conversations", "conversationStart", "conversationHistory"]);
+    expect(fake.posted.find((message) => message.type === "conversationHistory")).toMatchObject({ id: "a", updates: session.past });
   });
 
   test("the project's GitHub repository goes to the webview with the theme, only when there is one", () => {
@@ -294,6 +330,23 @@ describe("the webview", () => {
     fake.githubRepo = "acme/shop";
     model.receive({ type: "ready" });
     expect(fake.posted.filter((message) => message.type === "githubRepo")).toEqual([{ type: "githubRepo", repo: "acme/shop" }]);
+  });
+
+  test("the GitHub repository goes to a webview that is there again when the window's origin changes, and to none before it is ready", () => {
+    const { model, fake } = setup();
+    fake.githubRepo = "acme/shop";
+    model.githubRepoChanged();
+    expect(fake.posted).toEqual([]);
+    model.receive({ type: "ready" });
+    fake.posted.length = 0;
+    fake.githubRepo = "acme/other";
+    model.githubRepoChanged();
+    fake.githubRepo = null;
+    model.githubRepoChanged();
+    expect(fake.posted).toEqual([
+      { type: "githubRepo", repo: "acme/other" },
+      { type: "githubRepo", repo: null },
+    ]);
   });
 
   test("a second ready replays the history again over a reset, without listening twice", () => {

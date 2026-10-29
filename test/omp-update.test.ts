@@ -1,10 +1,24 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { checkHolds, OMP_UPDATE_TTL_MS, ompSearchFolders, readUpdateCheck } from "../src/core/omp-update";
+import { checkHolds, newerToInstall, OMP_UPDATE_TTL_MS, ompSearchFolders, readUpdateCheck } from "../src/core/omp-update";
 import { certificateErrorText } from "../extension/src/certificate-errors";
-import { ensureOmpUpdated, findConfiguredOmp, findOmp, forgetUpdateCheck, OMP_UPDATE_KEY, ompVersionOnly, setUpdateStore } from "../extension/src/host/omp-update";
+import {
+  configuredOmpProgram,
+  ensureOmpUpdated,
+  findConfiguredOmp,
+  findOmp,
+  forgetOmp,
+  forgetUpdateCheck,
+  OMP_UPDATE_KEY,
+  ompProgram,
+  ompStatus,
+  ompVersion,
+  ompVersionOutcome,
+  prepareOmpLaunch,
+  setUpdateStore,
+} from "../extension/src/host/omp-update";
 import { bundlePath } from "../extension/src/host/system-certificates";
 
 const posix = process.platform !== "win32";
@@ -12,17 +26,26 @@ let dir = "";
 let calls = "";
 
 /**
- * A fake omp whose `update --check` prints `check`, whose `update` exits with `updateCode` and whose `--version` prints `version` (nothing for an empty one);
- * every call is appended to the `calls` file.
+ * A fake omp whose `update --check` prints `check`, whose `update` exits with `updateCode` (a successful one makes `--version` print `afterUpdate` from then on) and whose
+ * `--version` prints `version` (nothing for an empty one); every call is appended to the `calls` file.
  */
-function fakeOmp(check: string, updateCode = 0, checkCode = 0, version = "18.12.6"): string {
+function fakeOmp(check: string, updateCode = 0, checkCode = 0, version = "18.12.6", afterUpdate = version): string {
   const program = join(dir, "omp");
-  writeFileSync(program, `#!/bin/sh\necho "$@" >> "${calls}"\nif [ "$1" = "--version" ]; then printf '%s' '${version}'; exit 0; fi\nif [ "$1 $2" = "update --check" ]; then printf '%s\\n' '${check}'; exit ${checkCode}; fi\nif [ "$1" = "update" ]; then exit ${updateCode}; fi\nexit 0\n`);
+  const script = [
+    "#!/bin/sh",
+    `echo "$@" >> "${calls}"`,
+    `if [ "$1" = "--version" ]; then if [ -f "${dir}/updated" ]; then printf '%s' '${afterUpdate}'; else printf '%s' '${version}'; fi; exit 0; fi`,
+    `if [ "$1 $2" = "update --check" ]; then printf '%s\\n' '${check}'; exit ${checkCode}; fi`,
+    `if [ "$1" = "update" ]; then if [ ${updateCode} -eq 0 ]; then touch "${dir}/updated"; fi; exit ${updateCode}; fi`,
+    "exit 0",
+    "",
+  ].join("\n");
+  writeFileSync(program, script);
   chmodSync(program, 0o755);
   return program;
 }
 
-/** The calls of the fake omp, in the order they were made; `--version` runs beside the check, so it is left out unless asked for. */
+/** The calls of the fake omp, in the order they were made; `--version` is left out unless asked for. */
 const called = (withVersion = false): string[] => {
   try {
     return readFileSync(calls, "utf8").trim().split("\n").filter((line) => line !== "" && (withVersion || line !== "--version"));
@@ -31,10 +54,23 @@ const called = (withVersion = false): string[] => {
   }
 };
 
+/** Waits, in real time, until `condition` holds: the background check of a launch ends on its own. */
+async function until(condition: () => boolean, ms = 5000): Promise<void> {
+  for (let waited = 0; waited < ms && !condition(); waited += 10) await Bun.sleep(10);
+}
+
+/** The window's global state, in memory. */
+function keptState(): Map<string, unknown> {
+  const kept = new Map<string, unknown>();
+  setUpdateStore({ get: <T,>(key: string) => kept.get(key) as T | undefined, update: async (key, value) => void kept.set(key, value) });
+  return kept;
+}
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "omp-update-"));
   calls = join(dir, "calls");
   setUpdateStore(undefined);
+  forgetOmp();
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -69,23 +105,71 @@ test("General's set trama.ompPath resolves to the path as-is only when it runs: 
   expect(await findConfiguredOmp("omp-missing", { PATH: dir }, home, false)).toBeUndefined();
 });
 
-test("a newer version is installed, announced first, and the outcome holds for an hour", async () => {
+test("the program is searched once per window and kept; a program that is not found is searched again, and forgetOmp makes the module search again", async () => {
   if (!posix) return;
-  const program = fakeOmp("Current version: 18.12.6\nNew version available: 18.13.0");
+  const saved = { HOME: process.env["HOME"], PATH: process.env["PATH"] };
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  process.env["HOME"] = join(dir, "home");
+  process.env["PATH"] = bin;
+  try {
+    expect(await ompProgram("")).toBeUndefined();
+    writeFileSync(join(bin, "omp"), "#!/bin/sh\n", { mode: 0o755 });
+    expect(await ompProgram("")).toBe(join(bin, "omp"));
+    // Found: kept, so the file going away is not noticed until the module is told.
+    rmSync(join(bin, "omp"));
+    expect(await ompProgram("")).toBe(join(bin, "omp"));
+    expect(await configuredOmpProgram("")).toBe(join(bin, "omp"));
+    forgetOmp();
+    expect(await ompProgram("")).toBeUndefined();
+    // A set path is the program as-is; General's reading of it also asks that it runs.
+    expect(await ompProgram(join(dir, "set-omp"))).toBe(join(dir, "set-omp"));
+    expect(await configuredOmpProgram(join(dir, "set-omp"))).toBeUndefined();
+    writeFileSync(join(dir, "set-omp"), "#!/bin/sh\n", { mode: 0o755 });
+    expect(await configuredOmpProgram(join(dir, "set-omp"))).toBe(join(dir, "set-omp"));
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
+test("omp --version is asked once per window for every caller, again after forgetOmp or a failed answer", async () => {
+  if (!posix) return;
+  const program = fakeOmp("Current version: 18.12.6\nAlready up to date");
+  expect(await ompStatus(program)).toEqual({ missing: false, version: "18.12.6" });
+  expect(await ompVersion(program)).toEqual({ missing: false, version: "18.12.6" });
+  expect(await ompVersionOutcome(program)).toEqual({ version: "18.12.6" });
+  expect(called(true).filter((line) => line === "--version")).toHaveLength(1);
+  forgetOmp();
+  await ompStatus(program);
+  expect(called(true).filter((line) => line === "--version")).toHaveLength(2);
+  // A program that is not there answers as missing and is asked again.
+  expect(await ompStatus(join(dir, "no-such-omp"))).toEqual({ missing: true, error: `omp not found at ${join(dir, "no-such-omp")}` });
+  expect(await ompVersionOutcome(join(dir, "no-such-omp"))).toEqual({ missing: true });
+});
+
+test("the wizard's check: a newer version is installed, announced first, and the outcome holds for an hour", async () => {
+  if (!posix) return;
+  const program = fakeOmp("Current version: 18.12.6\nNew version available: 18.13.0", 0, 0, "18.12.6", "18.13.0");
   const heard: string[] = [];
   expect(await ensureOmpUpdated(program, (version) => heard.push(version))).toEqual({ version: "18.13.0", updated: "18.13.0" });
   expect(heard).toEqual(["18.13.0"]);
   expect(called()).toEqual(["update --check", "update"]);
   expect(await ensureOmpUpdated(program)).toEqual({ version: "18.13.0" });
   expect(called()).toHaveLength(2);
-  expect(await ensureOmpUpdated(program, undefined, process.env, () => Date.now() + 2 * 3600_000)).toEqual({ version: "18.13.0", updated: "18.13.0" });
-  expect(called()).toHaveLength(4);
+  // Two hours later the check runs again; the version it names is the one omp has, so there is nothing to install.
+  expect(await ensureOmpUpdated(program, undefined, process.env, () => Date.now() + 2 * 3600_000)).toEqual({ version: "18.13.0" });
+  expect(called()).toEqual(["update --check", "update", "update --check"]);
 });
 
-test("a failed update leaves omp as it was and says why; up to date runs nothing more", async () => {
+test("a failed update leaves omp as it was and says why, once, and the hour holds; up to date runs nothing more", async () => {
   if (!posix) return;
   const failing = fakeOmp("Current version: 18.12.6\nNew version available: 18.13.0", 3);
   expect(await ensureOmpUpdated(failing)).toEqual({ updateError: "omp update exited with code 3", version: "18.12.6" });
+  expect(await ensureOmpUpdated(failing)).toEqual({ version: "18.12.6" });
+  expect(called()).toEqual(["update --check", "update"]);
   forgetUpdateCheck();
   const latest = fakeOmp("Current version: 18.12.6\nAlready up to date");
   expect(await ensureOmpUpdated(latest)).toEqual({ version: "18.12.6" });
@@ -102,13 +186,13 @@ test("a failed check is a failed update with its reason, and a missing program i
 
 test("the outcome lives in the global state under its key, and joining a running check does not run a second one", async () => {
   if (!posix) return;
-  const kept = new Map<string, unknown>();
-  setUpdateStore({ get: <T,>(key: string) => kept.get(key) as T | undefined, update: async (key, value) => void kept.set(key, value) });
+  const kept = keptState();
   const program = fakeOmp("Current version: 18.12.6\nAlready up to date");
   const [a, b] = await Promise.all([ensureOmpUpdated(program), ensureOmpUpdated(program)]);
   expect(a).toEqual(b);
   expect(called()).toEqual(["update --check"]);
   expect(kept.get(OMP_UPDATE_KEY)).toMatchObject({ omp: program, version: "18.12.6" });
+  expect(kept.get(OMP_UPDATE_KEY)).not.toHaveProperty("newer");
 });
 
 test("the folders omp is looked for in are the PATH, then .bun/bin, then .local/bin of the home", () => {
@@ -126,6 +210,18 @@ test("an outcome holds for an hour, for the same program only, and never from th
   expect(checkHolds(undefined, "/bin/omp", at)).toBe(false);
 });
 
+test("a newer version is installed only while the outcome that found it holds for the program, and not when omp already is that version", () => {
+  const at = Date.parse("2026-01-01T10:00:00.000Z");
+  const stored = { checkedAt: new Date(at).toISOString(), omp: "/bin/omp", version: "18.12.6", newer: "18.13.0" };
+  expect(newerToInstall(stored, "/bin/omp", at + 1000, "18.12.6")).toBe("18.13.0");
+  expect(newerToInstall(stored, "/bin/omp", at + 1000)).toBe("18.13.0");
+  expect(newerToInstall(stored, "/bin/omp", at + 1000, "18.13.0")).toBeUndefined();
+  expect(newerToInstall(stored, "/bin/omp", at + OMP_UPDATE_TTL_MS)).toBeUndefined();
+  expect(newerToInstall(stored, "/other/omp", at + 1000)).toBeUndefined();
+  expect(newerToInstall({ ...stored, newer: undefined }, "/bin/omp", at + 1000)).toBeUndefined();
+  expect(newerToInstall(undefined, "/bin/omp", at)).toBeUndefined();
+});
+
 test("a changed program is checked again even within the hour", async () => {
   if (!posix) return;
   const first = fakeOmp("Current version: 18.12.6\nAlready up to date");
@@ -137,34 +233,115 @@ test("a changed program is checked again even within the hour", async () => {
   expect(called()).toEqual(["update --check", "other"]);
 });
 
-test("omp --version is read together with the update check, with fixed arguments, and holds for the hour with it", async () => {
+test("a launch does not wait for the check: it goes on with the version of omp, the check runs in the background once and writes its outcome with the newer version", async () => {
   if (!posix) return;
-  const program = fakeOmp("Current version: 18.12.6\nAlready up to date");
-  expect(await ensureOmpUpdated(program)).toEqual({ version: "18.12.6" });
-  expect(called(true).sort()).toEqual(["--version", "update --check"]);
-  expect(await ensureOmpUpdated(program)).toEqual({ version: "18.12.6" });
-  expect(called(true)).toHaveLength(2);
+  const kept = keptState();
+  const program = fakeOmp("Current version: 18.12.6\nNew version available: 18.13.0", 0, 0, "18.12.6", "18.13.0");
+  // The check takes a moment, so a launch that waited for it would show.
+  writeFileSync(program, readFileSync(program, "utf8").replace('if [ "$1 $2" = "update --check" ]; then', 'if [ "$1 $2" = "update --check" ]; then sleep 0.6;'));
+  const started = Date.now();
+  const [a, b] = await Promise.all([prepareOmpLaunch(program), prepareOmpLaunch(program)]);
+  expect([a, b]).toEqual([{ version: "18.12.6" }, { version: "18.12.6" }]);
+  expect(Date.now() - started).toBeLessThan(450);
+  expect(kept.get(OMP_UPDATE_KEY)).toBeUndefined();
+  await until(() => kept.get(OMP_UPDATE_KEY) !== undefined);
+  expect(called()).toEqual(["update --check"]);
+  expect(kept.get(OMP_UPDATE_KEY)).toMatchObject({ omp: program, version: "18.12.6", newer: "18.13.0" });
+  // The version found is not installed by the check: the next launch installs it and waits for that, and only that.
+  const heard: (string | undefined)[] = [];
+  expect(await prepareOmpLaunch(program, { updating: (version) => heard.push(version) })).toEqual({ version: "18.13.0", updated: "18.13.0" });
+  expect(heard).toEqual(["18.13.0"]);
+  expect(called()).toEqual(["update --check", "update"]);
+  // The version is read again after the update and `newer` is gone; nothing runs while the outcome holds.
+  expect(kept.get(OMP_UPDATE_KEY)).toMatchObject({ omp: program, version: "18.13.0" });
+  expect(kept.get(OMP_UPDATE_KEY)).not.toHaveProperty("newer");
+  expect(await prepareOmpLaunch(program)).toEqual({ version: "18.13.0" });
+  expect(called()).toEqual(["update --check", "update"]);
 });
 
-test("an omp older than the minimum that is up to date, or whose update fails, comes back tooOld with its version; the update that reaches the minimum clears it", async () => {
+test("launches that find an update under way wait for it and never repeat it", async () => {
   if (!posix) return;
-  expect(await ensureOmpUpdated(fakeOmp("Current version: 18.12.5\nAlready up to date", 0, 0, "18.12.5"))).toEqual({ version: "18.12.5", tooOld: true });
-  // The hour holds the judgment too.
-  expect(await ensureOmpUpdated(join(dir, "omp"))).toEqual({ version: "18.12.5", tooOld: true });
-  forgetUpdateCheck();
-  expect(await ensureOmpUpdated(fakeOmp("Current version: 18.12.5\nNew version available: 18.13.0", 3, 0, "18.12.5"))).toEqual({ updateError: "omp update exited with code 3", version: "18.12.5", tooOld: true });
-  forgetUpdateCheck();
-  expect(await ensureOmpUpdated(fakeOmp("Current version: 18.12.5\nNew version available: 18.13.0", 0, 0, "18.12.5"))).toEqual({ version: "18.13.0", updated: "18.13.0" });
+  const kept = keptState();
+  const program = fakeOmp("Current version: 18.12.6\nNew version available: 18.13.0", 0, 0, "18.12.6", "18.13.0");
+  writeFileSync(program, readFileSync(program, "utf8").replace('if [ "$1" = "update" ]; then', 'if [ "$1" = "update" ]; then sleep 0.2;'));
+  prepareOmpLaunch(program);
+  await until(() => (kept.get(OMP_UPDATE_KEY) as { newer?: string } | undefined)?.newer !== undefined);
+  const heard: (string | undefined)[] = [];
+  const outcomes = await Promise.all([prepareOmpLaunch(program, { updating: (version) => heard.push(version) }), prepareOmpLaunch(program, { updating: (version) => heard.push(version) })]);
+  expect(outcomes[0]).toBe(outcomes[1] as never);
+  expect(outcomes[0]).toEqual({ version: "18.13.0", updated: "18.13.0" });
+  expect(heard).toEqual(["18.13.0", "18.13.0"]);
+  expect(called().filter((line) => line === "update")).toHaveLength(1);
+});
+
+test("a failed background check is told once, to the launch that started it, and holds for the hour; an omp that is recent enough goes on", async () => {
+  if (!posix) return;
+  const kept = keptState();
+  const program = fakeOmp("x", 0, 4);
+  const told: string[] = [];
+  const hooks = { checkFailed: (reason: string, version?: string) => void told.push(`${reason} | ${version}`) };
+  expect(await Promise.all([prepareOmpLaunch(program, hooks), prepareOmpLaunch(program, hooks)])).toEqual([{ version: "18.12.6" }, { version: "18.12.6" }]);
+  await until(() => told.length > 0);
+  await Bun.sleep(50);
+  expect(told).toEqual(["omp update --check exited with code 4 | 18.12.6"]);
+  expect(called()).toEqual(["update --check"]);
+  expect(kept.get(OMP_UPDATE_KEY)).toMatchObject({ omp: program, version: "18.12.6" });
+  expect(await prepareOmpLaunch(program, hooks)).toEqual({ version: "18.12.6" });
+  await Bun.sleep(50);
+  expect(told).toHaveLength(1);
+  expect(called()).toEqual(["update --check"]);
+});
+
+test("a failed update of the version a check found keeps the omp of before, says why, and is not tried again within the hour", async () => {
+  if (!posix) return;
+  const kept = keptState();
+  const program = fakeOmp("Current version: 18.12.6\nNew version available: 18.13.0", 3);
+  prepareOmpLaunch(program);
+  await until(() => (kept.get(OMP_UPDATE_KEY) as { newer?: string } | undefined)?.newer !== undefined);
+  expect(await prepareOmpLaunch(program)).toEqual({ updateError: "omp update exited with code 3", version: "18.12.6" });
+  expect(await prepareOmpLaunch(program)).toEqual({ version: "18.12.6" });
+  expect(called()).toEqual(["update --check", "update"]);
+});
+
+test("a missing program stops everything: nothing is checked and the outcome says it is missing", async () => {
+  if (!posix) return;
+  expect(await prepareOmpLaunch(join(dir, "no-such-omp"))).toEqual({ missing: true });
+  expect(called()).toEqual([]);
+});
+
+test("an omp older than the minimum, with no check that found a newer version, is updated before the launch; one that stays too old, or whose update fails, comes back tooOld", async () => {
+  if (!posix) return;
+  const heard: (string | undefined)[] = [];
+  const hooks = { updating: (version: string | undefined) => void heard.push(version) };
+  expect(await prepareOmpLaunch(fakeOmp("Current version: 18.12.5\nAlready up to date", 0, 0, "18.12.5", "18.13.0"), hooks)).toEqual({ version: "18.13.0", updated: "18.13.0" });
+  expect(heard).toEqual([undefined]);
+  expect(called()).toEqual(["update"]);
+  forgetOmp();
+  rmSync(join(dir, "updated"));
+  expect(await prepareOmpLaunch(fakeOmp("x", 3, 0, "18.12.5"))).toEqual({ updateError: "omp update exited with code 3", version: "18.12.5", tooOld: true });
+  forgetOmp();
+  expect(await prepareOmpLaunch(fakeOmp("x", 0, 0, "18.12.5"))).toEqual({ version: "18.12.5", updated: "18.12.5", tooOld: true });
 });
 
 test("an omp whose version cannot be read counts as too old, and a failed check of a recent omp does not", async () => {
   if (!posix) return;
   expect(await ensureOmpUpdated(fakeOmp("Current version: 18.12.6\nAlready up to date", 0, 0, ""))).toEqual({ tooOld: true });
-  forgetUpdateCheck();
+  forgetOmp();
   expect(await ensureOmpUpdated(fakeOmp("Current version: 18.12.6\nAlready up to date", 0, 0, "dev build"))).toEqual({ version: "dev build", tooOld: true });
-  forgetUpdateCheck();
+  forgetOmp();
   // A failed update check never stops an omp that is recent enough.
   expect(await ensureOmpUpdated(fakeOmp("x", 0, 4))).toEqual({ updateError: "omp update --check exited with code 4", version: "18.12.6" });
+});
+
+test("an omp older than the minimum that the wizard's check finds up to date comes back tooOld with its version; the update that reaches the minimum clears it", async () => {
+  if (!posix) return;
+  expect(await ensureOmpUpdated(fakeOmp("Current version: 18.12.5\nAlready up to date", 0, 0, "18.12.5"))).toEqual({ version: "18.12.5", tooOld: true });
+  // The hour holds the judgment too.
+  expect(await ensureOmpUpdated(join(dir, "omp"))).toEqual({ version: "18.12.5", tooOld: true });
+  forgetOmp();
+  expect(await ensureOmpUpdated(fakeOmp("Current version: 18.12.5\nNew version available: 18.13.0", 3, 0, "18.12.5"))).toEqual({ updateError: "omp update exited with code 3", version: "18.12.5", tooOld: true });
+  forgetOmp();
+  expect(await ensureOmpUpdated(fakeOmp("Current version: 18.12.5\nNew version available: 18.13.0", 0, 0, "18.12.5", "18.13.0"))).toEqual({ version: "18.13.0", updated: "18.13.0" });
 });
 
 /** A fake omp that fails `update --check` with `stderr` (exit 1), answers `--version`, and records the certificate variable it received in the `env` file. */
@@ -216,8 +393,9 @@ test("the check, the update and the version reading receive the bundle with Syst
     expect(readFileSync(join(dir, "env"), "utf8").trim().split("\n")).toEqual(["none", "none"]);
     forgetUpdateCheck();
     rmSync(join(dir, "env"));
-    await ompVersionOnly(program, { PATH: process.env["PATH"] ?? "" }, undefined, true);
+    await ompVersionOutcome(program, { PATH: process.env["PATH"] ?? "" }, true);
     expect(readFileSync(join(dir, "env"), "utf8").trim()).toBe(path);
+    expect(existsSync(join(dir, "env"))).toBe(true);
   } finally {
     for (const [name, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[name];

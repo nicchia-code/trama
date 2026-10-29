@@ -17,7 +17,7 @@ Usa quando tocchi i dati di Task e Drift.
 - One file per Task, named with the Task's permanent identity, holding the percentage as an integer from 0 to 100 that is a multiple of 10, with at most a final newline. No file means no percentage.
 - A file is read only for a Task that is In progress and taken by the agent. For any other Task, or when its content is not such an integer, it counts as absent.
 - The file is deleted whenever the Task leaves Taken by the agent: any move by the agent or the developer, take-back, release by the editor, closing without changes and sending the origin back to To do when its Drift is fixed in the code. A declaration replaces the whole file.
-- The panel's Snapshot and the `--json` output of `trama task show`, `trama task list` and `trama project show` carry `progress` for each Task: the percentage, or `null` when there is none.
+- The `--json` output of `trama task show`, `trama task list` and `trama project show` carries `progress` for each Task: the percentage, or `null` when there is none. The panel's Snapshot does not carry it: the Board never shows it (`ui#task/Taken by the agent`).
 
 ## drift
 

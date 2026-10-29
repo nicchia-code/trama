@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { processStarted } from "./performance";
 
 const GIT_TIMEOUT_MS = 20_000;
 
@@ -13,11 +14,14 @@ export interface GitResult {
 const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
 
 /**
- * Runs git in `cwd` and returns how it ended, with its output. The timeout ends git with SIGKILL, not SIGTERM: a git that ignores SIGTERM would
- * otherwise block this synchronous wait, and the whole process, for good. git reads no input and never prompts on the terminal.
+ * Runs git in `cwd` and returns how it ended, with its output: the synchronous form, only for the command line, a short process that serves no editor (the editor's host
+ * uses `gitRunAsync`). The timeout ends git with SIGKILL, not SIGTERM: a git that ignores SIGTERM would otherwise block this synchronous wait, and the whole process, for good.
+ * git reads no input and never prompts on the terminal.
  */
 export function gitRun(cwd: string, args: string[], timeoutMs = GIT_TIMEOUT_MS): GitResult {
+  const ended = processStarted("git");
   const r = spawnSync("git", ["--no-optional-locks", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: 1 << 30, env: gitEnv });
+  ended();
   return { ok: r.error === undefined && r.status === 0, status: r.status, stdout: r.stdout ?? "", stderr: r.error === undefined ? (r.stderr ?? "") : r.error.message };
 }
 
@@ -28,12 +32,13 @@ export function git(cwd: string, args: string[], timeoutMs = GIT_TIMEOUT_MS): st
 }
 
 /**
- * Like `gitRun`, without holding the process: for a call that may take long and must not freeze the editor's host while it waits. The timeout ends git
- * with SIGKILL, and then `stderr` says so.
+ * The asynchronous form of `gitRun`, for the editor's host: it never holds the process while git runs, and starts git without a console window on Windows. The same fixed
+ * arguments, `--no-optional-locks`, `GIT_TERMINAL_PROMPT=0` and time limit; the timeout ends git with SIGKILL, and then `stderr` says so.
  */
 export function gitRunAsync(cwd: string, args: string[], timeoutMs = GIT_TIMEOUT_MS): Promise<GitResult> {
   const { promise, resolve } = Promise.withResolvers<GitResult>();
-  const child = spawn("git", ["--no-optional-locks", ...args], { cwd, stdio: ["ignore", "pipe", "pipe"], env: gitEnv });
+  const ended = processStarted("git");
+  const child = spawn("git", ["--no-optional-locks", ...args], { cwd, stdio: ["ignore", "pipe", "pipe"], env: gitEnv, windowsHide: true });
   const out: Buffer[] = [];
   const err: Buffer[] = [];
   let timedOut = false;
@@ -47,12 +52,20 @@ export function gitRunAsync(cwd: string, args: string[], timeoutMs = GIT_TIMEOUT
   child.on("error", (error) => {
     failed = error.message;
     clearTimeout(timer);
+    ended();
     resolve({ ok: false, status: null, stdout: "", stderr: error.message });
   });
   child.on("close", (status) => {
     clearTimeout(timer);
+    ended();
     const stderr = failed ?? (timedOut ? `git did not finish within ${Math.round(timeoutMs / 1000)} seconds` : Buffer.concat(err).toString("utf8"));
     resolve({ ok: failed === undefined && !timedOut && status === 0, status, stdout: Buffer.concat(out).toString("utf8"), stderr });
   });
   return promise;
+}
+
+/** The asynchronous form of `git`: the output of git run in `cwd`, or null when it fails or runs past `timeoutMs`. */
+export async function gitAsync(cwd: string, args: string[], timeoutMs = GIT_TIMEOUT_MS): Promise<string | null> {
+  const r = await gitRunAsync(cwd, args, timeoutMs);
+  return r.ok ? r.stdout : null;
 }

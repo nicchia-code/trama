@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { WindowOrigin } from "./window-origin";
 
 // A minimal editor: one webview panel and what the host posts to it.
 interface FakePanel {
@@ -67,38 +68,56 @@ mock.module("vscode", () => ({
 
 // The modules load after mock.module replaced "vscode", so they are imported here, as the other host tests do.
 const { Controller } = await import("../extension/src/host/controller");
+const { windowOrigin } = await import("./window-origin");
 
 let dir: string;
+let window: WindowOrigin;
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), "trama-github-repo-host-"));
   cpSync(join(import.meta.dir, "../examples/shop"), dir, { recursive: true });
   workspaceFolders = [{ uri: { fsPath: dir, scheme: "file" } }];
 });
-afterAll(() => rmSync(dir, { recursive: true, force: true }));
+afterAll(() => {
+  window?.stop();
+  rmSync(dir, { recursive: true, force: true });
+});
 
 const git = (...args: string[]) => spawnSync("git", args, { cwd: dir, stdio: "ignore", timeout: 30_000, killSignal: "SIGKILL" });
 
-/** The panel's pictures after `ready`, in the folder as it is now. */
+/** The panel's pictures after `ready`, in the folder as it is now and with the origin the window knows. */
 async function pictures() {
   posted.length = 0;
-  const controller = new Controller({ fsPath: dir } as never);
+  const controller = new Controller({ fsPath: dir } as never, undefined, undefined, undefined, undefined, undefined, undefined, window.git, window.origin);
   await controller.open();
   panels.at(-1)?.receive?.({ type: "ready" });
   await Bun.sleep(0);
+  controller.dispose();
   return posted.filter((message) => message.type === "snapshot");
 }
 
-test("the picture carries the GitHub repository of the origin remote, and nothing without one or when origin is elsewhere", async () => {
+test("the picture carries the GitHub repository of the origin the window keeps, and nothing without one or when origin is elsewhere", async () => {
   git("init", "-q");
+  window = await windowOrigin(() => dir);
+  await window.open();
   const without = await pictures();
   expect(without.length).toBeGreaterThan(0);
   expect(without.every((picture) => !("githubRepo" in picture))).toBe(true);
 
   git("remote", "add", "origin", "https://gitlab.com/acme/shop.git");
+  await window.changed();
   expect((await pictures()).every((picture) => !("githubRepo" in picture))).toBe(true);
 
   git("remote", "set-url", "origin", "git@github.com:acme/shop.git");
+  await window.changed();
   const on = await pictures();
   expect(on.length).toBeGreaterThan(0);
   expect(on.every((picture) => picture.githubRepo === "acme/shop")).toBe(true);
+});
+
+test("a picture and an opening of the panel do not read origin again: the address in git changing alone changes nothing until git's config is reported", async () => {
+  git("remote", "set-url", "origin", "https://gitlab.com/acme/shop.git");
+  const stale = await pictures();
+  expect(stale.every((picture) => picture.githubRepo === "acme/shop")).toBe(true);
+  await window.changed();
+  expect((await pictures()).every((picture) => !("githubRepo" in picture))).toBe(true);
 });

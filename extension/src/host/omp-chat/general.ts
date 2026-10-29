@@ -49,16 +49,16 @@ export interface GeneralDeps {
   usable(): boolean;
   /** `trama.ompPath`, trimmed. */
   ompPath(): string;
-  /** The program omp runs as, undefined when omp is not installed. */
+  /** The program omp runs as, undefined when omp is not installed: the one the window's omp module keeps, searched once per window. */
   findOmp(ompPath: string): Promise<string | undefined>;
-  /** The omp version General's start needs (`ompVersionOnly`): no check of updates and no update, and no notice; omp missing, or older than the minimum, stops General's start with its error line. */
+  /** The omp version General's start needs, the one the module keeps (asked at the first need of the window): no check of updates and no update, and no notice; omp missing, or older than the minimum, stops General's start with its error line. */
   checkOmp(program: string): Promise<{ missing?: true; tooOld?: true; version?: string }>;
   /** The launch of a new session: `omp [--model m] acp [--yolo]` with Trama's environment for `terminalId`. */
   launch(root: string, terminalId: string): Promise<OmpLaunch>;
   /** The launch of a saved session: the saved arguments and variables, with the endpoint and PATH of this window. */
   resumeLaunch(root: string, args: string[], env: Record<string, string>): Promise<OmpLaunch>;
   /** The file of General's instructions (`media/general.md` in this extension's package, followed by the language sentence when a language is chosen), read at every start and resume and passed to omp; undefined when the package has none; it throws when the file cannot be prepared. */
-  instructions(): string | undefined;
+  instructions(): Promise<string | undefined> | string | undefined;
   /** Ends General's work as a terminal's end does (the same `endAgentWork` the agent terminals use): releases what it took, withdraws its announcements, and forgets its process. It never disposes or idles a terminal. */
   endWork(terminalId: string, root: string): void;
   /** Interrupts every question round of General's agent, presented or queued, with the shared interruption error: its stop, its clear and its end do. */
@@ -313,7 +313,7 @@ export class GeneralConversation implements Disposable {
     }
     let instructions: string | undefined;
     try {
-      instructions = this.deps.instructions();
+      instructions = await this.deps.instructions();
     } catch (err) {
       this.pendingFailure = { kind: "start", reason: `its instructions could not be prepared: ${err instanceof Error ? err.message : String(err)}` };
       if (token === this.token) this.dispatch({ type: "startFailed", missing: false });

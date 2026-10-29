@@ -18,10 +18,9 @@ export async function followFacts(root: string, holders: readonly (string | null
   const processes = ask.length === 0 ? {} : readAgentProcesses(questionProjectId(project));
   const registered = Object.fromEntries(ask.map((holder) => [holder, processes?.[holder]?.window]));
   const followedElsewhere = ask.length === 0 ? new Set<string>() : await askFollowedHolders(project, ask, { ownWindow: ownWindowId(root), registered });
-  const alive = new Set<string>();
-  for (const holder of ask) {
-    if (followedElsewhere.has(holder)) continue;
-    if (processes === undefined || (await sameProcess(processes[holder]))) alive.add(holder);
-  }
+  // The registered processes of the holders no window follows are read together, not one after the other: each reading may start a program.
+  const unfollowed = ask.filter((holder) => !followedElsewhere.has(holder));
+  const same = await Promise.all(unfollowed.map((holder) => (processes === undefined ? true : sameProcess(processes[holder]))));
+  const alive = new Set(unfollowed.filter((_, index) => same[index] === true));
   return { followedHere: followsHolder, followedElsewhere, terminalProcessAlive: (holder) => alive.has(holder) };
 }

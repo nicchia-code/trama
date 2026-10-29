@@ -77,6 +77,8 @@ export type ToChatWebview =
   | { type: "conversationStart"; id: string; first?: FirstMessage; notice?: string; focus: boolean }
   /** A `session/update` notification of ACP, as it arrived. */
   | { type: "conversationUpdate"; id: string; update: SessionNotification }
+  /** The history of a conversation: every `session/update` notification its session kept (what `session/load` replayed included), in order, as one message. Sent once, before the first `conversationUpdate`. */
+  | { type: "conversationHistory"; id: string; updates: SessionNotification[] }
   | { type: "formRequest"; id: string; requestId: string; message: string; schema: ElicitationSchema }
   | { type: "permissionRequest"; id: string; requestId: string; toolCall: ToolCallUpdate; options: PermissionOption[] }
   /** A waiting permission request was answered `cancelled` (Stop, or the process ended). */

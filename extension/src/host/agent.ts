@@ -1,22 +1,23 @@
 import * as vscode from "vscode";
 import { execFile, type ExecFileException } from "node:child_process";
+import { processStarted } from "../../../src/core/performance";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, join, win32 } from "node:path";
-import { announce, newTerminalId, type AgentOrigin } from "../../../src/core/announcements";
+import { announceAsync, newTerminalId, type AgentOrigin } from "../../../src/core/announcements";
 import { ADVISOR_SENTENCE } from "../../../src/core/advisors";
 import { GH_ACCESS_ARGS, GH_LOGIN_ARGS } from "../../../src/core/github";
-import { writeFileAtomic } from "../../../src/core/atomic-write";
-import { releaseTerminalClaims } from "../../../src/core/claims";
+import { writeFileAtomicAsync } from "../../../src/core/atomic-write";
+import { releaseTerminalClaimsAsync } from "../../../src/core/claims";
 import { developerExclusions, findInstructionFiles, instructionExclusions, mergeExclusions } from "../../../src/core/instruction-files";
 import { TramaError } from "../../../src/core/errors";
-import { publishingIssues } from "../../../src/core/issues";
+import { type WorkFacts, workOnDisk } from "../../../src/core/work-facts";
 import { projectAt } from "../../../src/core/store";
 import { type NtfyTarget, ntfyTarget } from "../../../src/core/ntfy";
 import { releaseTasks } from "../../../src/core/work";
 import { QUESTION_ENDPOINT_ENV, questionProjectId, sendCoordinatorMessage } from "../../../src/core/question-channel";
-import { processAlive, readAgentProcess, removeAgentProcess, writeAgentProcess } from "../../../src/core/agent-processes";
+import { processAlive, readAgentProcess, removeAgentProcessAsync, writeAgentProcess } from "../../../src/core/agent-processes";
 import { terminalVerdict } from "../../../src/core/terminal-check";
 import { startFailureNotice, type SavedJob, useOmpChat } from "../../../src/core/omp-chat-conversation";
 import { bundledAskMoreInstructions, bundledGeneralInstructions, bundledOmpHook } from "./bundled";
@@ -40,7 +41,7 @@ import { AwayNotifier } from "./away-notices";
 import { ntfyToken } from "./ntfy-token";
 import type { ChatViewPort, OmpClientPort, OmpLaunch } from "./omp-chat/ports";
 import { GeneralConversation, type GeneralDeps } from "./omp-chat/general";
-import { findConfiguredOmp, ompVersionOnly } from "./omp-update";
+import { configuredOmpProgram, ompVersionOutcome } from "./omp-update";
 import { findProject } from "./project";
 
 export const settings = () => vscode.workspace.getConfiguration("trama");
@@ -197,7 +198,7 @@ export function setOmpChat(ports: { client: OmpClientPort; view: ChatViewPort },
     reportStopped: (name, reason, details) => reportStoppedFollowing(name, certificateReason(reason, [reason, details], configuredSystemCertificates()), details),
     reportAgentStopped: (job, reason) => reportAgentStopped(job, certificateReason(reason, [reason], configuredSystemCertificates())),
     registerProcess: (conversation, pid) => void writeAgentProcess(questionProjectId(projectAt(conversation.root)), conversation.id, pid, ownWindowId(conversation.root)),
-    unregisterProcess: (conversation) => removeAgentProcess(questionProjectId(projectAt(conversation.root)), conversation.id),
+    unregisterProcess: (conversation) => void inBackground(removeAgentProcessAsync(questionProjectId(projectAt(conversation.root)), conversation.id), "forget the process of the agent"),
     interruptQuestions: (conversation) => interruptTerminalRounds(conversation.id),
     restoreJob: (conversation, job) => {
       launchedRoots.add(conversation.root);
@@ -237,9 +238,10 @@ export function roundClosed(round: number): void {
   awayNotices?.roundClosed(round);
 }
 
-/** `trama.ompChat` changed in this window: General starts, or leaves as it is switched off. */
-export function ompChatGeneralSettingsChanged(): void {
+/** `trama.ompChat` changed in this window: General starts, or leaves as it is switched off, and switched off the saved conversations still waiting for their turn to resume are left saved. */
+export function ompChatSettingsChanged(): void {
   general?.settingsChanged();
+  if (!configuredOmpChat()) chatConversations?.stopResuming();
 }
 
 /**
@@ -247,15 +249,15 @@ export function ompChatGeneralSettingsChanged(): void {
  * read now), a copy in the extension's storage that ends with the language sentence, since omp takes one `--append-system-prompt`. Undefined when the package has no
  * instructions; it throws when the copy with the sentence cannot be written, so General never starts in a language other than the chosen one.
  */
-export function generalInstructions(storage: vscode.Uri | undefined = overlayStorage): string | undefined {
+export async function generalInstructions(storage: vscode.Uri | undefined = overlayStorage): Promise<string | undefined> {
   const file = bundledGeneralInstructions();
   const language = configuredLanguage();
   if (file === undefined || language === "") return file;
   if (storage === undefined) throw new Error("the extension's storage is not available to write the language sentence");
-  const text = `${readFileSync(file, "utf8").trimEnd()}\n\n${languageSentence(language)}\n`;
+  const text = `${(await readFile(file, "utf8")).trimEnd()}\n\n${languageSentence(language)}\n`;
   const copy = join(storage.fsPath, `general-${createHash("sha256").update(text).digest("hex").slice(0, 16)}.md`);
-  mkdirSync(storage.fsPath, { recursive: true });
-  writeFileAtomic(copy, text);
+  await mkdir(storage.fsPath, { recursive: true });
+  await writeFileAtomicAsync(copy, text);
   return copy;
 }
 
@@ -273,8 +275,8 @@ function generalDeps(ports: { client: OmpClientPort; view: ChatViewPort }, store
     folder: generalFolder,
     usable: configuredOmpChat,
     ompPath: configuredOmpPath,
-    findOmp: findConfiguredOmp,
-    checkOmp: (program) => ompVersionOnly(program),
+    findOmp: configuredOmpProgram,
+    checkOmp: (program) => ompVersionOutcome(program),
     instructions: generalInstructions,
     launch: async (root, terminalId) => {
       const endpoint = await questionEndpoint(root);
@@ -303,12 +305,21 @@ function releaseTakenTasks(root: string, origin: AgentOrigin): void {
   }
 }
 
-function releaseClaims(root: string, terminal: string): void {
+async function releaseClaims(root: string, terminal: string): Promise<void> {
   try {
-    releaseTerminalClaims(root, terminal);
+    await releaseTerminalClaimsAsync(root, terminal);
   } catch (err) {
     if (err instanceof TramaError) void vscode.window.showErrorMessage(`Trama: could not release the claims of the files the agent wrote: ${err.message}`);
     else throw err;
+  }
+}
+
+/** Waits for work the host does in the background, and shows what failed: nothing waits for it, so nothing else would hear of it. */
+async function inBackground(work: Promise<void>, what: string): Promise<void> {
+  try {
+    await work;
+  } catch (err) {
+    void vscode.window.showErrorMessage(`Trama: could not ${what}: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -367,12 +378,12 @@ export function watchAgentTerminal(): vscode.Disposable {
 function endAgentWork(info: { id: string; jobId?: string; root: string; line: string; since: number }, abnormal?: string): void {
   setHooked(info.id, false);
   releaseTakenTasks(info.root, { terminal: info.id });
-  releaseClaims(info.root, info.id);
+  void releaseClaims(info.root, info.id);
   // No Task holds this terminal any more and this window stops following it: its registered process is forgotten.
-  removeAgentProcess(questionProjectId(projectAt(info.root)), info.id);
+  void inBackground(removeAgentProcessAsync(questionProjectId(projectAt(info.root)), info.id), "forget the process of the agent");
   endFiledWork(info.root, info.id);
   for (const job of endTerminalJobs(info.id, abnormal)) finishJob(info.root, job);
-  withdrawWaiting(info.root, (announcement) => announcement.terminal === info.id);
+  void withdrawWaiting(info.root, (announcement) => announcement.terminal === info.id);
   awayNotices?.refresh();
 }
 
@@ -492,17 +503,19 @@ function unfollowTerminal(terminal: vscode.Terminal): void {
 /**
  * One execution check (`time.CHECK_DUE`): the agent terminals of this window, then, for the project open in the window and
  * every project this window launched work in, the Tasks and announcements no window follows and the agent registry. The
- * scheduler (`execution-check.ts`) decides when it runs.
+ * scheduler (`execution-check.ts`) decides when it runs. The Tasks taken, the announcements and the issues being published come
+ * from `workOf`, the window's picture in memory; a project it has no picture of is read from the disk.
  */
-export async function runExecutionCheck(openRoot?: string): Promise<void> {
+export async function runExecutionCheck(openRoot?: string, workOf?: (root: string) => WorkFacts | undefined): Promise<void> {
   await checkAgentTerminals();
   const roots = new Set(launchedRoots);
   if (openRoot !== undefined) roots.add(openRoot);
   for (const root of roots) {
-    await releaseUnfollowed(root);
+    const work = workOf?.(root) ?? workOnDisk(projectAt(root));
+    await releaseUnfollowed(root, undefined, work);
     // Only when an issue is being published: the check takes no extra turn of the event loop at rest.
-    if (publishingIssues(projectAt(root)).length > 0) await stopUnfollowedPublications(root);
-    await pruneAgentProcesses(root);
+    if (work.publishing.length > 0) await stopUnfollowedPublications(root, work);
+    await pruneAgentProcesses(root, work);
   }
 }
 
@@ -563,24 +576,24 @@ export type LaunchAnnouncement =
   | { kind: "work" | "check"; title: string };
 
 /** Announces the card of a launch and returns its ID, or undefined when no card is announced. */
-function announceLaunch(root: string, announcement: DesignAnnouncement | LaunchAnnouncement, origin: AgentOrigin): string | undefined {
+async function announceLaunch(root: string, announcement: DesignAnnouncement | LaunchAnnouncement, origin: AgentOrigin): Promise<string | undefined> {
   try {
-    if (typeof announcement === "string") return announce(projectAt(root), { kind: "proposal", title: announcement, source: "request", ...origin }).id;
+    if (typeof announcement === "string") return (await announceAsync(projectAt(root), { kind: "proposal", title: announcement, source: "request", ...origin })).id;
     if (announcement.kind === "unify") {
       const drifts = [...announcement.drifts()];
       if (drifts.length === 0) return undefined;
-      return announce(projectAt(root), { kind: "drift", title: `Unifying ${drifts.length} Drifts`, source: "request", ...origin }).id;
+      return (await announceAsync(projectAt(root), { kind: "drift", title: `Unifying ${drifts.length} Drifts`, source: "request", ...origin })).id;
     }
     if (announcement.kind === "resolve") {
       // Resolve Drifts is a Proposal named "Resolve Drifts" that names its Drifts; the panel titles it from them.
       const drifts = [...announcement.drifts()];
       if (drifts.length === 0) return undefined;
-      return announce(projectAt(root), { kind: "proposal", title: "Resolve Drifts", drifts, source: "request", ...origin }).id;
+      return (await announceAsync(projectAt(root), { kind: "proposal", title: "Resolve Drifts", drifts, source: "request", ...origin })).id;
     }
     // A refinement announces the Proposal it refines: bound to it from the start, with its title, so it is no card of its own.
-    if (announcement.kind === "refine") return announce(projectAt(root), { kind: "proposal", title: announcement.title, proposal: announcement.proposal, source: "request", ...origin }).id;
+    if (announcement.kind === "refine") return (await announceAsync(projectAt(root), { kind: "proposal", title: announcement.title, proposal: announcement.proposal, source: "request", ...origin })).id;
     const phase = announcement.kind === "check" ? { kind: "check" as const, phase: "scanning" as const } : { kind: "work" as const };
-    return announce(projectAt(root), { ...phase, title: announcement.title, source: "request", ...origin }).id;
+    return (await announceAsync(projectAt(root), { ...phase, title: announcement.title, source: "request", ...origin })).id;
   } catch (err) {
     if (err instanceof TramaError) void vscode.window.showErrorMessage(`Trama: could not announce the card: ${err.message}`);
     else throw err;
@@ -683,9 +696,9 @@ async function writeLaunchOverlay(root: string, advisor: boolean): Promise<strin
   const text = launchOverlay({ ...(advisor ? { advisor: { scan: configuredModels().scan } } : {}), disabledExtensions: await instructionExclusionsFor(root) });
   if (overlayStorage === undefined) return undefined;
   try {
-    mkdirSync(overlayStorage.fsPath, { recursive: true });
+    await mkdir(overlayStorage.fsPath, { recursive: true });
     const file = join(overlayStorage.fsPath, "launch.yml");
-    writeFileAtomic(file, text);
+    await writeFileAtomicAsync(file, text);
     return file;
   } catch {
     return undefined;
@@ -786,7 +799,7 @@ export async function launchAgent(
       const prompt = run.prompt();
       launchedRoots.add(root);
       // The conversation's work ends at omp's answer to the prompt of its work (`omp-acp.TURN_ENDED`), hooked or not.
-      const cardId = announceProposal === undefined ? undefined : announceLaunch(root, announceProposal, { terminal: terminalId });
+      const cardId = announceProposal === undefined ? undefined : await announceLaunch(root, announceProposal, { terminal: terminalId });
       onSent?.(Date.now());
       let savedJob: SavedJob | undefined;
       if (job !== undefined && jobId !== undefined) {
@@ -822,7 +835,7 @@ export async function launchAgent(
     // After a failed conversation start the card, the job and the sent instant already stand: they are the terminal's now.
     if (writtenFor === undefined) {
       const startedAt = Date.now();
-      if (announceProposal !== undefined) announceLaunch(root, announceProposal, { terminal: terminalId });
+      if (announceProposal !== undefined) await announceLaunch(root, announceProposal, { terminal: terminalId });
       onSent?.(startedAt);
       if (job !== undefined && jobId !== undefined) {
         const started = startJob(job, root, { terminal: terminalId }, jobId, jobOptions.drifts?.() ?? [], jobOptions.runAll);
@@ -859,7 +872,7 @@ async function openFocusedTerminal(root: string, name: string, omp: string, line
         placeholder,
         compose: (message) => ({ text: instructedMessage(part, message), attachment }),
         announce: () => {
-          announceLaunch(root, { kind: "work", title: name }, { terminal: terminalId });
+          void announceLaunch(root, { kind: "work", title: name }, { terminal: terminalId });
           launchedRoots.add(root);
           setHooked(terminalId, false);
         },
@@ -878,7 +891,7 @@ async function openFocusedTerminal(root: string, name: string, omp: string, line
     env: { ...terminalEnv(endpoint, terminalId), ...ompTerminalEnv(omp) },
     ...(asTab ? { location: { viewColumn: vscode.ViewColumn.Active, preserveFocus: false } } : {}),
   });
-  announceLaunch(root, { kind: "work", title: name }, { terminal: terminalId });
+  await announceLaunch(root, { kind: "work", title: name }, { terminal: terminalId });
   if (replaced) warnShellReplaced(defaultShell);
   const line = lineOf(shellFamily(shellPath ?? defaultShell));
   agentTerminals.set(terminal, { id: terminalId, root, line, since: Date.now(), askMore: true });
@@ -1002,7 +1015,9 @@ export type LogoutOutcome = { ok: true } | { ok: false; reason: string };
 export function logoutOmp(program: string, provider: OmpLoginProvider, timeoutMs = LOGOUT_TIMEOUT_MS, env: NodeJS.ProcessEnv = process.env): Promise<LogoutOutcome> {
   const { promise, resolve } = Promise.withResolvers<LogoutOutcome>();
   const systemCertificates = configuredSystemCertificates();
+  const ended = processStarted(program);
   execFile(program, ["auth-broker", "logout", provider.id], { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, env: { ...env, ...ompTerminalEnv(program, systemCertificates) } }, (error, _stdout, stderr) => {
+    ended();
     if (error === null) return resolve({ ok: true });
     const lines = String(stderr).split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "");
     const last = lines.at(-1);

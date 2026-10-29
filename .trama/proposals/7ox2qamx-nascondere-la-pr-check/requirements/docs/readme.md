@@ -1,0 +1,9 @@
+---
+description: "Use when writing or changing README.md, extension/README.md or the images in docs/images/."
+---
+# README
+
+## General
+- `README.md` is Trama's landing page, short and inviting, and `extension/README.md`, which VS Code shows in the Extensions view, has the same text. In this order it holds: the name and the tagline; an animated GIF of Trama at work in VS Code; a line with a link to the website's guide (`https://nicchia-code.github.io/trama/`); the loop in five steps (describe a change, answer the agent's questions, approve the Proposal, run the Tasks, resolve the Drifts), each with one screenshot of the real panel; the requirements (VS Code, the platforms, omp, `gh` only for Team); the install; a short note that omp Chat runs every command without asking by default (`yolo`) and how to switch to `ask` in the user settings; the links to the website, `CONTEXT.md`, `docs/model-format.md`, `docs/cli.md` and `CONTRIBUTING.md`; the license.
+- The READMEs describe no setting or optional feature in detail and nothing of the implementation (components, modules, messages, Requirement references). The details of the features live in the website's guide (see `docs#website`), with `CHANGELOG.md`, `docs/cli.md` and the descriptions of the settings in the editor.
+- The images of the READMEs live in `docs/images/`: PNG screenshots and GIF animations, never SVG (which `vsce` refuses), each GIF under 5 MB and each image with an `alt` text. `README.md` links them, and the other files of the repository, with relative paths; `extension/README.md` with absolute URLs of the repository on GitHub (`https://raw.githubusercontent.com/nicchia-code/trama/main/docs/images/<file>` for images, `https://github.com/nicchia-code/trama/blob/main/<path>` for files), because the `.vsix` does not carry `docs/`.

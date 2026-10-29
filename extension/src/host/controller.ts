@@ -1,4 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
+import { measured, measuring } from "../../../src/core/performance";
+import { messageName, timerWork } from "./performance";
 import { basename } from "node:path";
 import { homedir } from "node:os";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -66,28 +68,28 @@ import {
 import { planRuns, runSequence, runSequenceTogether, startRuns, type AppliedModel, type PlannedRun } from "./run-groups";
 import { runAllEstimate } from "./run-all-estimate";
 import { ompModels } from "./model-lists";
-import { ensureOmpUpdated, findOmp, forgetUpdateCheck } from "./omp-update";
+import { ensureOmpUpdated, forgetOmp, forgetUpdateCheck, ompModelsFor, ompProgram, ompStatus } from "./omp-update";
 import { cursorKeySaved, onCursorApiKeyChanged, removeCursorApiKey, saveCursorApiKey } from "./cursor-api-key";
 import { ntfyToken, ntfyTokenSaved, onNtfyTokenChanged, removeNtfyToken, saveNtfyToken } from "./ntfy-token";
 import { sendNtfy } from "./away-notices";
 import { testText } from "../../../src/core/away-notices";
 import { ompLoginProvider } from "../omp-login";
-import { ompStatus } from "./omp-status";
 import { exportFailureMessage, onSystemCertificatesChanged, runExport, systemCertificatesState } from "./system-certificates";
 import { confirmScanSystem } from "./scan-confirm";
 import { planSettingChange, settingsSchema, settingTitle, type SettingPlan, type SettingSchema, type SettingsValues } from "./settings-schema";
 import { resolveMarkdownFile } from "./paths";
 import type { SoloKind } from "../../../src/core/solo-mode";
 import { checkSkills, fileFolders, findProject, initializeProject, NO_PROJECT_WARNING, updateSkills } from "./project";
-import { inGitRepository, soloModeMessage, writeSoloMode } from "./solo-mode";
+import { inGitRepository, SoloModeState, writeSoloMode } from "./solo-mode";
 import { managerModeMessage, writeManagerMode } from "./manager-mode";
-import { managerStatus, readOrigin, teamUnavailableReason } from "../../../src/core/manager-mode";
+import { managerStatus, readOriginAsync, teamUnavailableReason } from "../../../src/core/manager-mode";
+import { GitDirectories } from "./git-directories";
+import { ProjectOrigin } from "./origin";
 import { type GitHubTarget, githubTarget, linkChosenProject, TeamGitHub } from "./team/github";
 import { findGh, linkedGithubProject, localToday, unlinkGithubProject } from "../../../src/core/github";
-import { refreshProjectSkills } from "../../../src/cli/skill-refresh";
-import { deleteReportsExcept, prCheckInstruction, type PreparedCheck } from "../../../src/core/pr-check";
+import { refreshProjectSkillsAsync } from "../../../src/cli/skill-refresh";
+import { prCheckInstruction, type PreparedCheck } from "../../../src/core/pr-check";
 import { PrChecks } from "./team/pr-check";
-import { TeamPullRequests } from "./team/pull-requests";
 import { People, type SaveOutcome, type WriteOutcome } from "./team/people";
 import { appliedFields, beginPublishing, findIssue, handoffBeingWritten, issuesOfHandoff, listIssues, publishAgainBlock, referenceTexts, REPLANNING_TITLE, replanHandoffsBlock, replanRunning, splitIssueBlock, stopPublishing } from "../../../src/core/issues";
 import { fieldRulesOf, publishedIssues } from "../../../src/core/team-views";
@@ -164,12 +166,7 @@ async function askNtfyToken(): Promise<string | undefined> {
 
 const notBlank = (message: string) => (value: string) => (value.trim() === "" ? message : undefined);
 
-/** The GitHub repository whose Team view the panel has (the pull requests, and with Manager mode the team too): origin on GitHub, whatever Manager mode says; null when origin is not on GitHub. */
-function originRepository(project: Project): string | null {
-  return readOrigin(project.root).repository;
-}
-
-/** The GitHub repository whose team the Manager's tabs show, or null while Team is not available (Manager mode off, or origin not on GitHub). */
+/** The GitHub repository whose team the Manager's tabs show, or null while Team is not available (Manager mode off, or origin not on GitHub). Origin is the window's value (`ProjectOrigin`). */
 function teamRepository(project: Project): string | null {
   const status = managerStatus(project);
   return status.available ? status.repository : null;
@@ -208,6 +205,8 @@ export class Controller implements vscode.Disposable {
   private ompRequest = 0;
   /** The omp request under way: a wish for the same omp path while it runs joins it, so `omp models --json` runs once for the suggestions and the status. */
   private ompRefresh: { path: string; done: Promise<void> } | undefined;
+  /** What the window last learned of omp for `path` (the model suggestions and the status, as messages): sent again at every other appearance of Settings or of the Board, with nothing started. */
+  private ompResult: { path: string; messages: ToWebview[] } | undefined;
   /** Whether a check of the installed skills is under way: another opening does not start a second. */
   private checkingSkills = false;
   /** The tab a panel just created goes to once its webview is ready (`openSettings`, `openGhostDetails`), with the options of the `navigate`. */
@@ -219,6 +218,8 @@ export class Controller implements vscode.Disposable {
   private readonly shownViewListeners = new Set<(view: ViewName | undefined) => void>();
   /** The newest request of model suggestions made by the wizard: an answer that arrives after a newer one is dropped. */
   private wizardSuggestionsRequest = 0;
+  /** The newest request of the workspace folders of the wizard: an answer that arrives after a newer one, or after the project appeared, is dropped. */
+  private foldersRequest = 0;
   /** The paths of the newest `instructionFiles` answer: the only ones the wizard may ask to open. */
   private instructionFilePaths = new Set<string>();
   /** The newest instruction-files search: an answer that arrives after a newer request is dropped. */
@@ -236,10 +237,19 @@ export class Controller implements vscode.Disposable {
     private readonly people?: People,
     /** `ExtensionContext.storageUri` of the window, where the worktrees of the PR Check live; without it the PR Check is not available. */
     private readonly storage?: string,
+    /** The git directories of the window, read once and again when git's configuration changes; without them the controller makes its own, which resolve only when asked to follow. */
+    git?: GitDirectories,
+    /** The origin of the window's project (`rules#manager-mode`): read once and again when `config` changes, never at a picture, a view or an opening of the panel. */
+    origin?: ProjectOrigin,
+    /** The last `soloMode` message of the window. */
+    soloState?: SoloModeState,
   ) {
+    this.git = git ?? new GitDirectories();
+    this.origin = origin ?? new ProjectOrigin(this.git);
+    this.solo = soloState ?? new SoloModeState(this.git);
+    this.listeners.push(this.origin.onDidChange(() => this.originChanged()), this.solo.onDidChange((message) => this.post(message)));
     this.picture = picture ?? new WindowPicture();
     this.github = modelMemory === undefined ? undefined : new TeamGitHub(modelMemory);
-    this.pullRequests = modelMemory === undefined ? undefined : new TeamPullRequests(modelMemory);
     this.prChecks = new PrChecks({
       project: () => findProject(),
       storage: () => this.storage,
@@ -248,19 +258,27 @@ export class Controller implements vscode.Disposable {
         const project = findProject();
         return project !== undefined && ownWindowRuns(project.root);
       },
-      writeSkills: (worktree) => void refreshProjectSkills(worktree, configuredSkillsDir(), false),
+      writeSkills: async (worktree) => void (await refreshProjectSkillsAsync(worktree, configuredSkillsDir(), false)),
       launch: (prepared, job) => this.launchPrCheck(prepared, job),
       stop: stopAgent,
       error: (text) => void vscode.window.showErrorMessage(text),
       warning: (text) => void vscode.window.showWarningMessage(text),
-      changed: () => this.postPullRequests(),
+      // The PR Check is hidden: it never starts, so it has no Pull Requests tab to tell.
+      changed: () => {},
     });
   }
 
+  /** The git directories of the window. */
+  private readonly git: GitDirectories;
+  /** The origin of the window's project: the panel's Team, the picture's GitHub repository and the PR Check read it from here. */
+  private readonly origin: ProjectOrigin;
+  /** The last Solo mode of the window, worked out once and again after a write or a change of git's `index` or `info/exclude`. */
+  private readonly solo: SoloModeState;
+  /** What the controller listens to for its whole life. */
+  private readonly listeners: { dispose(): void }[] = [];
+
   /** The Team view's reads of GitHub (`rules#github-project`); without the workspace state there is nowhere to keep them and the view has nothing to read. */
   private readonly github: TeamGitHub | undefined;
-  /** The Team view's reads of the open pull requests (`rules#pr-check`), kept in the workspace state like the reads of GitHub. */
-  private readonly pullRequests: TeamPullRequests | undefined;
   /** The PR Check of this window (`rules#pull-request-check`): at most one at a time, in memory only. */
   private readonly prChecks: PrChecks;
   /** The PR Check being launched: what `launchAction` reads when it gets `{ kind: "prCheck" }`, which carries only the number. */
@@ -313,18 +331,28 @@ export class Controller implements vscode.Disposable {
     else await this.launchAction(project, { kind: "import" });
   }
 
-  /** The workspace folders a first setup can initialize. */
-  private workspaceFolderViews(): WorkspaceFolderView[] {
-    return fileFolders().map((folder) => {
-      const root = folder.uri.fsPath;
-      let hasFiles = false;
-      try {
-        hasFiles = readdirSync(root).some((name) => !name.startsWith("."));
-      } catch {
-        // A folder that cannot be read counts as empty.
-      }
-      return { name: folder.name, root, hasFiles, inGit: inGitRepository(root), origin: readOrigin(root) };
-    });
+  /** The workspace folders a first setup can initialize, with whether each is in git and its origin: asked of git without holding the host, once for the folders the panel offers. */
+  private async workspaceFolderViews(): Promise<WorkspaceFolderView[]> {
+    return Promise.all(
+      fileFolders().map(async (folder) => {
+        const root = folder.uri.fsPath;
+        let hasFiles = false;
+        try {
+          hasFiles = readdirSync(root).some((name) => !name.startsWith("."));
+        } catch {
+          // A folder that cannot be read counts as empty.
+        }
+        const [inGit, origin] = await Promise.all([inGitRepository(root), readOriginAsync(root)]);
+        return { name: folder.name, root, hasFiles, inGit, origin };
+      }),
+    );
+  }
+
+  /** Tells the wizard which folders it can initialize; an answer that arrives after the project appeared, or after a newer one, is dropped. */
+  private async postWorkspaceFolders(): Promise<void> {
+    const request = ++this.foldersRequest;
+    const folders = await this.workspaceFolderViews();
+    if (request === this.foldersRequest && !this.disposed) this.post({ type: "workspaceFolders", folders });
   }
 
 
@@ -362,10 +390,10 @@ export class Controller implements vscode.Disposable {
    */
   async show(view: MenuViewName): Promise<void> {
     if (view !== "settings" && view !== "getstarted" && findProject() === undefined) return this.open();
-    // The Team view exists only in a project whose origin is on GitHub, with Manager mode on or off; otherwise the command is the ordinary opening.
+    // The Team view exists only while Team is available (Manager mode recorded and origin on GitHub); otherwise the command is the ordinary opening.
     if (view === "team") {
       const project = findProject();
-      if (project === undefined || originRepository(project) === null) return this.open();
+      if (project === undefined || teamRepository(project) === null) return this.open();
     }
     if (view !== "settings" && !vscode.workspace.workspaceFolders?.length) {
       void vscode.window.showInformationMessage("Trama: open a folder to use Trama.");
@@ -405,7 +433,7 @@ export class Controller implements vscode.Disposable {
     if (!project || this.checkingSkills) return;
     this.checkingSkills = true;
     setTimeout(() => {
-      void checkSkills(project).finally(() => {
+      void timerWork("check skills", () => checkSkills(project)).finally(() => {
         this.checkingSkills = false;
       });
     }, 0);
@@ -455,6 +483,8 @@ export class Controller implements vscode.Disposable {
           finish("The folder to initialize is not in the workspace any more.");
           return;
         }
+        // `trama project new` turns Manager mode on with the origin the window knows: the folder's own origin is read first, since the window follows no project in it yet.
+        if (message.manager === true) await this.origin.readFor(root);
         const initialized = await initializeProject(root, { ...(message.solo === undefined ? {} : { solo: message.solo }), ...(message.manager === true ? { manager: true } : {}) });
         if (initialized === undefined) {
           finish(null);
@@ -463,8 +493,9 @@ export class Controller implements vscode.Disposable {
         project = initialized.project;
         // Manager mode is written after the project's files; when that fails the project stays, Manager mode stays off and the reason is shown.
         if (initialized.managerError !== null) void vscode.window.showErrorMessage(`Trama: could not save Manager Mode: ${initialized.managerError.replace(/\.$/, "")}.`);
+        this.git.follow();
         this.refresh();
-        this.postSolo();
+        await this.refreshSolo();
       } else {
         project = findProject();
         if (project === undefined && message.mode === "empty-model") {
@@ -474,13 +505,13 @@ export class Controller implements vscode.Disposable {
         // Solo mode of an empty-Model wizard: written after the settings and before the path, only when the choice differs from the project's value; a failed write is a failed save.
         if (project !== undefined && message.solo !== undefined) {
           try {
-            writeSoloMode(project, message.solo, true);
+            await writeSoloMode(project, message.solo, true);
           } catch (error) {
-            this.postSolo();
+            await this.refreshSolo();
             finish(`Could not save Solo Mode: ${describeError(error).replace(/\.$/, "")}.`);
             return;
           }
-          this.postSolo();
+          await this.refreshSolo();
         }
         if (project !== undefined && message.manager !== undefined) {
           try {
@@ -513,7 +544,7 @@ export class Controller implements vscode.Disposable {
    */
   private async checkAgent(ompPath: string, systemCertificates?: boolean): Promise<readonly string[] | undefined> {
     const wanted = ompPath.trim();
-    const program = await findOmp(wanted);
+    const program = await ompProgram(wanted);
     if (program === undefined) {
       this.post({ type: "agentCheck", ompPath, state: "done", ok: false, missing: true, error: `omp not found at ${wanted === "" ? "the editor PATH" : wanted}` });
       return undefined;
@@ -523,7 +554,7 @@ export class Controller implements vscode.Disposable {
       this.post({ type: "agentCheck", ompPath, state: "done", ok: false, missing: true, error: `omp not found at ${wanted === "" ? "the editor PATH" : wanted}` });
       return undefined;
     }
-    const list = await ompModels(wanted === "" ? program : wanted, undefined, undefined, systemCertificates);
+    const list = await ompModels(program, undefined, undefined, systemCertificates);
     this.post({
       type: "agentCheck",
       ompPath,
@@ -546,7 +577,7 @@ export class Controller implements vscode.Disposable {
   installOmp(systemCertificates?: boolean): void {
     installOmp(
       () => {
-        forgetUpdateCheck();
+        forgetOmp();
         void this.checkAgent(configuredOmpPath(), systemCertificates);
         void this.refreshOmp(true);
       },
@@ -564,7 +595,7 @@ export class Controller implements vscode.Disposable {
     const entry = ompLoginProvider(provider);
     if (entry === undefined) return;
     const wanted = ompPath ?? configuredOmpPath();
-    const program = await findOmp(wanted.trim());
+    const program = await ompProgram(wanted.trim());
     if (program === undefined) {
       this.post({ type: "error", message: `omp not found at ${wanted.trim() === "" ? "the editor PATH" : wanted.trim()}` });
       return;
@@ -603,7 +634,7 @@ export class Controller implements vscode.Disposable {
     this.post({ type: "ompLogoutState", provider: entry.id, running: true });
     try {
       const wanted = ompPath ?? configuredOmpPath();
-      const program = await findOmp(wanted.trim());
+      const program = await ompProgram(wanted.trim());
       const outcome: LogoutOutcome = program === undefined ? { ok: false, reason: "could not start omp" } : await logoutOmp(program, entry);
       if (!outcome.ok) void vscode.window.showErrorMessage(`Trama: could not log out of ${entry.name}: ${outcome.reason}.`);
       const [providers] = await Promise.all([this.checkAgent(wanted), this.refreshOmp(true)]);
@@ -752,33 +783,47 @@ export class Controller implements vscode.Disposable {
   }
 
   /**
-   * Sends the Settings tab and the Board the omp of `trama.ompPath`: `ompStatus` `checking` at once, then, from one `omp models --json` and one
-   * `omp --version`, the model suggestions and the status (the version and the number of models, or why nothing answers). Only the newest request
-   * is answered; with `fresh` a request under way for the same path is not joined.
+   * Sends the Settings tab and the Board the omp of `trama.ompPath`. The state of omp and the model suggestions are prepared once per window, at the first need (the first
+   * Settings tab shown or the first Board that asks for the models of a Proposal), from one `omp models --json` and one `omp --version` kept by the module: `ompStatus`
+   * `checking` at once, then the suggestions and the status (the version and the number of models, or why nothing answers). Every other call answers at once with the
+   * last result the window holds, without starting anything and without `checking`. Only `fresh` (`refreshOmp(true)`: `trama.ompPath`, the end of the installer's terminal,
+   * a provider's login or logout, the Cursor API key, the system certificates) prepares them again, and a request under way for the same path is not joined then. Only
+   * the newest request is answered.
    */
   async refreshOmp(fresh = false): Promise<void> {
     // `trama.ompPath` is application-scoped: only the user value counts; empty means `omp` from the editor's PATH.
     const ompPath = configuredOmpPath();
-    const running = this.ompRefresh;
-    if (!fresh && running !== undefined && running.path === ompPath) return running.done;
+    if (!fresh) {
+      const last = this.ompResult;
+      if (last !== undefined && last.path === ompPath) {
+        for (const message of last.messages) this.post(message);
+        return;
+      }
+      const running = this.ompRefresh;
+      if (running !== undefined && running.path === ompPath) return running.done;
+    }
     const request = ++this.ompRequest;
     this.post({ type: "ompStatus", state: "checking" });
     const entry: { path: string; done: Promise<void> } = { path: ompPath, done: Promise.resolve() };
     entry.done = (async () => {
-      const [list, status] = await Promise.all([ompModels(ompPath), ompStatus(ompPath)]);
+      const [list, status] = await Promise.all([ompModelsFor(ompPath), ompStatus(ompPath)]);
       if (request !== this.ompRequest) return;
       const { providers, ...suggestions } = list;
-      this.post({ type: "modelSuggestions", ...suggestions });
       const error = status.error ?? list.error;
-      this.post({
-        type: "ompStatus",
-        state: "done",
-        missing: status.missing || list.missing === true,
-        ...(status.version === undefined ? {} : { version: status.version }),
-        ...(status.tooOld === true ? { tooOld: true as const } : {}),
-        ...(error === undefined ? { models: list.models.length } : { error }),
-        ...(providers === undefined ? {} : { providers }),
-      });
+      const messages: ToWebview[] = [
+        { type: "modelSuggestions", ...suggestions },
+        {
+          type: "ompStatus",
+          state: "done",
+          missing: status.missing || list.missing === true,
+          ...(status.version === undefined ? {} : { version: status.version }),
+          ...(status.tooOld === true ? { tooOld: true as const } : {}),
+          ...(error === undefined ? { models: list.models.length } : { error }),
+          ...(providers === undefined ? {} : { providers }),
+        },
+      ];
+      this.ompResult = { path: ompPath, messages };
+      for (const message of messages) this.post(message);
     })().finally(() => {
       if (this.ompRefresh === entry) this.ompRefresh = undefined;
     });
@@ -813,7 +858,7 @@ export class Controller implements vscode.Disposable {
   /** The model names of the omp at `ompPath` for the wizard's Models step, which suggests them before the path is saved. */
   private async postWizardSuggestions(ompPath: string): Promise<void> {
     const request = ++this.wizardSuggestionsRequest;
-    const { providers: _providers, ...suggestions } = await ompModels(ompPath.trim());
+    const { providers: _providers, ...suggestions } = await ompModelsFor(ompPath.trim());
     if (request === this.wizardSuggestionsRequest) this.post({ type: "modelSuggestions", ...suggestions, ompPath });
   }
 
@@ -851,8 +896,10 @@ export class Controller implements vscode.Disposable {
 
   /** Command entry point: launches an agent without needing the panel. */
   async launch(action: AgentAction): Promise<void> {
-    const project = this.requireProject();
-    if (project) await this.launchAction(project, action);
+    await measured("launch", action.kind, async () => {
+      const project = this.requireProject();
+      if (project) await this.launchAction(project, action);
+    });
   }
 
   async updateSkills(): Promise<void> {
@@ -893,25 +940,34 @@ export class Controller implements vscode.Disposable {
     this.post({ type: "settings", schema, values });
   }
 
-  /** Sends the `Solo Mode` row the project's Solo mode as it is now; nothing without a project. */
+  /** Sends the `Solo Mode` row the last Solo mode of the project; the first time the window needs it, it is worked out first. Nothing without a project. Settings becoming visible starts no git. */
   private postSolo(): void {
     const project = findProject();
     if (project === undefined) return;
+    const last = this.solo.last(project);
+    if (last === undefined) void this.refreshSolo();
+    else this.post(last);
+  }
+
+  /** Works Solo mode out again, without holding the host, and sends it to the `Solo Mode` row; nothing without a project. After every write, and when what git tracks may have changed. */
+  private async refreshSolo(): Promise<void> {
+    const project = findProject();
+    if (project === undefined) return;
     try {
-      this.post(soloModeMessage(project));
+      this.post(await this.solo.refresh(project));
     } catch (err) {
       this.post({ type: "error", message: describeError(err) });
     }
   }
 
   /** The `Solo Mode` row changed: writes it into the project; a failed write is an editor error with the reason. The row is told the real value either way. */
-  private setSolo(project: Project, solo: SoloKind): void {
+  private async setSolo(project: Project, solo: SoloKind): Promise<void> {
     try {
-      writeSoloMode(project, solo);
+      await writeSoloMode(project, solo);
     } catch (err) {
       void vscode.window.showErrorMessage(`Trama: could not save Solo Mode: ${describeError(err).replace(/\.$/, "")}.`);
     }
-    this.postSolo();
+    await this.refreshSolo();
   }
 
   /** Sends the `Manager Mode` row the project's Manager mode and origin as they are now; nothing without a project. */
@@ -921,8 +977,8 @@ export class Controller implements vscode.Disposable {
     try {
       const message = managerModeMessage(project);
       this.post(message);
-      // Origin is no longer on GitHub while the panel showed Team: the panel passes to the Board. Manager mode going off does not: the view stays and keeps only Pull Requests.
-      if (message.repository === null && this.panelView === "team") this.post({ type: "navigate", view: "board" });
+      // Team is no longer available (Manager mode turned off, or origin not on GitHub) while the panel showed Team: the panel passes to the Board.
+      if (!message.available && this.panelView === "team") this.post({ type: "navigate", view: "board" });
     } catch (err) {
       this.post({ type: "error", message: describeError(err) });
     }
@@ -950,7 +1006,7 @@ export class Controller implements vscode.Disposable {
    * are not available for each published issue: its own job runs (an announcement of the job is live) or a Run of this window is in progress. Nothing when the cards cannot be read.
    */
   private teamExtras(project: Project, target: GitHubTarget): { signals: IssueSignals; actions: Record<number, IssueActions> } {
-    if (this.github === undefined || !target.manager) return { signals: {}, actions: {} };
+    if (this.github === undefined) return { signals: {}, actions: {} };
     try {
       const cards = listIssues(project);
       const published = publishedIssues(project);
@@ -980,7 +1036,7 @@ export class Controller implements vscode.Disposable {
    * changes and the Team view hears why, as a notice.
    */
   private async issueAction(project: Project, id: string, kind: "update" | "scan"): Promise<void> {
-    const target = this.managerTarget();
+    const target = this.teamTarget();
     let name = id;
     const fail = (reason: string) => this.post({ type: "notice", text: `Trama could not ${kind === "update" ? "ask the agent to comment on" : "scan"} issue ${name}: ${reason.replace(/\.$/, "")}.` });
     try {
@@ -1010,68 +1066,23 @@ export class Controller implements vscode.Disposable {
     return target === null || this.github === undefined ? [] : this.github.issues(publishedIssues(project), target.linked);
   }
 
-  /** The repository of the project and, with Manager mode on, its linked Project, while origin is on GitHub: the Team view reads GitHub in every case, the Project only with Manager mode. */
+  /** The repository of the project and its linked Project, only while Team is available: Manager mode recorded and origin on GitHub (`rules#manager-mode`). */
   private teamTarget(): GitHubTarget | null {
     const project = findProject();
     return project === undefined ? null : githubTarget(project);
   }
 
-  /** The target of the Manager's work (the Project, the issues, the people's team): only while Team is available, that is with Manager mode on. */
-  private managerTarget(): GitHubTarget | null {
-    const target = this.teamTarget();
-    return target !== null && target.manager ? target : null;
-  }
-
   /**
    * `developer.REFRESH_TEAM` and the opening of the Team view: reads GitHub once at a time (a request for the same thing joins the read that runs) and tells the view when the
-   * read starts and when it ends, and reads the open pull requests alongside, in the background. The view keeps what it shows meanwhile.
+   * read starts and when it ends. The view keeps what it shows meanwhile. No pull request is read.
    */
   private async readGitHub(): Promise<void> {
     const target = this.teamTarget();
     if (target === null || this.github === undefined) return;
-    const done = this.github.read(target.repository, target.linked, target.manager);
-    const pulls = this.readPullRequests(target.repository);
+    const done = this.github.read(target.repository, target.linked);
     this.postGitHub();
-    await Promise.all([done, pulls]);
+    await done;
     this.postGitHub();
-  }
-
-  /**
-   * Reads the open pull requests that are ready for review (`rules#pr-check`) and tells the Pull Requests tab. After a read that worked the report of every pull request that is no longer
-   * on the list (merged, closed or back to a draft) is deleted (`github.PULL_REQUEST_GONE`); a read that failed deletes nothing.
-   */
-  private async readPullRequests(repository: string): Promise<void> {
-    if (this.pullRequests === undefined) return;
-    const read = await this.pullRequests.read(repository);
-    const project = findProject();
-    if (read.ok && project !== undefined) {
-      try {
-        deleteReportsExcept(project, read.items.map((item) => item.number));
-      } catch (err) {
-        void vscode.window.showErrorMessage(`Trama: could not delete the reports of the pull requests that are gone: ${describeError(err).replace(/\.$/, "")}.`);
-      }
-    }
-    this.postPullRequests();
-  }
-
-  /** Sends the Pull Requests tab what Trama knows of the open pull requests and of the PR Check of this window now; nothing unless the project's origin is on GitHub. */
-  private postPullRequests(): void {
-    if (this.pullRequests === undefined || this.teamTarget() === null) return;
-    this.post(this.prChecks.message(findProject(), { readAt: this.pullRequests.readAt, error: this.pullRequests.error, items: this.pullRequests.items }));
-  }
-
-  /**
-   * `developer.CHECK_PULL_REQUEST`: the host checks again what the tab showed and, when it holds, prepares the worktree and launches the scan of the whole System in it
-   * (`rules#pull-request-check`). A refusal or a failure is shown as an error of the editor; nothing else changes.
-   */
-  private async checkPullRequest(number: number): Promise<void> {
-    if (this.pullRequests === undefined || this.teamTarget() === null) return;
-    await this.prChecks.start(number, this.pullRequests.items, this.pullRequests.error === null && this.pullRequests.readAt !== null);
-  }
-
-  /** `developer.STOP_PULL_REQUEST_CHECK`: the PR Check of that pull request stops, with no report and no message. */
-  private async stopPullRequestCheck(number: number): Promise<void> {
-    await this.prChecks.stop(number);
   }
 
   /**
@@ -1094,11 +1105,10 @@ export class Controller implements vscode.Disposable {
     await this.prChecks.removeLeftovers();
   }
 
-  /** The Team view became visible: the people and what is known of GitHub and of the pull requests now, then a read. */
+  /** The Team view became visible: the people and what is known of GitHub now, then a read. */
   private openedTeam(): void {
     this.postTeam();
     this.postGitHub();
-    this.postPullRequests();
     void this.readGitHub();
   }
 
@@ -1138,15 +1148,14 @@ export class Controller implements vscode.Disposable {
       this.post({ type: "notice", text: "Trama could not find the GitHub CLI: install it from https://cli.github.com, then select Refresh." });
       return;
     }
-    loginGitHub(program, this.teamTarget()?.manager === true && this.github.problem() === "no-project-access", () => void this.readGitHub());
+    loginGitHub(program, this.github.problem() === "no-project-access", () => void this.readGitHub());
   }
 
-  /** `Show details`: the output channel of Trama shows everything `gh` said about the last failure, of the read of GitHub or, when that worked, of the read of the pull requests. */
+  /** `Show details`: the output channel of Trama shows everything `gh` said about the last failure of the read of GitHub. */
   private showGitHubDetails(): void {
     this.githubOutput ??= vscode.window.createOutputChannel("Trama");
     this.githubOutput.clear();
-    const said = this.github?.details() ?? "";
-    this.githubOutput.appendLine(said !== "" ? said : (this.pullRequests?.details() ?? ""));
+    this.githubOutput.appendLine(this.github?.details() ?? "");
     this.githubOutput.show(true);
   }
 
@@ -1193,8 +1202,6 @@ export class Controller implements vscode.Disposable {
       void vscode.window.showErrorMessage(`Trama: could not save Manager Mode: ${describeError(err).replace(/\.$/, "")}.`);
     }
     this.postManager();
-    // The view shown now reads GitHub again for what Manager mode adds or takes away: the Project and its issues.
-    if (this.panelView === "team") this.openedTeam();
   }
 
   /** Carries out a Settings plan. A refused plan saves nothing. The Settings tab is sent again either way, so its controls show the values that really hold. */
@@ -1218,8 +1225,19 @@ export class Controller implements vscode.Disposable {
     this.disposed = true;
     this.panel?.dispose();
     this.shownViewListeners.clear();
+    for (const listener of this.listeners) listener.dispose();
     this.githubOutput?.dispose();
     this.stopEstimateTimer();
+  }
+
+  /**
+   * The window's origin changed (`ProjectOrigin`): the panel gets `managerMode` again and a new picture (its GitHub repository is the origin's); when Team is no longer available
+   * (origin not on GitHub) while the panel shows Team, `postManager` moves it to the Board. The side menu listens to the origin itself.
+   */
+  private originChanged(): void {
+    if (this.disposed) return;
+    this.postManager();
+    if (this.panel !== undefined) this.refresh();
   }
 
   /** The view a panel being created opens on: the one asked for, else the Board in a Trama project, Get Started in a folder that is none, Settings without folders. */
@@ -1246,7 +1264,7 @@ export class Controller implements vscode.Disposable {
       scriptUri: panel.webview.asWebviewUri(vscode.Uri.joinPath(dist, "webview.js")).toString(),
       mermaidUri: panel.webview.asWebviewUri(vscode.Uri.joinPath(dist, "mermaid.js")).toString(),
     });
-    panel.webview.onDidReceiveMessage((raw: unknown) => void this.handle(raw));
+    panel.webview.onDidReceiveMessage(measuring("panel", messageName, (raw: unknown) => this.handle(raw)));
 
     const subscriptions = [
       // The panel follows the picture the window builds when the files of `.trama/` or the folders change (`WindowPicture`); a refresh asked for here builds its own and renders it itself.
@@ -1331,16 +1349,17 @@ export class Controller implements vscode.Disposable {
     if (!configuredAutoUpdateStaleProposals()) this.refinement = emptyQueue(this.refinement);
     this.post({ type: "project", present: outcome.kind !== "none" });
     if (outcome.kind === "none") {
-      this.post({ type: "workspaceFolders", folders: this.workspaceFolderViews() });
+      void this.postWorkspaceFolders();
       return;
     }
     const { project } = outcome;
-    // Team's availability depends on origin, which can change under an open panel: it is read again with every picture, and told even when the files of the picture cannot be read.
+    this.foldersRequest++;
+    // Team's availability follows the window's origin, which tells when it changes, and Manager mode, which is a file: told again with every picture, even when the files of the picture cannot be read, without reading origin.
     this.postManager();
     // The Proposals that waited for a Run of this window are settled once that Run has ended.
     if (this.refinement.waiting.length > 0 && !ownWindowRuns(project.root)) this.releaseWaiting(project);
     try {
-      if (this.modelMemory) forgetProposalModels(this.modelMemory, project).catch((err: unknown) => this.post({ type: "error", message: describeError(err) }));
+      if (this.modelMemory) forgetProposalModels(this.modelMemory, project, outcome.kind === "built" ? outcome.picture : undefined).catch((err: unknown) => this.post({ type: "error", message: describeError(err) }));
       const work = driftWork(project.root);
       this.allowTaskImages(project);
       if (outcome.kind === "failed") throw outcome.error;
@@ -1367,13 +1386,10 @@ export class Controller implements vscode.Disposable {
     this.lastRunEstimate = JSON.stringify(runEstimate);
     if (runEstimate === null) this.stopEstimateTimer();
     else this.startEstimateTimer(project);
-    const repo = readOrigin(project.root).repository;
+    const repo = this.origin.get().repository;
     this.post({ type: "snapshot", snapshot, asking: questionRoundOpen(), resolve: { blocker: resolveDriftsBlocker(project, work, facts), runReason: runWindowBlocker({ resolving: work.resolving, running: ownWindowRuns(project.root) }), running: ownWindowRuns(project.root), drifts, resolving }, unify: { blockers: unifyDriftsBlockers(project, work, driftsFinishing(project.root), facts), unifying: unifyingDrifts(project.root) }, models, refinement: this.refinementPicture(project, picture), runEstimate, ...(repo === null ? {} : { githubRepo: repo }), ...(teamRepository(project) === null ? {} : { replan: this.replanView(project, picture.proposals) }) });
     // The states of the published issues come from the last read of GitHub and from the cards: a new picture of the cards moves them without a new read.
-    if (this.panelView === "team") {
-      this.postGitHub();
-      this.postPullRequests();
-    }
+    if (this.panelView === "team") this.postGitHub();
   }
 
   /**
@@ -1411,16 +1427,21 @@ export class Controller implements vscode.Disposable {
   /** Starts the timer that works the time left of the Run all out again every minute and sends the Board only a change; it runs only while a Run all of this window goes on. */
   private startEstimateTimer(project: Project): void {
     if (this.estimateTimer !== undefined) return;
-    this.estimateTimer = setInterval(() => {
-      let estimate: RunEstimateView;
-      try {
-        estimate = runAllEstimate(project);
-      } catch {
-        return; // The files cannot be read now: the next change or tick tries again.
-      }
-      if (estimate === null) this.stopEstimateTimer();
-      if (JSON.stringify(estimate) !== this.lastRunEstimate) this.refresh();
-    }, RUN_ESTIMATE_INTERVAL_MS);
+    this.estimateTimer = setInterval(() => timerWork("update Run all estimate", () => this.updateEstimate(project)), RUN_ESTIMATE_INTERVAL_MS);
+  }
+
+  private updateEstimate(project: Project): void {
+    // The Tasks and what blocks them come from the last picture: the timer reads no file of `.trama/`.
+    const last = this.picture.peek();
+    if (last?.kind !== "built") return;
+    let estimate: RunEstimateView;
+    try {
+      estimate = runAllEstimate(project, new Date(), { tasks: last.picture.tasks, blocked: new Map(last.snapshot.tasks.map((task) => [task.id, task.blockedBy])) });
+    } catch {
+      return; // The estimate cannot be worked out now: the next change or tick tries again.
+    }
+    if (estimate === null) this.stopEstimateTimer();
+    if (JSON.stringify(estimate) !== this.lastRunEstimate) this.refresh();
   }
 
   private stopEstimateTimer(): void {
@@ -1561,7 +1582,6 @@ export class Controller implements vscode.Disposable {
       this.postSolo();
       this.postTeam();
       this.postGitHub();
-      this.postPullRequests();
       this.postCursorApiKey();
       this.postNtfyToken();
       this.postSystemCertificates();
@@ -1579,12 +1599,12 @@ export class Controller implements vscode.Disposable {
     if (message.type === "setSetting") {
       await this.applyPlan(planSettingChange(this.manifestSettings(), message.key, message.value));
       // The files git tracks under the skills folder depend on it.
-      if (message.key === "trama.skillsDir") this.postSolo();
+      if (message.key === "trama.skillsDir") void this.refreshSolo();
       return;
     }
     if (message.type === "setSoloMode") {
       const soloProject = findProject();
-      if (soloProject !== undefined) this.setSolo(soloProject, message.solo);
+      if (soloProject !== undefined) await this.setSolo(soloProject, message.solo);
       return;
     }
     if (message.type === "setManagerMode") {
@@ -1604,12 +1624,8 @@ export class Controller implements vscode.Disposable {
       await this.readGitHub();
       return;
     }
-    if (message.type === "checkPullRequest") {
-      await this.checkPullRequest(message.number);
-      return;
-    }
-    if (message.type === "stopPullRequestCheck") {
-      await this.stopPullRequestCheck(message.number);
+    if (message.type === "checkPullRequest" || message.type === "stopPullRequestCheck") {
+      // The PR Check is hidden (`pull-request-check` stays in Idle): `developer.CHECK_PULL_REQUEST` and `developer.STOP_PULL_REQUEST_CHECK` cannot happen.
       return;
     }
     if (message.type === "logInGitHub") {
@@ -2382,7 +2398,7 @@ export class Controller implements vscode.Disposable {
    * read them. A refused value changes nothing and reaches the preview as `issueFieldRejected`; a fresh picture follows either way.
    */
   private changeIssueField(project: Project, message: Extract<ToHost, { type: "setIssueField" }>): void {
-    const target = this.managerTarget();
+    const target = this.teamTarget();
     try {
       if (target === null || this.github === undefined) throw new TramaError("Team is not available.");
       const roster = this.people?.members(target.repository);

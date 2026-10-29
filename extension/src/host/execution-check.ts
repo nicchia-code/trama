@@ -1,33 +1,27 @@
+import { timerWork } from "./performance";
 import * as vscode from "vscode";
-import { listAnnouncements } from "../../../src/core/announcements";
-import { publishingIssues } from "../../../src/core/issues";
-import { projectAt } from "../../../src/core/store";
-import { listTasks } from "../../../src/core/work";
+import { workOfPicture, type WorkFacts } from "../../../src/core/work-facts";
 import { hasTerminalWork, runExecutionCheck } from "./agent";
+import { onFileWritten } from "../../../src/core/written";
 import { onDriftResolutionChange } from "./drift-resolution";
 import { followsHolder } from "./followed-holders";
+import type { PictureOutcome, WindowPicture } from "./picture";
 
 /** The delay between two execution checks (`time.CHECK_DUE`); not a setting. */
 export const CHECK_INTERVAL_MS = 60_000;
 
-/** Whether the project at `root` has a Task taken by the agent (`agent` other than `false`) or an issue being published. */
-function hasTakenTask(root: string): boolean {
-  try {
-    return listTasks(projectAt(root)).some((task) => task.data.agent) || publishingIssues(projectAt(root)).length > 0;
-  } catch {
-    // An unreadable board says nothing: no work is assumed.
-    return false;
-  }
+/** What the arming of the timer needs of a picture: whether the project has a Task taken by the agent or an issue being published, and the terminal of each announcement. */
+interface ProjectWork {
+  root: string;
+  takenOrPublishing: boolean;
+  announcedBy: readonly (string | null)[];
 }
 
-/** Whether the project at `root` has an announcement owned by no terminal or conversation of this window: one of no terminal at all, or of one this window does not follow. */
-function hasForeignAnnouncement(root: string): boolean {
-  try {
-    return listAnnouncements(projectAt(root)).some((announcement) => announcement.terminal === null || !followsHolder(announcement.terminal));
-  } catch {
-    // Unreadable announcements say nothing: no work is assumed.
-    return false;
-  }
+/** The work a picture shows; none for a project that is not there or a picture that could not be built (an unreadable board says nothing: no work is assumed). */
+function projectWork(outcome: PictureOutcome | undefined): ProjectWork | undefined {
+  if (outcome?.kind !== "built") return undefined;
+  const work = workOfPicture(outcome.picture);
+  return { root: outcome.project.root, takenOrPublishing: work.taken.length > 0 || work.publishing.length > 0, announcedBy: work.announcements.map((announcement) => announcement.terminal) };
 }
 
 /**
@@ -36,24 +30,42 @@ function hasForeignAnnouncement(root: string): boolean {
  * running in a terminal, the open project has a Task taken by the agent, or it has an announcement no terminal or conversation of this window owns. The omp Chat
  * conversations of the window neither arm the timer nor are checked: their end is certain. At rest nothing is armed. One `setTimeout`, re-armed
  * after each finished check, so two checks never overlap; it does not keep the host process alive and is cancelled on dispose.
- * Armed again at the first job in a terminal (the job registry tells), at the first Task taken and at the first announcement of another's (the `.trama/tasks` and
- * `.trama/announcements` watcher tells). `onCheck`, when given, is called after each check (the remembered merge of Solo mode is looked at then).
+ * Armed again at the first job in a terminal (the job registry tells) and, for Tasks taken and announcements of another's, when a new picture of the project arrives
+ * (`quality#panel`): the decision is made on the picture in memory, and a raw event of the watcher of `.trama/` reads no Task, issue or announcement. The check
+ * itself takes the Tasks, announcements and issues from the same picture. `onCheck`, when given, is called after each check (the remembered merge of Solo mode is looked at then).
  */
-export function startExecutionCheck(root: () => string | undefined, files: vscode.FileSystemWatcher, after?: Promise<unknown>, onCheck?: () => void): vscode.Disposable {
+export function startExecutionCheck(root: () => string | undefined, picture: WindowPicture, after?: Promise<unknown>, onCheck?: () => void): vscode.Disposable {
   let timer: NodeJS.Timeout | undefined;
   let running = false;
+  /** Whether the running check wrote or removed a file under `.trama/`. */
+  let wrote = false;
   let disposed = false;
+  /** The work the last picture showed; the picture that has not been built yet shows none, and the first one builds the timer. */
+  let shown: ProjectWork | undefined = projectWork(picture.peek());
 
   const pending = (): boolean => {
+    if (hasTerminalWork()) return true;
     const open = root();
-    return hasTerminalWork() || (open !== undefined && (hasTakenTask(open) || hasForeignAnnouncement(open)));
+    if (open === undefined || shown === undefined || shown.root !== open) return false;
+    return shown.takenOrPublishing || shown.announcedBy.some((terminal) => terminal === null || !followsHolder(terminal));
+  };
+
+  /** The facts of the check for `project`, from the picture in memory; none for a project the window has no picture of. A picture `latest` had to build tells nobody, so the arming learns of it here. */
+  const workOf = (project: string): WorkFacts | undefined => {
+    const outcome = picture.latest();
+    shown = projectWork(outcome);
+    return outcome.kind === "built" && outcome.project.root === project ? workOfPicture(outcome.picture) : undefined;
   };
 
   const check = async (): Promise<void> => {
     if (running || disposed) return;
     running = true;
+    wrote = false;
     try {
-      await runExecutionCheck(root());
+      await runExecutionCheck(root(), workOf);
+      // A check that released a Task or withdrew an announcement changed the files the picture in memory was built from: the picture is built again at once, so the timer is armed
+      // on what is left and the panel shows the release without waiting for the watcher (whose events for these writes then ask for nothing).
+      if (wrote) picture.build("requested");
       onCheck?.();
     } catch {
       // A failed check changes nothing; the next turn tries again.
@@ -72,16 +84,21 @@ export function startExecutionCheck(root: () => string | undefined, files: vscod
     if (timer !== undefined) return;
     timer = setTimeout(() => {
       timer = undefined;
-      void check().finally(arm);
+      void timerWork("execution check", () => check()).finally(arm);
     }, CHECK_INTERVAL_MS);
     timer.unref?.();
   };
 
-  const onWorkFile = (uri: vscode.Uri): void => {
-    if (/[\\/]\.trama[\\/](tasks|announcements|issues)[\\/]/.test(uri.fsPath)) arm();
-  };
-
-  const subscriptions = [onDriftResolutionChange(arm), files.onDidCreate(onWorkFile), files.onDidChange(onWorkFile)];
+  const subscriptions = [
+    onFileWritten((_kind, path) => {
+      if (running && /[\\/]\.trama[\\/]/.test(path)) wrote = true;
+    }),
+    onDriftResolutionChange(arm),
+    picture.onDidBuild((outcome) => {
+      shown = projectWork(outcome);
+      arm();
+    }),
+  ];
   void (after === undefined ? check() : after.then(check, check)).finally(arm);
 
   return {

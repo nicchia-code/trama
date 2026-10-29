@@ -1,4 +1,5 @@
 import { execFile, type ExecFileException } from "node:child_process";
+import { processStarted } from "../../../src/core/performance";
 import { certificateErrorText, isCertificateError } from "../certificate-errors";
 import { cursorKeyEnv } from "./cursor-api-key";
 import { savedSystemCertificates, systemCertificatesEnv } from "./system-certificates";
@@ -115,7 +116,9 @@ export function ompPathVariable(ompPath: string, env: NodeJS.ProcessEnv = proces
 export function ompModels(ompPath: string, timeoutMs = 15_000, env: NodeJS.ProcessEnv = process.env, systemCertificates: boolean = savedSystemCertificates()): Promise<ModelList> {
   const { promise, resolve } = Promise.withResolvers<ModelList>();
   const options = { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, env: { ...env, ...cursorKeyEnv(), ...systemCertificatesEnv(systemCertificates), PATH: ompPathVariable(ompPath, env) } };
+  const ended = processStarted(ompPath === "" ? "omp" : ompPath);
   execFile(ompPath === "" ? "omp" : ompPath, ["models", "--json"], options, (error, stdout, stderr) => {
+    ended();
     const list = error === null ? parseOmpList(stdout) : undefined;
     resolve(list === undefined ? { models: [], error: ompError(error, ompPath, timeoutMs, String(stderr), systemCertificates), ...(error?.code === "ENOENT" ? { missing: true as const } : {}) } : list);
   });

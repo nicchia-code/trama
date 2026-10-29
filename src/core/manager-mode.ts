@@ -2,7 +2,7 @@ import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomic } from "./atomic-write";
 import { TramaError } from "./errors";
-import { git } from "./git";
+import { git, gitAsync } from "./git";
 import { type Project, writeFileEnsuringDir } from "./store";
 
 /*
@@ -57,8 +57,30 @@ export function originOf(address: string | null): Origin {
   return repository === null ? { repository: null, reason: ORIGIN_NOT_GITHUB } : { repository, reason: null };
 }
 
-/** The origin of the folder `root`, read with `git remote get-url origin`. No origin, no git or a failed git call is no origin remote. */
+/** The origin of the folder `root`, read with `git remote get-url origin`. No origin, no git or a failed git call is no origin remote. Synchronous: the command line's. */
 export const readOrigin = (root: string): Origin => originOf(git(root, ["remote", "get-url", "origin"]));
+
+/** The same read without holding the process: what the editor's host uses, once per window and for the folders of the wizard. */
+export const readOriginAsync = async (root: string): Promise<Origin> => originOf(await gitAsync(root, ["remote", "get-url", "origin"]));
+
+/** Where the origin of a project comes from while an editor window keeps it: the folder asked about, the origin the window knows. */
+export type OriginSource = (root: string) => Origin;
+
+let originSource: OriginSource | undefined;
+
+/**
+ * The editor's host installs the origin its window keeps (`extension/src/host/origin.ts`), so that no function below starts a process while the window runs; the command line installs
+ * nothing and reads origin with git. Returns the function that takes the source off again.
+ */
+export function useOriginSource(source: OriginSource): () => void {
+  originSource = source;
+  return () => {
+    if (originSource === source) originSource = undefined;
+  };
+}
+
+/** The origin of the project at `root`: the window's value when an editor keeps one, else what git says now. What the commands that run inside the editor's host read, so they start no process there. */
+export const currentOrigin = (root: string): Origin => (originSource === undefined ? readOrigin(root) : originSource(root));
 
 /** What the Settings tab and the wizard need: whether Manager mode is recorded, the origin, and whether Team is available (recorded and origin on GitHub). */
 export interface ManagerStatus extends Origin {
@@ -67,7 +89,7 @@ export interface ManagerStatus extends Origin {
 }
 
 export function managerStatus(p: Project): ManagerStatus {
-  const origin = readOrigin(p.root);
+  const origin = currentOrigin(p.root);
   const recorded = readManagerMode(p);
   return { ...origin, recorded, available: recorded && origin.repository !== null };
 }
@@ -94,7 +116,7 @@ export function requireTeam(p: Project): void {
  * the folder with its `.gitignore` and every other file of Trama. A failed write says why.
  */
 export function setManagerMode(p: Project, on: boolean): Origin {
-  const origin = readOrigin(p.root);
+  const origin = currentOrigin(p.root);
   if (on && origin.repository === null) throw new TramaError(MANAGER_NEEDS_GITHUB);
   const file = managerFile(p);
   try {

@@ -1,5 +1,7 @@
-import { existsSync, readFileSync } from "node:fs";
-import { isAbsolute, relative, sep } from "node:path";
+import { editorEvent } from "./performance";
+import { existsSync } from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
+import { isAbsolute, join, relative, sep } from "node:path";
 import * as vscode from "vscode";
 import { consumeRequest, createRequest, isEmptyRequest, requestFile, requestIdAt, requestsDir, requestTitle, sweepRequestImages } from "../../../src/core/design-requests";
 import { teamUnavailableReason } from "../../../src/core/manager-mode";
@@ -11,6 +13,8 @@ import { buildPrompt } from "./prompts";
 
 /** Context key for the active tab's written design request. */
 const CONTEXT_KEY = "trama.designRequest";
+/** The path of a request file, as far as the editor's events can tell without the project: `.trama/requests/<name>.md`. */
+const REQUEST_PATH = /[\\/]\.trama[\\/]requests[\\/][^\\/]+\.md$/;
 /** Context key for the active group's request tab. */
 const RESOURCE_CONTEXT_KEY = "trama.designRequestResources";
 /** The workspace state key of the IDs of the requests already sent. */
@@ -54,6 +58,15 @@ export class DesignRequests implements vscode.Disposable {
     handoff: vscode.window.createTextEditorDecorationType({ after: { contentText: HANDOFF_GHOST, color: new vscode.ThemeColor("disabledForeground") } }),
   };
   private readonly subscriptions: vscode.Disposable[];
+  /**
+   * Which request files exist in the project's `requests/` folder: listed once, then followed by the watcher of `.trama/`. The editor's events (typing, saving, a change of
+   * tab) ask this instead of the disk. Until the listing is back, every request counts as existing.
+   */
+  private presence: Presence | undefined;
+  /** Set by `dispose`: what waited for the listing of the request files is not settled for a window that is gone. */
+  private disposed = false;
+  /** What the context keys were last set to, so a key is sent only when its value changes. */
+  private context: { shown: boolean; path: string | undefined } | undefined;
 
   constructor(
     private readonly state: vscode.Memento,
@@ -65,28 +78,28 @@ export class DesignRequests implements vscode.Disposable {
     private readonly runAll?: () => Promise<void>,
   ) {
     this.subscriptions = [
-      vscode.window.onDidChangeActiveTextEditor(() => this.updateContext()),
-      vscode.workspace.onDidChangeTextDocument((event) => {
+      vscode.window.onDidChangeActiveTextEditor(editorEvent("active editor changed", () => this.updateContext())),
+      vscode.workspace.onDidChangeTextDocument(editorEvent("document changed", (event: vscode.TextDocumentChangeEvent) => {
         const id = this.requestId(event.document);
         if (id !== undefined) this.refreshGhosts();
-        if (event.contentChanges.length > 0 && id !== undefined && !this.finished.has(id)) this.scheduleSave(event.document);
-      }),
-      vscode.window.onDidChangeVisibleTextEditors(() => this.refreshGhosts()),
-      vscode.window.tabGroups.onDidChangeTabs((event) => {
+        if (event.contentChanges.length > 0 && id !== undefined && !this.finished.has(id)) this.scheduleSave(event.document, id);
+      })),
+      vscode.window.onDidChangeVisibleTextEditors(editorEvent("visible editors changed", () => this.refreshGhosts())),
+      vscode.window.tabGroups.onDidChangeTabs(editorEvent("tabs changed", (event: vscode.TabChangeEvent) => {
         this.finishMissing(event.opened);
         for (const tab of event.closed) void this.closed(tab);
         this.forget();
-      }),
+      })),
+      tramaFiles.onDidCreate((uri) => this.created(uri)),
       tramaFiles.onDidDelete((uri) => this.deleted(uri)),
     ];
-    this.finishMissing(vscode.window.tabGroups.all.flatMap((group) => group.tabs));
-    this.forget();
     const current = this.project();
     if (current) {
       sweepRequestImages(current);
       pruneImages(current);
+      // The listing of the request files finishes what needs to know which ones exist: the tabs of files gone, the lists of requests sent and of setups and handoffs.
+      this.presenceOf(current);
     }
-    void this.clearGoneSetup();
     this.updateContext();
   }
 
@@ -118,6 +131,7 @@ export class DesignRequests implements vscode.Disposable {
       return;
     }
     const { id, file } = createRequest(project);
+    this.appeared(project, id);
     this.finished.delete(id); // A new request may reuse the ID of one deleted earlier in the session.
     if (kind === "setup") await this.state.update(SETUP_KEY, [...this.setupIds(), id]);
     if (kind === "handoff") await this.state.update(HANDOFF_KEY, [...this.handoffIds(), id]);
@@ -159,7 +173,7 @@ export class DesignRequests implements vscode.Disposable {
     if (!project || id === undefined || this.isDone(id) || this.sending.has(id) || this.tabsOf(uri).length > 0) return;
     let text: string;
     try {
-      text = readFileSync(uri.fsPath, "utf8");
+      text = await readFile(uri.fsPath, "utf8");
     } catch {
       return; // Already deleted: `deleted` deals with it.
     }
@@ -168,6 +182,7 @@ export class DesignRequests implements vscode.Disposable {
   }
 
   dispose(): void {
+    this.disposed = true;
     for (const timer of this.saves.values()) clearTimeout(timer);
     this.saves.clear();
     for (const subscription of this.subscriptions) subscription.dispose();
@@ -220,10 +235,7 @@ export class DesignRequests implements vscode.Disposable {
 
   /** Takes out of the list at `key` the IDs whose file is gone, and returns them. */
   private async takeGone(key: string, ids: string[], project: Project): Promise<string[]> {
-    const gone = ids.filter((id) => {
-      const file = requestFile(project, id);
-      return file !== undefined && !existsSync(file);
-    });
+    const gone = ids.filter((id) => requestFile(project, id) !== undefined && !this.exists(project, id));
     if (gone.length > 0) await this.state.update(key, ids.filter((id) => !gone.includes(id)));
     return gone;
   }
@@ -304,7 +316,7 @@ export class DesignRequests implements vscode.Disposable {
       if (!open.has(id)) this.finished.delete(id);
     }
     const sent = this.sentIds();
-    const kept = sent.filter((id) => { const file = requestFile(project, id); return file !== undefined && existsSync(file); });
+    const kept = sent.filter((id) => this.exists(project, id));
     if (kept.length !== sent.length) void this.state.update(SENT_KEY, kept);
   }
 
@@ -319,7 +331,7 @@ export class DesignRequests implements vscode.Disposable {
       if (!(tab.input instanceof vscode.TabInputText) || tab.input.uri.scheme !== "file") return false;
       const { fsPath } = tab.input.uri;
       const id = requestIdAt(project, fsPath);
-      if (id === undefined || existsSync(fsPath)) return false;
+      if (id === undefined || this.exists(project, id)) return false;
       this.finish(id);
       return !tab.isDirty;
     });
@@ -327,14 +339,15 @@ export class DesignRequests implements vscode.Disposable {
   }
 
   /** Saves `document` shortly after its last change, but never brings back a request file already deleted. */
-  private scheduleSave(document: vscode.TextDocument): void {
+  private scheduleSave(document: vscode.TextDocument, id: string): void {
     const key = document.uri.toString();
     clearTimeout(this.saves.get(key));
     this.saves.set(
       key,
       setTimeout(() => {
         this.saves.delete(key);
-        if (!document.isClosed && document.isDirty && existsSync(document.uri.fsPath)) void document.save();
+        const project = this.project();
+        if (!document.isClosed && document.isDirty && project && this.exists(project, id)) void document.save();
       }, SAVE_DELAY_MS),
     );
   }
@@ -350,6 +363,15 @@ export class DesignRequests implements vscode.Disposable {
     if (!project) return;
     const gone = (fsPath: string) => within(uri.fsPath, fsPath) && requestIdAt(project, fsPath) !== undefined;
     if (!gone(uri.fsPath) && !within(uri.fsPath, requestsDir(project))) return;
+    // The watcher says what is gone, listed or not: the requests of the lists and the one named count, so a deletion that comes before the listing is not forgotten.
+    const presence = this.presenceOf(project);
+    const named = requestIdAt(project, uri.fsPath);
+    for (const id of new Set([...presence.ids, ...this.setupIds(), ...this.handoffIds(), ...this.sentIds(), ...(named === undefined ? [] : [named])])) {
+      const file = requestFile(project, id);
+      if (file === undefined || !within(uri.fsPath, file)) continue;
+      presence.ids.delete(id);
+      presence.removed.add(id);
+    }
     sweepRequestImages(project);
     void this.settleSetup(project);
     void this.takeGoneHandoff(project);
@@ -381,11 +403,14 @@ export class DesignRequests implements vscode.Disposable {
     return vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri.toString());
   }
 
-  /** The ID of the request `document` shows, or undefined when it is not a request file of the project. */
+  /**
+   * The ID of the request `document` shows, or undefined when it is not a request file of the project. The scheme and the path are checked first, so a document
+   * that cannot be a request (almost every one) costs nothing; the project is the one the window keeps in memory.
+   */
   private requestId(document: vscode.TextDocument | undefined): string | undefined {
+    if (!document || document.uri.scheme !== "file" || !REQUEST_PATH.test(document.uri.fsPath)) return undefined;
     const project = this.project();
-    if (!document || !project || document.uri.scheme !== "file") return undefined;
-    return requestIdAt(project, document.uri.fsPath);
+    return project ? requestIdAt(project, document.uri.fsPath) : undefined;
   }
 
   /** Shows the ghost text in each visible editor of a request never sent whose document is empty, and clears it elsewhere. */
@@ -400,14 +425,73 @@ export class DesignRequests implements vscode.Disposable {
     }
   }
 
+  /** Sets the two context keys of the active tab, each only when its value changes. */
   private updateContext(): void {
     const document = vscode.window.activeTextEditor?.document;
     const id = this.requestId(document);
+    const project = id === undefined ? undefined : this.project();
     // A request whose file is gone cannot be sent, whatever the lists say.
-    const shown = document !== undefined && id !== undefined && !this.isDone(id) && existsSync(document.uri.fsPath);
-    void vscode.commands.executeCommand("setContext", CONTEXT_KEY, shown);
+    const shown = document !== undefined && id !== undefined && project !== undefined && !this.isDone(id) && this.exists(project, id);
+    const path = shown ? document.uri.fsPath : undefined;
+    if (this.context?.shown !== shown) void vscode.commands.executeCommand("setContext", CONTEXT_KEY, shown);
     // Menu resource context is evaluated for each editor group, unlike a single global boolean.
-    void vscode.commands.executeCommand("setContext", RESOURCE_CONTEXT_KEY, shown ? { [document.uri.fsPath]: true } : {});
+    if (this.context === undefined || this.context.path !== path) void vscode.commands.executeCommand("setContext", RESOURCE_CONTEXT_KEY, path === undefined ? {} : { [path]: true });
+    this.context = { shown, path };
+  }
+
+  /** The request files that exist, as far as the window knows them; the listing of the folder starts the first time it is asked for. */
+  private presenceOf(project: Project): Presence {
+    if (this.presence?.root !== project.root) {
+      const presence: Presence = { root: project.root, ids: new Set(), removed: new Set(), loaded: false };
+      this.presence = presence;
+      void this.list(project, presence);
+    }
+    return this.presence;
+  }
+
+  /** Whether request `id` has its file. Until the folder is listed it does, unless the watcher already said it was deleted. */
+  private exists(project: Project, id: string): boolean {
+    const presence = this.presenceOf(project);
+    return !presence.removed.has(id) && (!presence.loaded || presence.ids.has(id));
+  }
+
+  /** Request `id` has its file now: made by Trama or reported by the watcher. */
+  private appeared(project: Project, id: string): void {
+    const presence = this.presenceOf(project);
+    presence.ids.add(id);
+    presence.removed.delete(id);
+  }
+
+  /** Lists the request files once; what waited for the list (the tabs of files gone, the lists of sent, setup and handoff requests) is settled when it is back. */
+  private async list(project: Project, presence: Presence): Promise<void> {
+    try {
+      for (const name of await readdir(requestsDir(project))) {
+        const id = requestIdAt(project, join(requestsDir(project), name));
+        if (id !== undefined && !presence.removed.has(id)) presence.ids.add(id);
+      }
+    } catch {
+      // No requests folder: no request.
+    }
+    presence.loaded = true;
+    if (this.disposed || this.presence !== presence) return;
+    this.finishMissing(vscode.window.tabGroups.all.flatMap((group) => group.tabs));
+    this.forget();
+    this.updateContext();
+    await this.clearGoneSetup();
+  }
+
+  /** A file or folder appeared in `.trama/`: a request file joins the ones that exist; a folder that may hold requests is listed again. */
+  private created(uri: vscode.Uri): void {
+    const project = this.project();
+    if (!project) return;
+    const id = requestIdAt(project, uri.fsPath);
+    if (id !== undefined) {
+      this.appeared(project, id);
+      this.updateContext();
+    } else if (within(uri.fsPath, requestsDir(project))) {
+      this.presence = undefined;
+      this.presenceOf(project);
+    }
   }
 }
 
@@ -415,4 +499,12 @@ export class DesignRequests implements vscode.Disposable {
 function within(parent: string, path: string): boolean {
   const rel = relative(parent, path);
   return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
+
+/** Which request files exist: the ones listed or reported created, minus the ones the watcher reported deleted (`removed` holds that for the ids it said nothing else about). */
+interface Presence {
+  root: string;
+  ids: Set<string>;
+  removed: Set<string>;
+  loaded: boolean;
 }

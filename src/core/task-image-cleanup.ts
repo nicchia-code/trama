@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import type { Project } from "./store";
+import { noteRemoved } from "./written";
 import { taskImagesDir, taskImagesRoot } from "./task-images";
 
 const TASK_ID = /^[a-z0-9]{8}$/;
@@ -53,6 +54,7 @@ export function pruneTaskImages(p: Project, proposals: readonly KeepProposal[], 
   for (const entry of entries) {
     if (!entry.isDirectory() || !TASK_ID.test(entry.name) || keep.has(entry.name)) continue;
     rmSync(join(root, entry.name), { recursive: true, force: true });
+    noteRemoved(join(root, entry.name));
   }
 }
 
@@ -62,8 +64,12 @@ export function removeTaskImage(p: Project, id: string, name: string): boolean {
   const path = join(dir, name);
   if (basename(name) !== name || name.startsWith(".") || !existsSync(path)) return false;
   rmSync(path, { force: true });
+  noteRemoved(path);
   try {
-    if (readdirSync(dir).length === 0) rmSync(dir, { recursive: true, force: true });
+    if (readdirSync(dir).length === 0) {
+      rmSync(dir, { recursive: true, force: true });
+      noteRemoved(dir);
+    }
   } catch { /* Already gone. */ }
   return true;
 }

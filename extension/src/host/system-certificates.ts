@@ -2,9 +2,10 @@
 // that bundle and the variables every process Trama starts receives. The names of the variables and the paths live only here. No runtime import of the editor: the
 // launchers of omp (`model-lists`, `omp-update`, the ACP client) read the variables through here and run outside the editor in tests.
 import { execFile } from "node:child_process";
+import { processStarted } from "../../../src/core/performance";
 import { X509Certificate } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, posix, win32 } from "node:path";
 import { rootCertificates } from "node:tls";
@@ -145,7 +146,9 @@ function programFailure(error: NodeJS.ErrnoException & { killed?: boolean }, nam
 /** Runs a fixed program without a shell and gives its output. */
 function runProgram(program: string, args: string[], name: string, timeoutMs: number): Promise<string> {
   const { promise, resolve, reject } = Promise.withResolvers<string>();
+  const ended = processStarted(program);
   execFile(program, args, { timeout: timeoutMs, maxBuffer: 256 * 1024 * 1024, windowsHide: true }, (error, stdout) => {
+    ended();
     if (error !== null) return reject(programFailure(error as NodeJS.ErrnoException, name, timeoutMs));
     resolve(stdout);
   });
@@ -244,23 +247,23 @@ export function onSystemCertificatesChanged(listener: (state: SystemCertificates
   return { dispose: () => void listeners.delete(listener) };
 }
 
-/** Reads the bundle on disk into the state (`exportedAt` is the file's `mtime`, `count` its certificates); no bundle leaves both out. Silent: it never fails. */
-export function loadBundleState(path: string = bundlePath()): void {
-  let next: SystemCertificatesState;
+/** Reads the bundle on disk into the state (`exportedAt` is the file's `mtime`, `count` its certificates); no bundle leaves both out. Silent: it never fails. Read without holding the host. */
+export async function loadBundleStateAsync(path: string = bundlePath()): Promise<void> {
+  let bundle: { modified: string; text: string } | undefined;
   try {
-    const modified = statSync(path).mtime.toISOString();
-    next = { exporting: state.exporting, count: countCertificates(readFileSync(path, "utf8")), exportedAt: modified };
+    bundle = { modified: (await stat(path)).mtime.toISOString(), text: await readFile(path, "utf8") };
   } catch {
-    next = { exporting: state.exporting };
+    bundle = undefined;
   }
+  const next: SystemCertificatesState = bundle === undefined ? { exporting: state.exporting } : { exporting: state.exporting, count: countCertificates(bundle.text), exportedAt: bundle.modified };
   if (state.error !== undefined) next.error = state.error;
   change(next);
 }
 
-/** Whether the bundle is missing or was written more than 24 hours before `now`: the extension exports it again when it starts. */
-export function bundleStale(now: number = Date.now(), path: string = bundlePath()): boolean {
+/** Whether the bundle is missing or was written more than 24 hours before `now`: the extension exports it again when it starts. Read without holding the host. */
+export async function bundleStaleAsync(now: number = Date.now(), path: string = bundlePath()): Promise<boolean> {
   try {
-    return now - statSync(path).mtimeMs > BUNDLE_MAX_AGE_MS;
+    return now - (await stat(path)).mtimeMs > BUNDLE_MAX_AGE_MS;
   } catch {
     return true;
   }

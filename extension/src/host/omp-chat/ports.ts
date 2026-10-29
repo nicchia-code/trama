@@ -89,8 +89,12 @@ export interface OmpSessionPort {
    * A turn that a message of the developer queued behind the work is the one that counts. An end that comes before a listener is the one it receives first.
    */
   onTurnEnd(listener: (end: TurnEnd) => void): Disposable;
-  /** The `session/update` notifications as they arrive. Everything received since the session was created or loaded (the history a load replays included) is replayed to a new listener first. */
+  /** The `session/update` notifications as they arrive. Everything received since the session was created or loaded (the history a load replays included) is replayed to a new listener first, one by one. */
   onUpdate(listener: (notification: SessionNotification) => void): Disposable;
+  /** Everything received since the session was created or loaded (the history a load replays included), in order: the view takes it whole, as one message, and follows `onLiveUpdate` from then on. */
+  history(): readonly SessionNotification[];
+  /** The `session/update` notifications that arrive from now on; nothing is replayed. */
+  onLiveUpdate(listener: (notification: SessionNotification) => void): Disposable;
   /** The agent starts or ends a turn, for a prompt of the view or of anyone else. */
   onTurn(listener: (inTurn: boolean) => void): Disposable;
   /** A form of the agent (an elicitation request of ACP); the ones still waiting are replayed to a new listener. */
@@ -154,13 +158,16 @@ export interface PendingInstruction {
 export interface ChatViewPort {
   /**
    * Adds the conversation's tab, in front of the others, and shows the view on it: with the focus in the message field when `focus` is set, without taking it
-   * otherwise. `notice` is a line the conversation starts with (a resumed one); `first` is the instruction the conversation started with, which the view shows as Trama's message.
-   * With no `session` yet the tab shows that omp is starting, until `setSession` gives it one. `instruction` is held for the developer's first message: the view sends
-   * `compose(message)` with that message, once, and then forgets it. The view reads the session's notifications and sends the developer's messages, the model changes and the form answers to the session itself.
+   * otherwise. `notice` is a line the conversation starts with (a resumed one). With no `session` yet the tab shows that omp is starting, until `setSession` gives it
+   * one. `instruction` is held for the developer's first message: the view sends `compose(message)` with that message, once, and then forgets it. The view reads the
+   * session's notifications and sends the developer's messages, the model changes and the form answers to the session itself.
    */
-  open(tab: ConversationTab, session: OmpSessionPort | undefined, options: { focus: boolean; notice?: string; first?: OmpPrompt; instruction?: PendingInstruction }): void;
-  /** The session of the conversation `id`, once its process started: its tab stops showing the start and follows the session. */
-  setSession(id: string, session: OmpSessionPort): void;
+  open(tab: ConversationTab, session: OmpSessionPort | undefined, options: { focus: boolean; notice?: string; instruction?: PendingInstruction }): void;
+  /**
+   * The session of the conversation `id`, once it is open: its tab stops showing the start and follows the session. `first` is the instruction the conversation starts with
+   * (a job's prompt of work), which the view shows as Trama's message from now on, not before.
+   */
+  setSession(id: string, session: OmpSessionPort, options?: { first?: OmpPrompt }): void;
   /** The conversation is, or is no longer, working for Trama (the tab's dot). */
   setWorking(id: string, working: boolean): void;
   /** Removes the tab; the view refuses the forms still waiting. */

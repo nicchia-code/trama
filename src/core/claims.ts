@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync, rmSync } from "nod
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "./atomic-write";
-import { withFileLock } from "./file-lock";
+import { withFileLock, withFileLockAsync } from "./file-lock";
 import { findProject, TRAMA_DIR } from "./store";
 
 /** The variable a terminal of a Run carries: its write tools claim the files they write. */
@@ -151,18 +151,30 @@ export function claimWrites(root: string, paths: readonly string[], writer: Clai
 function releaseWhere(root: string, matches: (claim: Claim) => boolean): void {
   const dir = join(root, TRAMA_DIR, "claims");
   if (!existsSync(dir)) return;
-  withFileLock(dir, CLAIMS_LOCK, () => {
-    for (const name of readdirSync(dir)) {
-      if (!name.endsWith(".json")) continue;
-      const file = join(dir, name);
-      const claim = parseClaim(readFileSync(file, "utf8"));
-      if (claim !== undefined && matches(claim)) rmSync(file, { force: true });
-    }
-  });
+  withFileLock(dir, CLAIMS_LOCK, () => removeMatching(dir, matches));
+}
+
+/** As `releaseWhere`, for the editor's host: the wait for the lock gives the thread back. */
+async function releaseWhereAsync(root: string, matches: (claim: Claim) => boolean): Promise<void> {
+  const dir = join(root, TRAMA_DIR, "claims");
+  if (!existsSync(dir)) return;
+  await withFileLockAsync(dir, CLAIMS_LOCK, () => removeMatching(dir, matches));
+}
+
+function removeMatching(dir: string, matches: (claim: Claim) => boolean): void {
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".json")) continue;
+    const file = join(dir, name);
+    const claim = parseClaim(readFileSync(file, "utf8"));
+    if (claim !== undefined && matches(claim)) rmSync(file, { force: true });
+  }
 }
 
 /** Forgets every claim of `terminal`; a project without claims is not an error. */
 export const releaseTerminalClaims = (root: string, terminal: string): void => releaseWhere(root, (claim) => claim.terminal === terminal);
+
+/** `releaseTerminalClaims` for the editor's host: the wait for the lock gives the thread back. */
+export const releaseTerminalClaimsAsync = (root: string, terminal: string): Promise<void> => releaseWhereAsync(root, (claim) => claim.terminal === terminal);
 
 /** The terminals and omp Chat conversations that hold a claim, each once; a claim that does not read names none, and a project without claims has none. */
 export function claimHolders(root: string): string[] {

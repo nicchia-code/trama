@@ -60,7 +60,7 @@ export async function chooseProposalModel(memory: ModelMemory, p: Project, id: s
 }
 
 /** A Proposal keeps its model while it is a draft or open, and while it is approved with a Task of its design still to do or in progress. */
-function keeps(proposal: Proposal | undefined, tasks: Task[]): boolean {
+function keeps(proposal: Proposal | undefined, tasks: readonly Task[]): boolean {
   if (!proposal) return false;
   if (proposal.data.status === "draft" || proposal.data.status === "open") return true;
   if (proposal.data.status !== "approved") return false;
@@ -69,14 +69,14 @@ function keeps(proposal: Proposal | undefined, tasks: Task[]): boolean {
 
 /**
  * Forgets the models of the Proposals that no longer exist, are rejected or discarded, or are approved with no Task of
- * their design in To do or In progress. Writes only when it forgets something.
+ * their design in To do or In progress. Writes only when it forgets something. `cards` are the Proposals and Tasks a picture already read; without them they are listed.
  */
-export async function forgetProposalModels(memory: ModelMemory, p: Project): Promise<void> {
+export async function forgetProposalModels(memory: ModelMemory, p: Project, cards?: { proposals: readonly Proposal[]; tasks: readonly Task[] }): Promise<void> {
   const models = proposalModels(memory);
   const ids = Object.keys(models);
   if (ids.length === 0) return;
-  const proposals = new Map(listProposals(p).map((proposal) => [proposal.id, proposal]));
-  const tasks = listTasks(p);
+  const proposals = new Map((cards?.proposals ?? listProposals(p)).map((proposal) => [proposal.id, proposal]));
+  const tasks = cards?.tasks ?? listTasks(p);
   const kept: ProposalModels = {};
   for (const id of ids) {
     const entry = models[id];

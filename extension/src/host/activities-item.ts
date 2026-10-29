@@ -1,8 +1,8 @@
+import { timerWork } from "./performance";
 import * as vscode from "vscode";
-import { listAnnouncements } from "../../../src/core/announcements";
-import { announcementView } from "../../../src/core/snapshot";
-import { projectAt } from "../../../src/core/store";
+import type { AnnouncementView } from "../../../src/core/snapshot";
 import { type Activity, ACTIVITIES_ITEM_ID, ACTIVITIES_ITEM_NAME, ACTIVITIES_PLACEHOLDER, ACTIVITIES_PRIORITY, ACTIVITIES_REFRESH_MS, activitiesOf, activityOptions, SHOW_ACTIVITIES_COMMAND, summarize } from "./activities";
+import type { PictureOutcome, WindowPicture } from "./picture";
 
 /** The command the item's click runs; it is not in the command palette. */
 export { SHOW_ACTIVITIES_COMMAND };
@@ -11,37 +11,41 @@ type OptionItem = vscode.QuickPickItem & { id: string };
 
 /**
  * The status bar item that sums up the ghosts with no Board column (checks, scans, comparisons, works), in every window open
- * on a Trama project, also with the panel closed. It follows the announcements of the project through `files` (the watcher
- * of `.trama/**`), shows only while one exists, and recomputes `Running for` every 30 seconds while it shows. Its click, with
- * one ghost, opens that ghost's details through `openDetails`; with several, a QuickPick that follows the announcements.
+ * on a Trama project, also with the panel closed. It takes the announcements from the picture the window builds on the watcher of
+ * `.trama/**` (the same view of the ghosts as the Snapshot), at every new picture, and never reads the announcements folder itself. It shows only while one exists,
+ * and recomputes `Running for` every 30 seconds while it shows, from what it already holds. Its click, with one ghost, opens that
+ * ghost's details through `openDetails`; with several, a QuickPick that follows the announcements.
  */
 export class ActivitiesItem implements vscode.Disposable {
   private readonly item = vscode.window.createStatusBarItem(ACTIVITIES_ITEM_ID, vscode.StatusBarAlignment.Left, ACTIVITIES_PRIORITY);
-  private readonly subscriptions: vscode.Disposable[] = [];
+  private readonly subscriptions: { dispose(): void }[] = [];
+  /** The ghosts of the last picture that built. */
+  private announcements: readonly AnnouncementView[] = [];
   private activities: Activity[] = [];
   private timer: NodeJS.Timeout | undefined;
   private pick: vscode.QuickPick<OptionItem> | undefined;
 
   constructor(
-    private readonly root: () => string | undefined,
-    files: vscode.FileSystemWatcher,
+    picture: WindowPicture,
     private readonly openDetails: (announcement: string) => void,
   ) {
     this.item.name = ACTIVITIES_ITEM_NAME;
     this.item.command = SHOW_ACTIVITIES_COMMAND;
-    const refresh = (): void => this.refresh();
-    this.subscriptions.push(
-      files.onDidCreate(refresh),
-      files.onDidChange(refresh),
-      files.onDidDelete(refresh),
-      vscode.workspace.onDidChangeWorkspaceFolders(refresh),
-    );
+    this.subscriptions.push(picture.onDidBuild((outcome) => this.follow(outcome)));
+    const built = picture.peek();
+    if (built !== undefined) this.follow(built);
+  }
+
+  /** A new picture: its ghosts, or none when the window has no project; a picture that could not be read leaves the item as it is. */
+  private follow(outcome: PictureOutcome): void {
+    if (outcome.kind === "failed") return;
+    this.announcements = outcome.kind === "none" ? [] : outcome.snapshot.announcements;
     this.refresh();
   }
 
-  /** Reads the announcements again and brings the item, and the list when it is open, up to date. */
+  /** Brings the item, and the list when it is open, up to date with the ghosts it holds: nothing is read. */
   refresh(): void {
-    this.activities = this.read();
+    this.activities = activitiesOf(this.announcements);
     const [first] = this.activities;
     if (first === undefined) {
       this.item.hide();
@@ -54,7 +58,7 @@ export class ActivitiesItem implements vscode.Disposable {
     this.item.tooltip = tooltip;
     this.item.accessibilityInformation = { label };
     this.item.show();
-    this.timer ??= setInterval(() => this.refresh(), ACTIVITIES_REFRESH_MS);
+    this.timer ??= setInterval(() => timerWork("refresh ghosts item", () => this.refresh()), ACTIVITIES_REFRESH_MS);
     this.timer.unref?.();
     this.updatePick();
   }
@@ -65,18 +69,6 @@ export class ActivitiesItem implements vscode.Disposable {
     if (only === undefined) return;
     if (others.length === 0) this.openDetails(only.id);
     else this.openList();
-  }
-
-  private read(): Activity[] {
-    const root = this.root();
-    if (root === undefined) return [];
-    try {
-      const project = projectAt(root);
-      return activitiesOf(listAnnouncements(project).map((a) => announcementView(project, a, undefined)));
-    } catch {
-      // An unreadable announcement folder shows nothing; the next change of the files tries again.
-      return [];
-    }
   }
 
   private options(): OptionItem[] {

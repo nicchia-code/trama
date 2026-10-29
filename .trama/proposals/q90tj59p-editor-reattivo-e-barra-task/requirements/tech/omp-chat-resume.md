@@ -1,0 +1,10 @@
+---
+description: "Usa quando costruisci o cambi il salvataggio e la ripresa delle conversazioni di omp Chat dopo una ricarica o una riapertura della finestra."
+---
+# Conversazioni di omp Chat: ripresa
+
+## omp-chat-conversation/Waiting for the window
+- Persistenza per la ripresa (`data#omp-chat-conversation`): l'host scrive le conversazioni aperte di una finestra in `ExtensionContext.workspaceState` a ogni cambio di stato e alla chiusura. All'attivazione dell'estensione le legge e, per ognuna, avvia un processo nuovo con gli stessi argomenti e lo stesso ambiente (la stessa `TRAMA_TERMINAL`), poi riapre la sessione salvata con il metodo che omp 18.12.6 dichiara (`tech#omp-acp`). Riuscita → `omp-acp.SESSION_RESUMED`; fallimento di avvio, di `initialize` o del caricamento, o il limite di tempo dell'apertura superato → `omp-acp.SESSION_NOT_RESUMED`, e la voce si cancella. Il lavoro salvato rientra nel registro dei lavori con la sua identità prima che parta il controllo di esecuzione e prima che la finestra ritiri gli annunci orfani (`tech#announcement`), così i Task presi e gli annunci di quella conversazione non vengono rilasciati né ritirati alla riapertura.
+- Ripresa di Ask more: una conversazione senza hook salvata come `running` riprende in Agent idle, senza il messaggio fisso della ripresa e senza `work`, e la sua voce torna `idle`.
+- Order (`rules#omp-chat-conversation`): `OmpConversations.resume` in `extension/src/host/omp-chat/conversations.ts` splits the saved entries into those with `state: "running"` and a job, started together at activation, and the others, resumed in the saved order by one queue that starts the next entry only when the previous one has given `SESSION_RESUMED` or `SESSION_NOT_RESUMED`. Closing the window or turning omp Chat off empties the queue without starting what is left; the entries left stay saved.
+- The history that `session/load` replays reaches the webview in one message per conversation at the end of the load, not one per stored update (`quality#omp-chat-conversation`).

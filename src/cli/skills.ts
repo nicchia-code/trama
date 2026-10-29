@@ -15,6 +15,7 @@ import handoff from "../../skills/trama-handoff/SKILL.md" with { type: "text" };
 import { SKILL_DIRS } from "../core/requirement-skills";
 import { normalizeLf } from "../core/line-endings";
 import { readTextLf, writeFileEnsuringDir } from "../core/store";
+import { drain, type Steps } from "../core/steps";
 
 /** Skill files, embedded in the binary: path relative to the skills directory -> content. The text is LF-normalised: a CRLF checkout embeds the same text as Linux, so an installed copy compares equal. */
 export const SKILLS: Record<string, string> = {
@@ -52,17 +53,34 @@ export function removeRetiredSkills(root: string, extraDirs: string[] = []): str
 
 /** Existing skill files under `dir` whose content differs from ours, i.e. what an install would destroy. */
 export function skillConflicts(dir: string): string[] {
-  return Object.entries(SKILLS)
-    .map(([rel, content]) => ({ path: join(dir, rel), content }))
-    .filter(({ path, content }) => existsSync(path) && readTextLf(path) !== content)
-    .map(({ path }) => path);
+  return drain(skillConflictsSteps(dir));
+}
+
+/** `skillConflicts` as steps, one per skill file (see `Steps`). */
+export function* skillConflictsSteps(dir: string): Steps<string[]> {
+  const found: string[] = [];
+  for (const [rel, content] of Object.entries(SKILLS)) {
+    const path = join(dir, rel);
+    if (existsSync(path) && readTextLf(path) !== content) found.push(path);
+    yield;
+  }
+  return found;
 }
 
 /** Skill files of this version that are not under `dir` yet. */
 export function missingSkills(dir: string): string[] {
-  return Object.keys(SKILLS)
-    .map((rel) => join(dir, rel))
-    .filter((path) => !existsSync(path));
+  return drain(missingSkillsSteps(dir));
+}
+
+/** `missingSkills` as steps, one per skill file (see `Steps`). */
+export function* missingSkillsSteps(dir: string): Steps<string[]> {
+  const found: string[] = [];
+  for (const rel of Object.keys(SKILLS)) {
+    const path = join(dir, rel);
+    if (!existsSync(path)) found.push(path);
+    yield;
+  }
+  return found;
 }
 
 /** Writes `content` to `path` unless the file already holds it; returns whether it wrote. */
@@ -80,7 +98,17 @@ function writeIfChanged(path: string, content: string): string {
 
 /** Writes the skills under `dir`, replacing any previous copy whose content differs; returns every skill path. */
 export function installSkills(dir: string): string[] {
-  return Object.entries(SKILLS).map(([rel, content]) => writeIfChanged(join(dir, rel), content));
+  return drain(installSkillsSteps(dir));
+}
+
+/** `installSkills` as steps, one per skill file (see `Steps`). */
+export function* installSkillsSteps(dir: string): Steps<string[]> {
+  const paths: string[] = [];
+  for (const [rel, content] of Object.entries(SKILLS)) {
+    paths.push(writeIfChanged(join(dir, rel), content));
+    yield;
+  }
+  return paths;
 }
 
 /** omp's role for each sub-agent, as `[name, model]`. `trama-analysis` takes omp's `@slow` role, which Trama passes `--slow` with the scan model when set. `trama-implementer` names no model, so it uses the model of the main process (`--model`). */

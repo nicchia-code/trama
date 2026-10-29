@@ -49,6 +49,22 @@ describe("agent process registry", () => {
     expect(readAgentProcess("p1", "t1", dir)).toBeUndefined();
   });
 
+  test("the process is registered at once and its start is added when the reading ends, only to the entry that asked for it", async () => {
+    const settled = writeAgentProcess("p1", "t1", process.pid, "w1", dir);
+    // Nothing has been awaited: the pid and the window are already there, the start is not.
+    expect(readAgentProcess("p1", "t1", dir)).toMatchObject({ pid: process.pid, window: "w1" });
+    expect(readAgentProcess("p1", "t1", dir)?.processStart).toBeUndefined();
+    await settled;
+    expect(Number.isNaN(Date.parse(readAgentProcess("p1", "t1", dir)?.processStart ?? ""))).toBe(false);
+
+    // Another registration for the terminal while the start is read keeps its own entry: the late start is not its.
+    const late = writeAgentProcess("p1", "t2", process.pid, "w1", dir);
+    await writeAgentProcess("p1", "t2", 2_000_000_000, "w2", dir);
+    await late;
+    expect(readAgentProcess("p1", "t2", dir)).toMatchObject({ pid: 2_000_000_000, window: "w2" });
+    expect(readAgentProcess("p1", "t2", dir)?.processStart).toBeUndefined();
+  });
+
   test("an entry written by an earlier version has no start and reads back as such", () => {
     writeFileSync(join(dir, "agents-p1.json"), JSON.stringify({ t1: { pid: 5, started: "2026-01-01T00:00:00.000Z" } }));
     expect(readAgentProcess("p1", "t1", dir)).toEqual({ pid: 5, started: "2026-01-01T00:00:00.000Z" });
@@ -73,10 +89,14 @@ describe("the same process", () => {
     expect(await sameProcess(registered(process.pid, "2001-01-01T00:00:00.000Z"))).toBe(false);
   });
 
-  test("no entry, an entry without a start and a start that is no date are gone", async () => {
+  test("no entry and a start that is no date are gone", async () => {
     expect(await sameProcess(undefined)).toBe(false);
-    expect(await sameProcess(registered(process.pid))).toBe(false);
     expect(await sameProcess(registered(process.pid, "not a date"))).toBe(false);
+  });
+
+  test("an entry whose start has not arrived is alive while the process exists", async () => {
+    expect(await sameProcess(registered(process.pid))).toBe(true);
+    expect(await sameProcess(registered(2_000_000_000))).toBe(false);
   });
 
   test("a process that ended is gone", async () => {

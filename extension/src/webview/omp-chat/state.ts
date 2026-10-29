@@ -49,6 +49,12 @@ export function selectedOf(state: ChatState): string | undefined {
   return state.items.some((item) => item.id === state.selected) ? state.selected : state.items[0]?.id;
 }
 
+/** Whether the host sent the same tab again: every field equal. */
+function sameItem(a: ConversationItem, b: ConversationItem): boolean {
+  const left = Object.entries(a);
+  return left.length === Object.keys(b).length && left.every(([key, value]) => (b as unknown as Record<string, unknown>)[key] === value);
+}
+
 /** Applies a message of the host. `now` is read once by the caller so the reducer stays pure. */
 export function reduce(state: ChatState, message: ToChatWebview, now: number): ChatState {
   switch (message.type) {
@@ -66,13 +72,23 @@ export function reduce(state: ChatState, message: ToChatWebview, now: number): C
       return change(state, message.id, (view) => ({ ...view, transcript: setSendStatus(view.transcript, message.messageId, message.status, message.reason) }));
     case "conversations": {
       const kept: Record<string, ConversationView> = {};
-      for (const item of message.items) {
+      // An item the host sent again unchanged keeps its identity, so what draws it does not draw it again.
+      const items = message.items.map((item) => {
+        const before = state.items.find((each) => each.id === item.id);
+        return before !== undefined && sameItem(before, item) ? before : item;
+      });
+      for (const item of items) {
         const view = state.conversations[item.id] ?? fresh();
         const before = state.items.find((each) => each.id === item.id);
         // The agent's turn ended: what was open in the conversation closes.
         kept[item.id] = before?.state === "running" && item.state !== "running" ? { ...view, transcript: settle(view.transcript, now) } : view;
       }
-      return { ...state, items: message.items, selected: message.selected, conversations: kept };
+      const unchanged =
+        message.selected === state.selected &&
+        items.length === state.items.length &&
+        Object.keys(kept).length === Object.keys(state.conversations).length &&
+        items.every((item, at) => item === state.items[at] && kept[item.id] === state.conversations[item.id]);
+      return unchanged ? state : { ...state, items, selected: message.selected, conversations: kept };
     }
     case "conversationStart":
       return change(state, message.id, (view) => ({
@@ -82,6 +98,8 @@ export function reduce(state: ChatState, message: ToChatWebview, now: number): C
       }));
     case "conversationUpdate":
       return change(state, message.id, (view) => ({ ...view, transcript: applyUpdate(view.transcript, message.update, now) }));
+    case "conversationHistory":
+      return change(state, message.id, (view) => ({ ...view, transcript: message.updates.reduce((transcript, update) => applyUpdate(transcript, update, now), view.transcript) }));
     case "formRequest":
       return change(state, message.id, (view) => ({ ...view, transcript: addForm(view.transcript, { requestId: message.requestId, message: message.message, schema: message.schema }, now) }));
     case "permissionRequest":

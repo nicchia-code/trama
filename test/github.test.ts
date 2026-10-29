@@ -26,7 +26,6 @@ import {
   PROJECT_ITEMS_QUERY,
   PROJECT_QUERY,
   PROJECTS_QUERY,
-  readGhState,
   readPullRequests,
   readGitHub,
   readLinkedProject,
@@ -263,18 +262,6 @@ describe("a read of GitHub", () => {
     const reading = await readGitHub("acme/web", null, deps);
     expect(reading).toMatchObject({ ok: false, reason: GH_NOT_LOGGED_IN });
     expect(calls).toHaveLength(2);
-  });
-
-  test("the state of gh alone, for the Team view without Manager mode, asks only the version and the login: no query of Projects, so no missing scope", async () => {
-    const { calls, deps } = fakeGh({ projects: refused(1, "gh: Your token has not been granted the required scopes to execute this query. The 'projectsV2' field requires one of the following scopes: ['read:project']\n") });
-    const state = await readGhState(deps);
-    expect(state).toEqual({ ok: true, readAt: "2026-10-25T10:00:00.000Z" });
-    expect(calls.map((args) => args.slice(0, 2))).toEqual([["--version"], ["auth", "status"]]);
-    const missing = await readGhState({ find: () => null });
-    expect(missing).toMatchObject({ ok: false, reason: GH_NOT_INSTALLED });
-    const out = fakeGh({ auth: refused(1, "You are not logged into any GitHub hosts.\n") });
-    expect(await readGhState(out.deps)).toMatchObject({ ok: false, reason: GH_NOT_LOGGED_IN });
-    expect(out.calls).toHaveLength(2);
   });
 
   test("a Projects query refused for the missing scope is cannot read Projects", async () => {

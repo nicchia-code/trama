@@ -1,17 +1,12 @@
 import { z } from "zod";
 import { TramaError } from "../../../../src/core/errors";
-import { type GhDeps, type GhProblemKind, ghProblemKind, type GhStateReading, type GitHubIteration, type GitHubProject, type GitHubReading, linkedGithubProject, linkGithubProject, type LinkedProject, type ProjectChoice, readGhState, readGitHub } from "../../../../src/core/github";
+import { type GhDeps, type GhProblemKind, ghProblemKind, type GitHubIteration, type GitHubProject, linkedGithubProject, linkGithubProject, type LinkedProject, type ProjectChoice, readGitHub } from "../../../../src/core/github";
 import { type IssueActions, type IssueOnGitHub, type IssueSignals, issuesOnGitHub, openLoads, type PublishedIssue } from "../../../../src/core/timeline";
 import type { OpenLoad } from "../../../../src/core/sprints";
 import { managerStatus } from "../../../../src/core/manager-mode";
 import type { Project } from "../../../../src/core/store";
 import type { ModelMemory } from "../proposal-models";
 import type { ToWebview } from "../../protocol";
-
-/** The state-only read of `gh` in the shape of a full read: nothing about Projects. */
-function withoutProjects(reading: GhStateReading): GitHubReading {
-  return reading.ok ? { ok: true, readAt: reading.readAt, projects: [], project: null } : reading;
-}
 
 /** The workspace state key of what Trama last read from GitHub (`data#github-project`). */
 export const GITHUB_CACHE_KEY = "trama.team.github";
@@ -57,12 +52,11 @@ export function readGitHubCache(memory: ModelMemory): GitHubCache | undefined {
 }
 
 /** The key of what a read was asked for: a second request for the same thing, made while one runs, is answered by that read. */
-const keyOf = (repository: string, linked: LinkedProject | null, manager: boolean): string => JSON.stringify([repository, linked?.owner ?? null, linked?.number ?? null, manager]);
+const keyOf = (repository: string, linked: LinkedProject | null): string => JSON.stringify([repository, linked?.owner ?? null, linked?.number ?? null]);
 
 /**
  * The Team view's reads of GitHub (`rules#github-project`): one at a time, the result kept in the workspace state and the last successful data kept through a failed read.
- * A request made while a read runs waits for it, and runs again only when it asked for something else (another linked Project, or Manager mode turned on or off). With Manager
- * mode off a read is only the state of `gh`: no Project is read. `deps` is for tests.
+ * A request made while a read runs waits for it, and runs again only when it asked for something else (another linked Project). `deps` is for tests.
  */
 export class TeamGitHub {
   private running: Promise<void> | undefined;
@@ -83,20 +77,19 @@ export class TeamGitHub {
     return this.running !== undefined;
   }
 
-  /** Reads GitHub for `repository` (`<owner>/<repo>`) and, with `manager`, the linked Project; resolves when the result is stored. Never rejects. */
-  read(repository: string, linked: LinkedProject | null, manager = true): Promise<void> {
-    const key = keyOf(repository, linked, manager);
-    if (this.running !== undefined) return this.running.then(() => (this.lastKey === key ? undefined : this.read(repository, linked, manager)));
-    const running = this.run(repository, linked, manager, key).finally(() => {
+  /** Reads GitHub for `repository` (`<owner>/<repo>`): the state of `gh`, the Projects of its owner and the linked Project; resolves when the result is stored. Never rejects. */
+  read(repository: string, linked: LinkedProject | null): Promise<void> {
+    const key = keyOf(repository, linked);
+    if (this.running !== undefined) return this.running.then(() => (this.lastKey === key ? undefined : this.read(repository, linked)));
+    const running = this.run(repository, linked, key).finally(() => {
       this.running = undefined;
     });
     this.running = running;
     return running;
   }
 
-  private async run(repository: string, linked: LinkedProject | null, manager: boolean, key: string): Promise<void> {
-    // Without Manager mode only the state of `gh` is read: no Projects, so no choices and no linked Project.
-    const reading = manager ? await readGitHub(repository, linked, this.deps) : withoutProjects(await readGhState(this.deps));
+  private async run(repository: string, linked: LinkedProject | null, key: string): Promise<void> {
+    const reading = await readGitHub(repository, linked, this.deps);
     if (reading.ok) {
       this.projects = reading.projects;
       this.problemDetails = "";
@@ -169,18 +162,16 @@ export class TeamGitHub {
   }
 }
 
-/** The repository of the project (`<owner>/<repo>`), whether Manager mode is on, and the Project linked to it, as the reads need them: with Manager mode off no Project is read, so none is linked here. */
+/** The repository of the project (`<owner>/<repo>`) and the Project linked to it, as the reads of Team need them. */
 export interface GitHubTarget {
   repository: string;
-  /** Team is available: Manager mode recorded and origin on GitHub. */
-  manager: boolean;
   linked: LinkedProject | null;
 }
 
-/** The target of the reads of the project; null without a repository on GitHub. The origin is read again at every call. */
+/** The target of the reads of Team; null unless Team is available (Manager mode recorded and origin on GitHub). Origin is the window's value (`ProjectOrigin`), never read from git here. */
 export function githubTarget(project: Project): GitHubTarget | null {
   const { repository, available } = managerStatus(project);
-  return repository === null ? null : { repository, manager: available, linked: available ? linkedGithubProject(project) : null };
+  return repository === null || !available ? null : { repository, linked: linkedGithubProject(project) };
 }
 
 /**

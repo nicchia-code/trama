@@ -4,6 +4,7 @@ description: "Use when building the Pull Requests tab of the Team view, the repo
 # PR Check
 
 ## pull-request-check
+- Hidden for now (`rules#pr-check`): none of the texts, tabs, buttons and windows of this fragment is shown. They describe the PR Check as it looks when it is offered.
 - Team view: the tab `Pull Requests` comes right after `Issues` with Manager mode on. With Manager mode off the tab bar holds only `Pull Requests` and the title's line has no GitHub Project button, only `Updated …` and `Refresh`.
 - Without Manager mode the GitHub states of `ui#github-project` show without `GitHub CLI can't read Projects`, and their texts name pull requests instead of the Project: `Team uses gh to read the pull requests. Install it, then select Refresh.` and `Log in so Trama can read the pull requests of <owner>/<repo>. This runs gh auth login in a terminal.`; a failed read is titled `Couldn't read the pull requests`.
 - Header of the tab, in secondary text: `<n> open pull requests ready for review` (`1 open pull request…`).

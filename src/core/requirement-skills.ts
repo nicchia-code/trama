@@ -4,6 +4,7 @@ import { stringify } from "yaml";
 import { type Area, type Fragment, hasContent, loadProject, type ProjectModel, REQUIREMENT_SKILLS_BUDGET, type RequirementSection } from "./requirements";
 import { type Project, readTextLf, writeFileEnsuringDir } from "./store";
 import { SPEC_FIELD_TITLES, SPEC_LIST_FIELDS, SPECS_FILE, type Specs } from "./specs";
+import { drain, type Steps } from "./steps";
 
 /** Folders, relative to the project root, where agents look for skills and Trama may have installed its own. */
 export const SKILL_DIRS = [".agents/skills"];
@@ -165,7 +166,13 @@ export type SpecsSkillSync = { state: "generated" } | { state: "kept"; problem: 
  * file inside one, that the current mode does not produce.
  */
 export function syncRequirementSkills(p: Project, extraDirs: string[] = []): RequirementSkillSync {
+  return drain(syncRequirementSkillsSteps(p, extraDirs));
+}
+
+/** `syncRequirementSkills` as steps, one after each file read or written: the editor host runs them with the thread given back between steps (`drainAsync`). */
+export function* syncRequirementSkillsSteps(p: Project, extraDirs: string[] = []): Steps<RequirementSkillSync> {
   const loaded = loadProject(p);
+  yield;
   const dirs = tramaSkillDirs(p.root, extraDirs);
   // An invalid Specs keeps the skill already on disk, and that skill still takes budget.
   const specsKept = !loaded.specsSkill && existsSync(join(p.dir, SPECS_FILE)) && dirs.some((d) => existsSync(join(d, SPECS_SKILL, "SKILL.md")));
@@ -178,12 +185,14 @@ export function syncRequirementSkills(p: Project, extraDirs: string[] = []): Req
   for (const dir of dirs) {
     for (const [rel, content] of wanted) {
       const file = join(dir, rel);
+      yield;
       if (existsSync(file) && readTextLf(file) === content) continue;
       writeFileEnsuringDir(file, content);
       changed.push(file);
     }
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (!entry.isDirectory() || !entry.name.startsWith(PREFIX)) continue;
+      yield;
       const folder = join(dir, entry.name);
       if (!skills.has(entry.name)) {
         rmSync(folder, { recursive: true, force: true });
@@ -197,6 +206,7 @@ export function syncRequirementSkills(p: Project, extraDirs: string[] = []): Req
         }
     }
   }
+  yield;
   const specsSkill = syncSpecsSkill(p, project, dirs, changed);
   return { mode, budget, switchedFrom: before !== null && before !== mode ? before : null, changed, specsSkill };
 }

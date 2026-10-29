@@ -15,10 +15,11 @@ import { tasksHeldByDrifts } from "./delete-task";
 import { syncShortNumbers } from "./short-numbers";
 import { readTaskImages, type TaskImage } from "./task-images";
 import { clearedSince, readLastScan } from "./last-scan";
-import { attachedDrift, closedUnchanged, type Column, type DifferenceView, differenceViews, type Drift, type DriftOption, type DriftSides, driftBody, driftOptions, driftSides, type FollowedDrift, followedDrifts, indexDrifts, listDrifts, listTasks, type Task, taskProgress, unifiedDrifts, unifiedInto } from "./work";
+import { attachedDrift, closedUnchanged, type Column, type DifferenceView, differenceViews, type Drift, type DriftOption, type DriftSides, driftBody, driftOptions, driftSides, type FollowedDrift, followedDrifts, indexDrifts, listDrifts, listTasks, type Task, unifiedDrifts, unifiedInto } from "./work";
 import { preparedFlagOf } from "./prepared";
 import { type Specs, type SpecsChange, specsChange } from "./specs";
 import { type HistoryFault, readHistory } from "./history";
+import { publishingIssues } from "./issues";
 import { type HandoffView, type IssueRowView, teamViews } from "./team-views";
 import { type DocumentCache, PictureReader } from "./document-cache";
 
@@ -207,8 +208,6 @@ export interface TaskView {
   proposalTag: ProposalTag | null;
   /** True while the agent has taken the Task: the developer cannot move it. */
   agent: boolean;
-  /** The percentage the agent declared for the Task it has taken, a multiple of 10; null when none. */
-  progress: number | null;
   /** When the Task arrived in Done, UTC ISO 8601; null outside Done and on Tasks that reached Done before the instant was kept. */
   finished: string | null;
   /** When the Task was created, UTC ISO 8601; null on numbered Tasks written before the field existed. */
@@ -440,6 +439,10 @@ export interface Picture {
   tasks: readonly Task[];
   drifts: readonly Drift[];
   proposals: readonly Proposal[];
+  /** Every live announcement, in the order they were announced, also those the Board draws nowhere: the execution check looks at who owns each (`terminal`). */
+  announcements: readonly Announcement[];
+  /** The issues `publishing` now with the terminal that publishes each (null when none is recorded): the execution check stops those no window follows. */
+  publishing: readonly { id: string; holder: string | null; handoff: string }[];
   /** The picture's reads: `reads.run` works from the same parsed files while the picture is fresh. */
   reads: PictureReader;
 }
@@ -458,9 +461,7 @@ export function buildSnapshot(p: Project, finishingDrifts: readonly string[] = [
 export function buildPicture(p: Project, finishingDrifts: readonly string[] = [], finishingProposals: readonly string[] = [], finishingTasks: readonly string[] = [], cache?: DocumentCache): Picture {
   const reads = new PictureReader(cache);
   try {
-    const picture = reads.run(() => pictureOf(p, finishingDrifts, finishingProposals, finishingTasks, reads));
-    reads.finish();
-    return picture;
+    return reads.run(() => pictureOf(p, finishingDrifts, finishingProposals, finishingTasks, reads));
   } catch (error) {
     reads.close();
     throw error;
@@ -550,7 +551,6 @@ function pictureOf(p: Project, finishingDrifts: readonly string[], finishingProp
       proposal: t.data.proposal,
       proposalTag: proposalTagOf(t.data.proposal, proposalById),
       agent: t.data.agent,
-      progress: taskProgress(p, t),
       finished: t.data.finished,
       created: t.data.created,
       unchanged: t.data.unchanged,
@@ -595,7 +595,16 @@ function pictureOf(p: Project, finishingDrifts: readonly string[], finishingProp
     })),
     historyFaults: history.faults,
   };
-  return { snapshot, tasks, drifts, proposals: allProposals, reads };
+  return { snapshot, tasks, drifts, proposals: allProposals, announcements: live, publishing: publishingOf(p), reads };
+}
+
+/** The issues being published; a card that cannot be read leaves the list empty (`teamViews` reports it in the Snapshot's diagnostics), so the picture still builds. */
+function publishingOf(p: Project): Picture["publishing"] {
+  try {
+    return publishingIssues(p);
+  } catch {
+    return [];
+  }
 }
 
 /** The tag of a Task's Proposal: its label in full, or else its title shortened past 30 characters; null when the Task has no Proposal or the Proposal is gone. */

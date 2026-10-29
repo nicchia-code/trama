@@ -23,10 +23,10 @@ export interface MenuSurface {
   scan(): void;
   /** The editor's choice of a folder to open. */
   openFolder(): void;
-  /** Merge of Solo mode as the menu shows it, read now; undefined with Solo mode off. */
+  /** Merge of Solo mode as the menu shows it: the last state worked out, a read of what is known that starts no process; undefined with Solo mode off. */
   mergeState(): MergeMenuState | undefined;
-  /** What the project of the window has of Team (`rules#manager-mode`), read now: `team` when origin is on GitHub (the Team view and its entry), `manager` when Manager mode is also recorded (Team available). */
-  manager(): { team: boolean; manager: boolean };
+  /** Whether Team is available in the project of the window (`rules#manager-mode`: Manager mode recorded and origin on GitHub, the origin the window keeps), starting no process: the Team view and its entry. */
+  manager(): boolean;
   /** The press of Merge. */
   startMerge(): void;
   /** Open Merge Editor of the merge Trama started. */
@@ -80,9 +80,9 @@ export class MenuModel {
     if (situation === "project") this.last = this.surface.facts() ?? this.last;
     const facts = situation === "project" ? this.last : { decisions: 0, tasksSinceScan: 0, handoffs: 0 };
     const merge = situation === "project" ? this.surface.mergeState() : undefined;
-    const { team, manager } = situation === "project" ? this.surface.manager() : { team: false, manager: false };
+    const manager = situation === "project" && this.surface.manager();
     const { handoffs, ...numbers } = facts;
-    this.current = { situation, ...numbers, panelView: this.surface.panelView() ?? null, ...(merge === undefined ? {} : { merge }), ...(team ? { team: true as const } : {}), ...(team && manager ? { manager: true as const } : {}), ...(team && manager && handoffs > 0 ? { handoffs } : {}) };
+    this.current = { situation, ...numbers, panelView: this.surface.panelView() ?? null, ...(merge === undefined ? {} : { merge }), ...(manager ? { manager: true as const } : {}), ...(manager && handoffs > 0 ? { handoffs } : {}) };
     return this.current;
   }
 

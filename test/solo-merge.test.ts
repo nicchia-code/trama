@@ -95,74 +95,74 @@ function conflicting(root: string): void {
 }
 
 describe("availability", () => {
-  test("a clean branch is available; untracked files do not count", () => {
+  test("a clean branch is available; untracked files do not count", async () => {
     const { root, p } = repo();
     write(join(root, "new.txt"), "untracked\n");
-    expect(mergeAvailability(p, false)).toEqual({ available: true });
-    expect(hasTrackedChanges(p)).toBe(false);
+    expect(await mergeAvailability(p, false)).toEqual({ available: true });
+    expect(await hasTrackedChanges(p)).toBe(false);
   }, GIT_TEST_MS);
 
-  test("a change to a tracked file, staged or not, makes it unavailable", () => {
+  test("a change to a tracked file, staged or not, makes it unavailable", async () => {
     const { root, p } = repo();
     write(join(root, "a.txt"), "changed\n");
-    expect(mergeAvailability(p, false)).toEqual({ available: false, reason: "changes" });
+    expect(await mergeAvailability(p, false)).toEqual({ available: false, reason: "changes" });
     git(root, "add", "a.txt");
-    expect(mergeAvailability(p, false)).toEqual({ available: false, reason: "changes" });
+    expect(await mergeAvailability(p, false)).toEqual({ available: false, reason: "changes" });
     git(root, "reset", "-q", "--hard");
-    expect(mergeAvailability(p, false).available).toBe(true);
+    expect((await mergeAvailability(p, false)).available).toBe(true);
   }, GIT_TEST_MS);
 
-  test("changes to tracked Trama files inside the block do not count, those outside do", () => {
+  test("changes to tracked Trama files inside the block do not count, those outside do", async () => {
     const { root, p } = repo();
     write(join(root, ".trama", "tracked.md"), "a\n");
     git(root, "add", "-f", ".trama/tracked.md");
     git(root, "commit", "-q", "-m", "tracked trama file");
     write(join(root, ".trama", "tracked.md"), "b\n");
-    expect(hasTrackedChanges(p)).toBe(false);
+    expect(await hasTrackedChanges(p)).toBe(false);
     write(join(root, "a.txt"), "changed\n");
-    expect(hasTrackedChanges(p)).toBe(true);
+    expect(await hasTrackedChanges(p)).toBe(true);
   }, GIT_TEST_MS);
 
-  test("a project inside the repository: the block's paths are those of the project, other paths of the repository count", () => {
+  test("a project inside the repository: the block's paths are those of the project, other paths of the repository count", async () => {
     const { root, p } = repo("app");
     write(join(root, ".trama", "tracked.md"), "a\n");
     git(root, "add", "-f", ".trama/tracked.md");
     git(root, "commit", "-q", "-m", "tracked trama file");
     write(join(root, ".trama", "tracked.md"), "b\n");
-    expect(hasTrackedChanges(p)).toBe(false);
+    expect(await hasTrackedChanges(p)).toBe(false);
     write(join(base, "a.txt"), "changed outside the project\n");
     write(join(root, "a.txt"), "changed inside the project\n");
-    expect(hasTrackedChanges(p)).toBe(true);
+    expect(await hasTrackedChanges(p)).toBe(true);
     git(base, "reset", "-q", "--hard");
     write(join(base, "top.txt"), "x\n");
     git(base, "add", "top.txt");
-    expect(hasTrackedChanges(p)).toBe(true);
+    expect(await hasTrackedChanges(p)).toBe(true);
   }, GIT_TEST_MS);
 
-  test("a detached HEAD, a merge in progress and a running job give their reasons, in that order", () => {
+  test("a detached HEAD, a merge in progress and a running job give their reasons, in that order", async () => {
     const { root, p } = repo();
-    expect(mergeAvailability(p, true)).toEqual({ available: false, reason: "agent" });
+    expect(await mergeAvailability(p, true)).toEqual({ available: false, reason: "agent" });
     write(join(root, "a.txt"), "changed\n");
-    expect(mergeAvailability(p, true)).toEqual({ available: false, reason: "changes" });
+    expect(await mergeAvailability(p, true)).toEqual({ available: false, reason: "changes" });
     git(root, "checkout", "-q", "--detach");
-    expect(mergeAvailability(p, true)).toEqual({ available: false, reason: "detached" });
-    expect(currentBranch(root)).toBeNull();
+    expect(await mergeAvailability(p, true)).toEqual({ available: false, reason: "detached" });
+    expect(await currentBranch(root)).toBeNull();
     git(root, "checkout", "-q", "--", "a.txt");
     git(root, "checkout", "-q", "main");
     conflicting(root);
     expect(() => git(root, "merge", "other")).toThrow();
-    expect(operationInProgress(root)).toBe(true);
-    expect(mergeAvailability(p, true)).toEqual({ available: false, reason: "inProgress" });
+    expect(await operationInProgress(root)).toBe(true);
+    expect(await mergeAvailability(p, true)).toEqual({ available: false, reason: "inProgress" });
   }, GIT_TEST_MS);
 
-  test("a cherry-pick or a revert in progress makes it unavailable", () => {
+  test("a cherry-pick or a revert in progress makes it unavailable", async () => {
     const { root, p } = repo();
     const other = branchWith(root, "other", { "a.txt": "other\n" });
     commit(root, "main change", { "a.txt": "main\n" });
     expect(() => git(root, "cherry-pick", other)).toThrow();
-    expect(mergeAvailability(p, false)).toEqual({ available: false, reason: "inProgress" });
+    expect(await mergeAvailability(p, false)).toEqual({ available: false, reason: "inProgress" });
     git(root, "cherry-pick", "--abort");
-    expect(mergeAvailability(p, false).available).toBe(true);
+    expect((await mergeAvailability(p, false)).available).toBe(true);
   }, GIT_TEST_MS);
 });
 
@@ -184,7 +184,7 @@ describe("branches", () => {
     return { root, remote, p };
   }
 
-  test("the upstream first, then the other remote branches, then the local ones, each in alphabetical order, without the current branch or <remote>/HEAD", () => {
+  test("the upstream first, then the other remote branches, then the local ones, each in alphabetical order, without the current branch or <remote>/HEAD", async () => {
     const { root, remote } = cloned();
     const other = join(base, "other");
     git(base, "clone", "-q", remote, other);
@@ -196,8 +196,8 @@ describe("branches", () => {
     git(root, "fetch", "-q", "--all");
     git(root, "branch", "mine");
     git(root, "branch", "alpha");
-    expect(upstreamBranch(root)).toBe("origin/main");
-    expect(mergeBranches(root)).toEqual([
+    expect(await upstreamBranch(root)).toBe("origin/main");
+    expect(await mergeBranches(root)).toEqual([
       { name: "origin/main", upstream: true, usual: true },
       { name: "origin/beta", upstream: false, usual: false },
       { name: "origin/zeta", upstream: false, usual: false },
@@ -206,13 +206,13 @@ describe("branches", () => {
     ]);
   }, GIT_TEST_MS);
 
-  test("a branch that is <remote>/<current branch> is usual even without an upstream; with no upstream none is marked", () => {
+  test("a branch that is <remote>/<current branch> is usual even without an upstream; with no upstream none is marked", async () => {
     const { root } = cloned();
     git(root, "checkout", "-q", "-b", "feature");
     git(root, "push", "-q", "origin", "feature");
     git(root, "fetch", "-q", "--all");
-    expect(upstreamBranch(root)).toBeNull();
-    const branches = mergeBranches(root);
+    expect(await upstreamBranch(root)).toBeNull();
+    const branches = await mergeBranches(root);
     expect(branches.map((b) => b.upstream)).toEqual(branches.map(() => false));
     expect(branches.filter((b) => b.usual).map((b) => b.name)).toEqual(["origin/feature"]);
     expect(branches.map((b) => b.name)).toEqual(["origin/feature", "origin/main", "main"]);
@@ -226,10 +226,10 @@ describe("branches", () => {
     commit(other, "news", { "n.txt": "n" });
     git(other, "push", "-q", "origin", "news");
     await fetchRemotes(root);
-    expect(mergeBranches(root).map((b) => b.name)).toContain("origin/news");
+    expect((await mergeBranches(root)).map((b) => b.name)).toContain("origin/news");
     git(other, "push", "-q", "origin", "--delete", "news");
     await fetchRemotes(root);
-    expect(mergeBranches(root).map((b) => b.name)).not.toContain("origin/news");
+    expect((await mergeBranches(root)).map((b) => b.name)).not.toContain("origin/news");
     git(root, "remote", "set-url", "origin", join(base, "missing.git"));
     const error = await fetchRemotes(root).then(() => null, (e: unknown) => e);
     expect(error).toBeInstanceOf(TramaError);
@@ -239,52 +239,52 @@ describe("branches", () => {
 });
 
 describe("merging", () => {
-  test("up to date: the branch is an ancestor of HEAD", () => {
+  test("up to date: the branch is an ancestor of HEAD", async () => {
     const { root } = repo();
     git(root, "branch", "old");
     commit(root, "more", { "b.txt": "b\n" });
-    expect(isUpToDate(root, "old")).toBe(true);
-    expect(isUpToDate(root, "main")).toBe(true);
+    expect(await isUpToDate(root, "old")).toBe(true);
+    expect(await isUpToDate(root, "main")).toBe(true);
     branchWith(root, "ahead", { "c.txt": "c\n" });
-    expect(isUpToDate(root, "ahead")).toBe(false);
-    expect(() => isUpToDate(root, "nowhere")).toThrow(TramaError);
+    expect(await isUpToDate(root, "ahead")).toBe(false);
+    await expect(isUpToDate(root, "nowhere")).rejects.toThrow(TramaError);
   }, GIT_TEST_MS);
 
-  test("a branch name that starts with a dash is refused, and nothing runs", () => {
+  test("a branch name that starts with a dash is refused, and nothing runs", async () => {
     const { root, p } = repo();
-    expect(() => startMerge(p, "--abort")).toThrow(TramaError);
-    expect(() => isUpToDate(root, "-x")).toThrow(TramaError);
+    await expect(startMerge(p, "--abort")).rejects.toThrow(TramaError);
+    await expect(isUpToDate(root, "-x")).rejects.toThrow(TramaError);
     expect(existsSync(mergeFile(p))).toBe(false);
   }, GIT_TEST_MS);
 
-  test("a merge without conflicts makes the merge commit and remembers nothing", () => {
+  test("a merge without conflicts makes the merge commit and remembers nothing", async () => {
     const { root, p } = repo();
     const incoming = branchWith(root, "feature", { "b.txt": "b\n" });
     commit(root, "main moves", { "c.txt": "c\n" });
     const base0 = git(root, "rev-parse", "HEAD");
-    const outcome = startMerge(p, "feature");
+    const outcome = await startMerge(p, "feature");
     expect(outcome).toEqual({ kind: "merged", base: base0, incoming });
     expect(git(root, "rev-list", "--parents", "-n", "1", "HEAD").split(" ")).toHaveLength(3);
     expect(existsSync(mergeFile(p))).toBe(false);
-    expect(settleMerge(p)).toEqual({ kind: "none" });
+    expect(await settleMerge(p)).toEqual({ kind: "none" });
   }, GIT_TEST_MS);
 
-  test("a fast-forward counts as a merge without conflicts", () => {
+  test("a fast-forward counts as a merge without conflicts", async () => {
     const { root, p } = repo();
     const base0 = git(root, "rev-parse", "HEAD");
     const incoming = branchWith(root, "feature", { "b.txt": "b\n" });
-    expect(startMerge(p, "feature")).toEqual({ kind: "merged", base: base0, incoming });
+    expect(await startMerge(p, "feature")).toEqual({ kind: "merged", base: base0, incoming });
     expect(git(root, "rev-parse", "HEAD")).toBe(incoming);
     expect(existsSync(mergeFile(p))).toBe(false);
   }, GIT_TEST_MS);
 
-  test("a merge with conflicts stays remembered with base, incoming and start, and lists the files with conflicts", () => {
+  test("a merge with conflicts stays remembered with base, incoming and start, and lists the files with conflicts", async () => {
     const { root, p } = repo();
     conflicting(root);
     const base0 = git(root, "rev-parse", "HEAD");
     const incoming = git(root, "rev-parse", "other");
     const before = Date.now();
-    const outcome = startMerge(p, "other");
+    const outcome = await startMerge(p, "other");
     // The files are under the folder git names: on Windows it has the long names a temporary folder's 8.3 path may lack.
     const top = git(root, "rev-parse", "--show-toplevel");
     expect(outcome).toEqual({ kind: "conflicts", base: base0, incoming, files: [join(top, "a.txt"), join(top, "b.txt")] });
@@ -292,18 +292,18 @@ describe("merging", () => {
     expect(remembered).toMatchObject({ branch: "other", base: base0, incoming });
     expect(Date.parse(remembered?.started ?? "")).toBeGreaterThanOrEqual(before - 1000);
     expect(JSON.parse(readFileSync(mergeFile(p), "utf8"))).toEqual(remembered);
-    expect(conflictedFiles(root)).toEqual([join(top, "a.txt"), join(top, "b.txt")]);
+    expect(await conflictedFiles(root)).toEqual([join(top, "a.txt"), join(top, "b.txt")]);
     expect(git(root, "rev-parse", "MERGE_HEAD")).toBe(incoming);
     // Trama never commits the merge: HEAD did not move.
     expect(git(root, "rev-parse", "HEAD")).toBe(base0);
   }, GIT_TEST_MS);
 
-  test("git refusing the merge for another reason gives its first line of error and remembers nothing", () => {
+  test("git refusing the merge for another reason gives its first line of error and remembers nothing", async () => {
     const { root, p } = repo();
     branchWith(root, "feature", { "b.txt": "from the branch\n" });
     write(join(root, "b.txt"), "untracked, would be overwritten\n");
     const head = git(root, "rev-parse", "HEAD");
-    const outcome = startMerge(p, "feature");
+    const outcome = await startMerge(p, "feature");
     expect(outcome.kind).toBe("failed");
     const reason = outcome.kind === "failed" ? outcome.reason : "";
     expect(reason).not.toBe("");
@@ -313,93 +313,93 @@ describe("merging", () => {
     expect(readFileSync(join(root, "b.txt"), "utf8")).toBe("untracked, would be overwritten\n");
   }, GIT_TEST_MS);
 
-  test("a branch that names no commit fails without remembering anything", () => {
+  test("a branch that names no commit fails without remembering anything", async () => {
     const { p } = repo();
-    expect(startMerge(p, "nowhere")).toEqual({ kind: "failed", reason: '"nowhere" is not a branch.' });
+    expect(await startMerge(p, "nowhere")).toEqual({ kind: "failed", reason: '"nowhere" is not a branch.' });
     expect(existsSync(mergeFile(p))).toBe(false);
   }, GIT_TEST_MS);
 
-  test("aborting brings the working copy back and forgets the merge; a failed abort says why and keeps it", () => {
+  test("aborting brings the working copy back and forgets the merge; a failed abort says why and keeps it", async () => {
     const { root, p } = repo();
     conflicting(root);
     const head = git(root, "rev-parse", "HEAD");
-    startMerge(p, "other");
-    abortMerge(p);
+    await startMerge(p, "other");
+    await abortMerge(p);
     expect(existsSync(mergeFile(p))).toBe(false);
     expect(git(root, "rev-parse", "HEAD")).toBe(head);
     expect(git(root, "status", "--porcelain")).toBe("");
-    expect(operationInProgress(root)).toBe(false);
+    expect(await operationInProgress(root)).toBe(false);
     // Nothing to abort now: git says so, and the file Trama wrote for the next merge stays.
     mkdirSync(soloDir(p), { recursive: true });
     writeFileSync(mergeFile(p), JSON.stringify({ branch: "other", base: head, incoming: head, started: new Date().toISOString() }));
-    expect(() => abortMerge(p)).toThrow(TramaError);
+    await expect(abortMerge(p)).rejects.toThrow(TramaError);
     expect(existsSync(mergeFile(p))).toBe(true);
   }, GIT_TEST_MS);
 });
 
 describe("the end of a remembered merge", () => {
-  test("none remembered", () => {
+  test("none remembered", async () => {
     const { p } = repo();
-    expect(settleMerge(p)).toEqual({ kind: "none" });
+    expect(await settleMerge(p)).toEqual({ kind: "none" });
   }, GIT_TEST_MS);
 
-  test("open while MERGE_HEAD points at the incoming commit", () => {
+  test("open while MERGE_HEAD points at the incoming commit", async () => {
     const { root, p } = repo();
     conflicting(root);
-    startMerge(p, "other");
+    await startMerge(p, "other");
     const merge = readOpenMerge(p);
-    expect(settleMerge(p)).toEqual({ kind: "open", merge: merge as NonNullable<typeof merge> });
+    expect(await settleMerge(p)).toEqual({ kind: "open", merge: merge as NonNullable<typeof merge> });
     expect(existsSync(mergeFile(p))).toBe(true);
   }, GIT_TEST_MS);
 
-  test("committed once the merge commit has arrived, and then forgotten", () => {
+  test("committed once the merge commit has arrived, and then forgotten", async () => {
     const { root, p } = repo();
     conflicting(root);
-    startMerge(p, "other");
+    await startMerge(p, "other");
     const merge = readOpenMerge(p);
     write(join(root, "a.txt"), "resolved\n");
     write(join(root, "b.txt"), "resolved b\n");
     git(root, "add", "a.txt", "b.txt");
     git(root, "commit", "-q", "--no-edit");
-    expect(settleMerge(p)).toEqual({ kind: "committed", merge: merge as NonNullable<typeof merge> });
+    expect(await settleMerge(p)).toEqual({ kind: "committed", merge: merge as NonNullable<typeof merge> });
     expect(existsSync(mergeFile(p))).toBe(false);
-    expect(settleMerge(p)).toEqual({ kind: "none" });
+    expect(await settleMerge(p)).toEqual({ kind: "none" });
   }, GIT_TEST_MS);
 
-  test("abandoned when the merge is aborted outside Trama", () => {
+  test("abandoned when the merge is aborted outside Trama", async () => {
     const { root, p } = repo();
     conflicting(root);
-    startMerge(p, "other");
+    await startMerge(p, "other");
     git(root, "merge", "--abort");
-    expect(settleMerge(p)).toEqual({ kind: "abandoned" });
+    expect(await settleMerge(p)).toEqual({ kind: "abandoned" });
     expect(existsSync(mergeFile(p))).toBe(false);
   }, GIT_TEST_MS);
 
-  test("abandoned when MERGE_HEAD points at another commit, and the file is deleted", () => {
+  test("abandoned when MERGE_HEAD points at another commit, and the file is deleted", async () => {
     const { root, p } = repo();
     conflicting(root);
-    startMerge(p, "other");
+    await startMerge(p, "other");
     const merge = readOpenMerge(p) as OpenMerge;
     writeFileSync(mergeFile(p), JSON.stringify({ ...merge, incoming: merge.base }));
-    expect(settleMerge(p)).toEqual({ kind: "abandoned" });
+    expect(await settleMerge(p)).toEqual({ kind: "abandoned" });
     expect(existsSync(mergeFile(p))).toBe(false);
   }, GIT_TEST_MS);
 
-  test("abandoned when the merge ended and HEAD does not contain the incoming commit (for example a reset)", () => {
+  test("abandoned when the merge ended and HEAD does not contain the incoming commit (for example a reset)", async () => {
     const { root, p } = repo();
     conflicting(root);
-    startMerge(p, "other");
+    await startMerge(p, "other");
     git(root, "reset", "-q", "--hard", "HEAD");
-    expect(settleMerge(p)).toEqual({ kind: "abandoned" });
+    expect(await settleMerge(p)).toEqual({ kind: "abandoned" });
   }, GIT_TEST_MS);
 
-  test("a file that is not valid JSON or misses a field counts as abandoned and is deleted", () => {
+  test("a file that is not valid JSON or misses a field counts as abandoned and is deleted", async () => {
     const { p } = repo();
     mkdirSync(soloDir(p), { recursive: true });
     for (const text of ["not json", "{}", JSON.stringify({ branch: "x", base: "a", incoming: "b" }), "null", JSON.stringify({ branch: "", base: "a", incoming: "b", started: "c" })]) {
       writeFileSync(mergeFile(p), text);
       expect(readOpenMerge(p)).toBeNull();
-      expect(settleMerge(p)).toEqual({ kind: "abandoned" });
+      expect(await settleMerge(p)).toEqual({ kind: "abandoned" });
       expect(existsSync(mergeFile(p))).toBe(false);
     }
   }, GIT_TEST_MS);

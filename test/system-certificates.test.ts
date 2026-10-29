@@ -8,13 +8,13 @@ import {
   BUNDLE_MAX_AGE_MS,
   buildBundle,
   bundlePath,
-  bundleStale,
+  bundleStaleAsync,
   CERTIFICATE_VARIABLES,
   countCertificates,
   ExportFailure,
   exportBundle,
   exportFailureMessage,
-  loadBundleState,
+  loadBundleStateAsync,
   onSystemCertificatesChanged,
   resetSystemCertificatesState,
   runExport,
@@ -201,21 +201,21 @@ test("the state says exporting meanwhile, keeps the earlier bundle's count and t
   }
 });
 
-test("the bundle is stale when it is missing or older than 24 hours, and loading it reads its count and time", () => {
+test("the bundle is stale when it is missing or older than 24 hours, and loading it reads its count and time", async () => {
   const path = join(dir, "system-certificates.pem");
   const now = Date.now();
-  expect(bundleStale(now, path)).toBe(true);
+  expect(await bundleStaleAsync(now, path)).toBe(true);
   writeBundle(path, `${CA}\n${LEAF}\n`);
   utimesSync(path, new Date(now - BUNDLE_MAX_AGE_MS + 60_000), new Date(now - BUNDLE_MAX_AGE_MS + 60_000));
-  expect(bundleStale(now, path)).toBe(false);
+  expect(await bundleStaleAsync(now, path)).toBe(false);
   utimesSync(path, new Date(now - BUNDLE_MAX_AGE_MS - 60_000), new Date(now - BUNDLE_MAX_AGE_MS - 60_000));
-  expect(bundleStale(now, path)).toBe(true);
-  loadBundleState(path);
+  expect(await bundleStaleAsync(now, path)).toBe(true);
+  await loadBundleStateAsync(path);
   expect(systemCertificatesState()).toEqual({ exporting: false, count: 2, exportedAt: statSync(path).mtime.toISOString() });
-  loadBundleState(join(dir, "missing.pem"));
+  await loadBundleStateAsync(join(dir, "missing.pem"));
   expect(systemCertificatesState()).toEqual({ exporting: false });
   mkdirSync(join(dir, "folder"));
-  loadBundleState(join(dir, "folder"));
+  await loadBundleStateAsync(join(dir, "folder"));
   expect(systemCertificatesState()).toEqual({ exporting: false });
 });
 

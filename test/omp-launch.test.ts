@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, mock, test } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -22,12 +22,33 @@ mock.module("vscode", () => ({
 const posix = process.platform !== "win32";
 let dir = "";
 
-/** A fake omp whose `--version` prints `version`, whose `update --check` prints `check` and exits with `checkCode`, and whose `update` takes a moment and exits with `updateCode`. */
-function fakeOmp(check: string, checkCode = 0, version = "18.12.6", updateCode = 0): string {
+/**
+ * A fake omp whose `--version` prints `version` (`afterUpdate` once a successful `update` ran), whose `update --check` prints `check` and exits with `checkCode`, and whose
+ * `update` takes a moment and exits with `updateCode`. Every call is appended to the `calls` file.
+ */
+function fakeOmp(check: string, checkCode = 0, version = "18.12.6", updateCode = 0, afterUpdate = version): string {
   const program = join(dir, "omp");
-  writeFileSync(program, `#!/bin/sh\nif [ "$1" = "--version" ]; then printf '%s' '${version}'; exit 0; fi\nif [ "$1 $2" = "update --check" ]; then printf '%s\\n' '${check}'; exit ${checkCode}; fi\nsleep 0.2\nexit ${updateCode}\n`);
+  const script = [
+    "#!/bin/sh",
+    `echo "$@" >> "${join(dir, "calls")}"`,
+    `if [ "$1" = "--version" ]; then if [ -f "${join(dir, "updated")}" ]; then printf '%s' '${afterUpdate}'; else printf '%s' '${version}'; fi; exit 0; fi`,
+    `if [ "$1 $2" = "update --check" ]; then printf '%s\\n' '${check}'; exit ${checkCode}; fi`,
+    "sleep 0.2",
+    `if [ ${updateCode} -eq 0 ]; then touch "${join(dir, "updated")}"; fi`,
+    `exit ${updateCode}`,
+    "",
+  ].join("\n");
+  writeFileSync(program, script);
   chmodSync(program, 0o755);
   return program;
+}
+
+/** The calls of the fake omp, `--version` left out. */
+const called = (): string[] => (existsSync(join(dir, "calls")) ? readFileSync(join(dir, "calls"), "utf8").split("\n").filter((line) => line !== "" && line !== "--version") : []);
+
+/** Waits, in real time, until `condition` holds: the background check of a launch ends on its own. */
+async function until(condition: () => boolean, ms = 5000): Promise<void> {
+  for (let waited = 0; waited < ms && !condition(); waited += 10) await Bun.sleep(10);
 }
 
 beforeEach(async () => {
@@ -37,9 +58,9 @@ beforeEach(async () => {
   progress.length = 0;
   commands.length = 0;
   choose = undefined;
-  const { forgetUpdateCheck, setUpdateStore } = await import("../extension/src/host/omp-update");
+  const { forgetOmp, setUpdateStore } = await import("../extension/src/host/omp-update");
   setUpdateStore(undefined);
-  forgetUpdateCheck();
+  forgetOmp();
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -57,36 +78,98 @@ test("a missing omp stops the launch with the notice and its two buttons; Instal
   expect(infos).toEqual([]);
 });
 
-test("an up to date omp launches with its program and no notice", async () => {
+/** The window's global state, in memory; the test reads the outcome of the check from it. */
+async function keptState(): Promise<Map<string, unknown>> {
+  const { setUpdateStore } = await import("../extension/src/host/omp-update");
+  const kept = new Map<string, unknown>();
+  setUpdateStore({ get: <T,>(key: string) => kept.get(key) as T | undefined, update: async (key, value) => void kept.set(key, value) });
+  return kept;
+}
+const KEY = "trama.ompUpdateCheck";
+const hasNewer = (kept: Map<string, unknown>): boolean => (kept.get(KEY) as { newer?: string } | undefined)?.newer !== undefined;
+
+test("an up to date omp launches at once with its program and no notice; the check the launch starts runs in the background and tells nothing", async () => {
   if (!posix) return;
   const { ompBeforeLaunch } = await import("../extension/src/host/omp-launch");
+  const kept = await keptState();
   const program = fakeOmp("Current version: 18.12.6\nAlready up to date");
   expect(await ompBeforeLaunch(program)).toBe(program);
   expect(warnings).toEqual([]);
   expect(infos).toEqual([]);
   expect(progress).toEqual([]);
-});
-
-test("a newer version is installed behind a progress notification, and the launch goes on after it", async () => {
-  if (!posix) return;
-  const { ompBeforeLaunch } = await import("../extension/src/host/omp-launch");
-  const program = fakeOmp("Current version: 18.12.6\nNew version available: 18.13.0");
-  const [a, b] = await Promise.all([ompBeforeLaunch(program), ompBeforeLaunch(program)]);
-  expect([a, b]).toEqual([program, program]);
-  expect(progress).toEqual(["Updating omp to 18.13.0…"]);
+  await until(() => kept.get(KEY) !== undefined);
+  expect(called()).toEqual(["update --check"]);
+  expect(kept.get(KEY)).toMatchObject({ omp: program, version: "18.12.6" });
+  // The outcome holds: the next launches neither check nor ask for the version again.
+  expect(await ompBeforeLaunch(program)).toBe(program);
+  expect(await ompBeforeLaunch(program)).toBe(program);
+  expect(called()).toEqual(["update --check"]);
   expect(infos).toEqual([]);
 });
 
-test("a failed check launches with the omp of before and tells why once for the check, however many launches joined it", async () => {
+test("a launch never waits for the check: an omp whose check takes long still launches at once", async () => {
+  if (!posix) return;
+  const { ompBeforeLaunch } = await import("../extension/src/host/omp-launch");
+  const kept = await keptState();
+  const program = fakeOmp("Current version: 18.12.6\nAlready up to date");
+  writeFileSync(program, readFileSync(program, "utf8").replace('if [ "$1 $2" = "update --check" ]; then', 'if [ "$1 $2" = "update --check" ]; then sleep 0.6;'));
+  const started = Date.now();
+  expect(await ompBeforeLaunch(program)).toBe(program);
+  expect(Date.now() - started).toBeLessThan(450);
+  expect(kept.get(KEY)).toBeUndefined();
+  await until(() => kept.get(KEY) !== undefined);
+});
+
+test("a newer version a check found is installed before the next launch, behind a progress notification, and both launches that find it wait for the one update", async () => {
+  if (!posix) return;
+  const { ompBeforeLaunch } = await import("../extension/src/host/omp-launch");
+  const kept = await keptState();
+  const program = fakeOmp("Current version: 18.12.6\nNew version available: 18.13.0", 0, "18.12.6", 0, "18.13.0");
+  // The first launch finds nothing to wait for: the check runs behind it.
+  expect(await ompBeforeLaunch(program)).toBe(program);
+  expect(progress).toEqual([]);
+  await until(() => hasNewer(kept));
+  expect(called()).toEqual(["update --check"]);
+  const [a, b] = await Promise.all([ompBeforeLaunch(program), ompBeforeLaunch(program)]);
+  expect([a, b]).toEqual([program, program]);
+  expect(progress).toEqual(["Updating omp to 18.13.0…"]);
+  expect(called()).toEqual(["update --check", "update"]);
+  expect(infos).toEqual([]);
+  expect(kept.get(KEY)).toMatchObject({ omp: program, version: "18.13.0" });
+  expect(hasNewer(kept)).toBe(false);
+});
+
+test("a failed check launches with the omp of before and tells why once for the check, however many launches started under it", async () => {
   if (!posix) return;
   const { ompBeforeLaunch } = await import("../extension/src/host/omp-launch");
   const program = fakeOmp("x", 4);
   const [a, b] = await Promise.all([ompBeforeLaunch(program), ompBeforeLaunch(program)]);
   expect([a, b]).toEqual([program, program]);
+  await until(() => infos.length > 0);
   expect(infos).toEqual(["Trama: could not update omp (omp update --check exited with code 4). The agent runs with omp 18.12.6."]);
   // The outcome holds for an hour: the next launch neither checks nor tells again.
   expect(await ompBeforeLaunch(program)).toBe(program);
   expect(infos).toHaveLength(1);
+  expect(called()).toEqual(["update --check"]);
+  expect(warnings).toEqual([]);
+});
+
+test("a failed update launches with the omp of before and tells why once for the update, however many launches waited for it", async () => {
+  if (!posix) return;
+  const { ompBeforeLaunch } = await import("../extension/src/host/omp-launch");
+  const kept = await keptState();
+  const program = fakeOmp("Current version: 18.12.6\nNew version available: 18.13.0", 0, "18.12.6", 3);
+  await ompBeforeLaunch(program);
+  await until(() => hasNewer(kept));
+  const [a, b] = await Promise.all([ompBeforeLaunch(program), ompBeforeLaunch(program)]);
+  expect([a, b]).toEqual([program, program]);
+  expect(infos).toEqual(["Trama: could not update omp (omp update exited with code 3). The agent runs with omp 18.12.6."]);
+  expect(progress).toEqual(["Updating omp to 18.13.0…"]);
+  // The failed update is not tried again at the next launch.
+  expect(await ompBeforeLaunch(program)).toBe(program);
+  expect(called()).toEqual(["update --check", "update"]);
+  expect(infos).toHaveLength(1);
+  expect(warnings).toEqual([]);
 });
 
 const TOO_OLD = "Trama needs omp 18.12.6 or later; the installed omp is 18.12.5.";
@@ -98,6 +181,9 @@ test("an omp older than the minimum that the update does not fix stops the launc
   expect(await ompBeforeLaunch(program)).toBeUndefined();
   expect(warnings).toEqual([{ message: TOO_OLD, buttons: ["Install omp", "Open Settings"] }]);
   expect(infos).toEqual([]);
+  // The update ran first, with no version to name.
+  expect(progress).toEqual(["Updating omp…"]);
+  expect(called()).toEqual(["update"]);
   choose = "Install omp";
   expect(await ompBeforeLaunch(program)).toBeUndefined();
   choose = "Open Settings";
@@ -113,14 +199,14 @@ test("a failed update of an omp that is too old stops the launch with the same n
   expect(await ompBeforeLaunch(failing)).toBeUndefined();
   expect(warnings.map((warning) => warning.message)).toEqual([TOO_OLD]);
   expect(infos).toEqual([]);
-  expect(progress).toEqual(["Updating omp to 18.13.0…"]);
-  const { forgetUpdateCheck } = await import("../extension/src/host/omp-update");
-  forgetUpdateCheck();
+  expect(progress).toEqual(["Updating omp…"]);
+  const { forgetOmp } = await import("../extension/src/host/omp-update");
+  forgetOmp();
   warnings.length = 0;
   progress.length = 0;
-  const updated = fakeOmp("Current version: 18.12.5\nNew version available: 18.13.0", 0, "18.12.5");
+  const updated = fakeOmp("Current version: 18.12.5\nNew version available: 18.13.0", 0, "18.12.5", 0, "18.13.0");
   expect(await ompBeforeLaunch(updated)).toBe(updated);
-  expect(progress).toEqual(["Updating omp to 18.13.0…"]);
+  expect(progress).toEqual(["Updating omp…"]);
   expect(warnings).toEqual([]);
 });
 
@@ -129,36 +215,56 @@ test("an omp whose version cannot be read stops the launch, saying the installed
   const { ompBeforeLaunch } = await import("../extension/src/host/omp-launch");
   expect(await ompBeforeLaunch(fakeOmp("Current version: 18.12.6\nAlready up to date", 0, ""))).toBeUndefined();
   expect(warnings.map((warning) => warning.message)).toEqual(["Trama needs omp 18.12.6 or later; the installed omp is unknown."]);
-  const { forgetUpdateCheck } = await import("../extension/src/host/omp-update");
-  forgetUpdateCheck();
+  const { forgetOmp } = await import("../extension/src/host/omp-update");
+  forgetOmp();
   warnings.length = 0;
+  const kept = await keptState();
   const recent = fakeOmp("x", 4);
   expect(await ompBeforeLaunch(recent)).toBe(recent);
   expect(warnings).toEqual([]);
+  // The failed check of the background tells its own notice, which this test does not look at.
+  await until(() => infos.length > 0 && kept.get(KEY) !== undefined);
 });
 
-test("ompVersionOnly is the check General uses: it reads the version only, with no update check and no notice", async () => {
+test("the omp is searched once per window: a launch with the same path takes the program the module keeps", async () => {
   if (!posix) return;
-  const { ompVersionOnly } = await import("../extension/src/host/omp-update");
+  const { ompBeforeLaunch } = await import("../extension/src/host/omp-launch");
+  const kept = await keptState();
+  const program = fakeOmp("Current version: 18.12.6\nAlready up to date");
+  expect(await ompBeforeLaunch(program)).toBe(program);
+  await until(() => kept.get(KEY) !== undefined);
+  // The module has the program and its version: a program that stops answering changes nothing for the next launches.
+  writeFileSync(program, "#!/bin/sh\nexit 1\n");
+  expect(await ompBeforeLaunch(program)).toBe(program);
+  expect(warnings).toEqual([]);
+});
+
+test("General's version is the module's: it reads the version only, with no update check, no update and no notice, and asks it once", async () => {
+  if (!posix) return;
+  const { ompVersionOutcome } = await import("../extension/src/host/omp-update");
   const marker = join(dir, "touched");
   const program = join(dir, "omp");
-  writeFileSync(program, `#!/bin/sh\nif [ "$1" = "--version" ]; then printf '%s' '18.12.5'; exit 0; fi\ntouch '${marker}'\nexit 1\n`);
+  writeFileSync(program, `#!/bin/sh\necho "$@" >> '${join(dir, "calls")}'\nif [ "$1" = "--version" ]; then printf '%s' '18.12.5'; exit 0; fi\ntouch '${marker}'\nexit 1\n`);
   chmodSync(program, 0o755);
-  expect(await ompVersionOnly(program)).toEqual({ version: "18.12.5", tooOld: true });
+  expect(await ompVersionOutcome(program)).toEqual({ version: "18.12.5", tooOld: true });
+  expect(await ompVersionOutcome(program)).toEqual({ version: "18.12.5", tooOld: true });
   expect(existsSync(marker)).toBe(false);
-  expect(await ompVersionOnly(join(dir, "no-such-omp"))).toEqual({ missing: true });
+  expect(readFileSync(join(dir, "calls"), "utf8").trim().split("\n")).toEqual(["--version"]);
+  expect(await ompVersionOutcome(join(dir, "no-such-omp"))).toEqual({ missing: true });
   expect(warnings).toEqual([]);
   expect(infos).toEqual([]);
   expect(progress).toEqual([]);
 });
 
-test("ompVersionOnly uses the outcome of the last launch check while it holds", async () => {
+test("General takes the version the launch's reading left in the module", async () => {
   if (!posix) return;
   const { ompBeforeLaunch } = await import("../extension/src/host/omp-launch");
-  const { ompVersionOnly } = await import("../extension/src/host/omp-update");
+  const { ompVersionOutcome } = await import("../extension/src/host/omp-update");
+  const kept = await keptState();
   const program = fakeOmp("Current version: 18.12.6\nAlready up to date");
   expect(await ompBeforeLaunch(program)).toBe(program);
-  // The program now answers a version the check did not see: the held outcome is the one used.
+  await until(() => kept.get(KEY) !== undefined);
+  // The program now answers a version the module did not see: the kept version is the one used.
   writeFileSync(program, "#!/bin/sh\nexit 1\n");
-  expect(await ompVersionOnly(program)).toEqual({ version: "18.12.6" });
+  expect(await ompVersionOutcome(program)).toEqual({ version: "18.12.6" });
 });

@@ -7,6 +7,7 @@ import { buildModel, findState, flattenStates } from "./model";
 import { type Element, resolveRef } from "./refs";
 import { normalizeLf } from "./line-endings";
 import { type Project, readTextLf, readTrackedFiles, REQUIREMENTS_PREFIX, requirementsDir, writeFileEnsuringDir } from "./store";
+import { noteRemoved } from "./written";
 import type { Diagnostic, FileMap, Machine, Model, State } from "./types";
 import { ID_PATTERN, isWindowsDeviceName } from "./types";
 
@@ -501,6 +502,7 @@ export function convertSingleFileAreas(p: Project): AreaConversion {
     if (doc.sections.some((s) => s.text !== ""))
       writeFileEnsuringDir(join(folder, "main.md"), `${head}${doc.sections.map((s) => `\n## ${s.heading}\n${s.text === "" ? "" : `${s.text}\n`}`).join("")}`);
     rmSync(file);
+    noteRemoved(file);
     result.converted.push(id);
   }
   return result;

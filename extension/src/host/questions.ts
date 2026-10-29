@@ -1,3 +1,4 @@
+import { editorEvent } from "./performance";
 import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import { createQuestionServer, type IssueStateRead, questionProjectId, type CoordinatorMessage, type QuestionServer } from "../../../src/core/question-channel";
@@ -5,6 +6,7 @@ import { QuestionRoundQueue } from "../../../src/core/question-rounds";
 import { type QuestionRequest, type QuestionResult, unavailableQuestions } from "../../../src/core/questions";
 import { projectAt, type Project } from "../../../src/core/store";
 import { trackRound } from "./question-activity";
+import { onProjectsChanged } from "./project";
 import type { QuestionSession } from "./question-session";
 import { checkTaskHolder } from "./task-check";
 import { followsAgent, receiveNotice, receiveAgentIdle, receiveAgentStarted } from "./drift-resolution";
@@ -76,18 +78,14 @@ export class EditorQuestions implements vscode.Disposable {
   constructor(private readonly project: () => Project | undefined, private readonly session: QuestionSession, private readonly ownsTerminal: (terminal: string, root: string) => boolean, private readonly people: People, private readonly issueStates: (project: Project) => readonly IssueStateRead[] = () => []) {
     windowQuestions = this;
     this.queue = new QuestionRoundQueue(session.present);
-    // Directory deletion/rename does not emit separate events for its children.
-    const watcher = vscode.workspace.createFileSystemWatcher("**/.trama");
+    // The window's project is kept in memory (`trackProjects`): it tells when a `.trama` appeared or went away, or the workspace folders changed.
     this.subscriptions = [
-      watcher,
-      watcher.onDidCreate(() => this.refresh()),
-      watcher.onDidDelete(() => this.refresh()),
-      vscode.workspace.onDidChangeWorkspaceFolders(() => this.refresh()),
-      vscode.window.onDidChangeWindowState((state) => {
-        if (state.focused && this.service) {
-          void this.service.server.then((server) => server.focus()).catch((error: unknown) => this.report(error));
-        }
-      }),
+      onProjectsChanged(() => this.refresh()),
+      vscode.window.onDidChangeWindowState(editorEvent("window focus", (state: vscode.WindowState) => {
+        if (!state.focused || !this.service) return undefined;
+        // The record of the question channel is written asynchronously: the focus holds nothing of the host.
+        return this.service.server.then((server) => server.focus()).catch((error: unknown) => this.report(error));
+      })),
     ];
     this.refresh();
   }

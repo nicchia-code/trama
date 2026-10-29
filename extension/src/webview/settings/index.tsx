@@ -220,9 +220,9 @@ export const mountSettings = (slot: Slot, context: ViewContext, theme: ThemeCont
     },
     show() {
       visible = true;
-      // The section of providers waits for the first outcome after the tab is shown.
-      page = { ...page, providers: null };
-      // The model names, the state of omp and the instruction files are asked again each time the tab becomes visible; the files only in a project.
+      // The providers keep the last state they showed: the section waits only for the very first outcome of the window.
+      // The model names, the state of omp and the instruction files are asked each time the tab becomes visible; the host answers the first two at once with the last result it holds, and
+      // starts omp only the first time; the files only in a project.
       context.post({ type: "modelSuggestionsWanted" });
       context.post({ type: "ompStatusWanted" });
       if (hasProject) askInstructionFiles();

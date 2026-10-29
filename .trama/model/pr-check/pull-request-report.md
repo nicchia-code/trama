@@ -1,6 +1,6 @@
 # Pull request report
 
-What the last PR Check of one pull request found, kept only in the working copy of the developer who ran it, never committed and never sent anywhere. It is a table with one row per finding, which never decides anything: in Solo, the Tasks and Drifts of the scan, telling the Drifts in code the pull request changed from the others; in Collaborative, also the differences of the Model, the Requirements and the Specs brought by the pull request, the problems of its Model (not valid, changed without an approved Proposal, changed also on the branch it goes into) and the cards it leaves open. The Pull Requests tab of the Team view opens it in a window over the view (see the Panel).
+What the last PR Check of one pull request found, kept only in the working copy of the developer who ran it, never committed and never sent anywhere. It is a table with one row per finding, which never decides anything: in Solo, the Tasks and Drifts of the scan, telling the Drifts in code the pull request changed from the others; in Collaborative, also the differences of the Model, the Requirements and the Specs brought by the pull request, the problems of its Model (not valid, changed without an approved Proposal, changed also on the branch it goes into) and the cards it leaves open. The Pull Requests tab of the Team view opens it in a window over the view (see the Panel). While the PR Check is hidden no report is written, shown or deleted: the reports already in the working copy stay as they are.
 
 ## States
 
