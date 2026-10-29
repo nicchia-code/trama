@@ -560,17 +560,21 @@ describe("the reports", () => {
     expect(readReport(p, 7)).toEqual(REPORT);
   });
 
-  test("never enter a commit, with Solo mode off or on", () => {
-    repositories();
-    const p = projectAt(open);
-    writeReport(p, REPORT);
-    expect(git(open, "status", "--porcelain")).not.toContain("pr-checks");
-    git(open, "add", "-A");
-    expect(git(open, "ls-files", ".trama/pr-checks")).toBe("");
-    setSoloMode(p, "files");
-    git(open, "add", "-A");
-    expect(git(open, "ls-files", ".trama/pr-checks")).toBe("");
-  });
+  test(
+    "never enter a commit, with Solo mode off or on",
+    () => {
+      repositories();
+      const p = projectAt(open);
+      writeReport(p, REPORT);
+      expect(git(open, "status", "--porcelain")).not.toContain("pr-checks");
+      git(open, "add", "-A");
+      expect(git(open, "ls-files", ".trama/pr-checks")).toBe("");
+      setSoloMode(p, "files");
+      git(open, "add", "-A");
+      expect(git(open, "ls-files", ".trama/pr-checks")).toBe("");
+    },
+    GIT_TEST_MS,
+  );
 
   test("the report of the same pull request replaces the previous one", () => {
     const p = projectAt(join(base, "open-folder"));
