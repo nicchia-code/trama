@@ -5,36 +5,37 @@ on:
 jobs:
   mac:
     runs-on: macos-14
-    timeout-minutes: 40
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        files:
-          - test/published-issues.test.ts
-          - test/host-ntfy-settings.test.ts test/host-delete-task.test.ts test/focus.test.tsx test/site-reveal.test.ts test/host-task-check.test.ts test/published-issues.test.ts test/host-solo-merge.test.ts
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
+      - run: bunx tsc --noEmit
       - name: repeated
         run: |
           set +e
-          for i in $(seq 1 10); do
+          for i in $(seq 1 4); do
             echo "=== run $i"
-            bun test --isolate ${{ matrix.files }} > out.txt 2>&1 &
+            bun test --isolate > out.txt 2>&1 &
             pid=$!
-            for t in $(seq 1 90); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+            for t in $(seq 1 400); do kill -0 $pid 2>/dev/null || break; sleep 1; done
             if kill -0 $pid 2>/dev/null; then
               echo "HANG"
-              tail -40 out.txt
-              ps -axo pid,ppid,stat,etime,command | grep -E 'bun|git' | grep -v grep
+              grep -E '^##\[group\]|^test/' out.txt | tail -3
+              tail -30 out.txt
+              ps -axo pid,ppid,stat,etime,command | grep -E 'bun|git|ps' | grep -v grep
               sample $pid 3 -file sample.txt > /dev/null 2>&1
-              grep -E 'Thread_|^ +[0-9]+ ' sample.txt | head -120
+              grep -nE 'Thread_|Call graph' sample.txt | head -20
+              sed -n '1,200p' sample.txt | grep -vE '^\s*$' | head -200
               pkill -9 -P $pid; kill -9 $pid
             else
               wait $pid
-              grep -E ' [0-9]+ (pass|fail)$' out.txt | tr '\n' ' '; echo
+              grep -E '^ *[0-9]+ (pass|fail)$' out.txt | tr '\n' ' '; echo
             fi
           done
