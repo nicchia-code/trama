@@ -85,9 +85,14 @@ test("without the editor's endpoint or a recognised terminal it needs the editor
 
 test("the window answers only for a terminal it owns", async () => {
   const asked: string[] = [];
-  const server = await window(() => ({ members: [ada] }), (terminal) => { asked.push(terminal); return terminal === "abc123"; });
+  const owns = (terminal: string) => { asked.push(terminal); return terminal === "abc123"; };
+  const server = await window(() => ({ members: [ada] }), owns);
   expect((await show(agent(server), "--json")).exit).toBe(0);
-  await expect(show({ ...agent(server), TRAMA_TERMINAL: "other1" })).rejects.toThrow(TEAM_NEEDS_EDITOR);
+  // The other asker reaches a window just like it. On Windows, Bun 1.4.0 sometimes never completes the listen of the next named pipe once a pipe server it ran
+  // served this second connection, and the whole run stops there: in the CI runs this file hung at the next test in more than half of the runs, and never with one
+  // connection per server. The editor's listener runs in the editor's Node, not in Bun.
+  const same = await window(() => ({ members: [ada] }), owns);
+  await expect(show({ ...agent(same), TRAMA_TERMINAL: "other1" })).rejects.toThrow(TEAM_NEEDS_EDITOR);
   expect(asked).toEqual(["abc123", "other1"]);
 });
 
